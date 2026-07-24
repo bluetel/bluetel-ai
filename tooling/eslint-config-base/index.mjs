@@ -1,8 +1,8 @@
-import { base as internalBase, withTypeChecking } from '@chalkboard/eslint-config-internal'
+import { base as internalBase, withTypeChecking } from '@bluetel-ai/eslint-config-internal'
 
 import { enforceSafeEnv } from './rules/enforce-safe-env.mjs'
 
-const chalkboardPlugin = {
+const bluetelAiPlugin = {
   rules: {
     'enforce-safe-env': enforceSafeEnv,
   },
@@ -11,10 +11,10 @@ const chalkboardPlugin = {
 export const base = [
   ...internalBase,
   {
-    plugins: { '@chalkboard': chalkboardPlugin },
+    plugins: { '@bluetel-ai': bluetelAiPlugin },
     files: ['**/*.ts', '**/*.tsx'],
     rules: {
-      '@chalkboard/enforce-safe-env': 'error',
+      '@bluetel-ai/enforce-safe-env': 'error',
     },
   },
 ]

@@ -1,5 +1,5 @@
 {
-  "name": "@chalkboard/qlty-diff",
+  "name": "@bluetel-ai/qlty-diff",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "devDependencies": {
-    "@chalkboard/eslint-config-internal": "workspace:*",
+    "@bluetel-ai/eslint-config-internal": "workspace:*",
     "vitest": "^3.2.4"
   }
 }

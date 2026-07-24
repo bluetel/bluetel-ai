@@ -12,7 +12,7 @@
 
 set -eu
 
-REPO_URL="${SKILLS_REPO_URL:-https://github.com/harrytwigg/universal-react-monorepo.git}"
+REPO_URL="${SKILLS_REPO_URL:-https://github.com/bluetel/bluetel-ai.git}"
 REPO_REF="${SKILLS_REPO_REF:-main}"
 SUBTREE="tooling/skills"
 

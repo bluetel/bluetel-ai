@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Pull Request Template
-    url: https://github.com/harrytwigg/universal-react-monorepo/blob/main/.github/pull_request_template.md
+    url: https://github.com/bluetel/bluetel-ai/blob/main/.github/pull_request_template.md
     about: Use this when opening a pull request.

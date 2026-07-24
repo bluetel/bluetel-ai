@@ -6,7 +6,6 @@
       "project": ["scripts/**/*.{ts,js}"],
       "ignore": ["--version/**"]
     },
-
     "apps/web": {
       "entry": [
         "src/app/**/{page,layout,loading,error,not-found,default,template,route,middleware}.{ts,tsx,js,jsx}",
@@ -21,14 +20,15 @@
       "project": ["src/**/*.{ts,tsx}", "app/**/*.{ts,tsx}"],
       "ignore": ["src/lib/image-sources.ts"],
       "ignoreDependencies": ["/^expo-/", "/^react-native-/", "nativewind"],
-      "metro": { "config": [] }
+      "metro": {
+        "config": []
+      }
     },
     "apps/ui-demo": {
       "entry": ["src/main.tsx", "src/routes/**/*.{ts,tsx}", "vite.config.ts"],
       "project": ["src/**/*.{ts,tsx}"],
       "vite": true
     },
-
     "packages/*": {
       "entry": ["src/index.ts"],
       "project": ["src/**/*.{ts,tsx}"]
@@ -47,7 +47,6 @@
       "project": ["src/**/*.{ts,tsx}"],
       "ignoreDependencies": ["drizzle-kit"]
     },
-
     "tooling/*": {
       "entry": ["{index,src/index}.{ts,js,mjs}"],
       "project": ["src/**/*.{ts,js,mjs}", "*.{ts,js,mjs}"],
@@ -58,15 +57,14 @@
       "project": ["lib/**/*.{ts,js,mjs}", "*.{ts,js,mjs}"]
     }
   },
-
   "ignore": ["**/assets/images/converted-svg/**", "**/*.d.ts"],
   "ignoreFiles": ["**/scripts/index-images.ts"],
   "ignoreDependencies": [
-    "@chalkboard/eslint-config-base",
-    "@chalkboard/eslint-config-react-native",
-    "@chalkboard/prettier-config",
-    "@chalkboard/commit-conventions",
-    "@chalkboard/image-indexer",
-    "@chalkboard/qlty-diff"
+    "@bluetel-ai/eslint-config-base",
+    "@bluetel-ai/eslint-config-react-native",
+    "@bluetel-ai/prettier-config",
+    "@bluetel-ai/commit-conventions",
+    "@bluetel-ai/image-indexer",
+    "@bluetel-ai/qlty-diff"
   ]
 }

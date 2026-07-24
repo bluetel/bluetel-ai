@@ -6,8 +6,8 @@ All decisions below resolve the "deferred to planning" items from the spec's Ass
 
 ## R1. Tooling package location & name
 
-- **Decision**: New package at `tooling/skills/`, published name `@chalkboard/skills`, canonical content in the `catalog/` subfolder.
-- **Rationale**: `tooling/*` is already a pnpm workspace glob and an Nx project location; `@chalkboard/*` is the established scope for internal tooling (`qlty-diff`, `eslint-config-*`). The package now holds content + shell scripts + tests rather than a runtime TS CLI, but the Nx `test`/`typecheck` target shape still mirrors `qlty-diff`.
+- **Decision**: New package at `tooling/skills/`, published name `@bluetel-ai/skills`, canonical content in the `catalog/` subfolder.
+- **Rationale**: `tooling/*` is already a pnpm workspace glob and an Nx project location; `@bluetel-ai/*` is the established scope for internal tooling (`qlty-diff`, `eslint-config-*`). The package now holds content + shell scripts + tests rather than a runtime TS CLI, but the Nx `test`/`typecheck` target shape still mirrors `qlty-diff`.
 - **Alternatives rejected**: `packages/*` (runtime scope, not tooling); a standalone repo (breaks single-source model + dogfooding).
 
 ## R2. Distribution / download surface — shallow sparse git clone of required dirs
@@ -16,7 +16,7 @@ All decisions below resolve the "deferred to planning" items from the spec's Ass
 
   ```sh
   git clone --depth 1 --filter=blob:none --sparse \
-    --branch "<ref>" https://github.com/harrytwigg/universal-react-monorepo.git "$TMP"
+    --branch "<ref>" https://github.com/bluetel/bluetel-ai.git "$TMP"
   git -C "$TMP" sparse-checkout set tooling/skills
   ```
 
@@ -96,7 +96,7 @@ All decisions below resolve the "deferred to planning" items from the spec's Ass
 
 | Deferred item (from spec)               | Resolution                                                                                 |
 | --------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Tooling package name + subfolder layout | `@chalkboard/skills` at `tooling/skills/`, content in `catalog/` (R1)                      |
+| Tooling package name + subfolder layout | `@bluetel-ai/skills` at `tooling/skills/`, content in `catalog/` (R1)                      |
 | Download/publish surface                | Single `install.sh` bootstrap → shallow, sparse `git clone` of only `tooling/skills/` (R2) |
 | Catalog format                          | Directory scan + per-skill `skill.meta` (KEY=value), no JSON/jq (R3)                       |
 | Version-metadata mechanism              | semver in `skill.meta` + `sha256` (shasum/sha256sum); target records `installed_hash` (R4) |

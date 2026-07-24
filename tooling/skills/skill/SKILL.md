@@ -1,12 +1,12 @@
 ---
 name: skills-install
-description: 'Interactively install and update shared AI skills from the @chalkboard/skills catalog into the current project.'
+description: 'Interactively install and update shared AI skills from the @bluetel-ai/skills catalog into the current project.'
 argument-hint: 'Optional: space-separated skill names to install non-interactively'
 ---
 
 # Install Shared Skills
 
-You are running from a downloaded snapshot of `@chalkboard/skills`. Your job is to help
+You are running from a downloaded snapshot of `@bluetel-ai/skills`. Your job is to help
 the user choose which shared skills to install into their project, then materialize the
 selection deterministically via the shell helper. **All deterministic work is done by
 `lib/skills.sh`** — you own conversation, selection, and the final summary. Never hand-write

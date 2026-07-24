@@ -1,11 +1,11 @@
 {
-  "name": "@chalkboard/skills",
+  "name": "@bluetel-ai/skills",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "devDependencies": {
-    "@chalkboard/eslint-config-internal": "workspace:*",
-    "@chalkboard/prettier-config": "workspace:*",
+    "@bluetel-ai/eslint-config-internal": "workspace:*",
+    "@bluetel-ai/prettier-config": "workspace:*",
     "vitest": "^3.2.4"
   }
 }

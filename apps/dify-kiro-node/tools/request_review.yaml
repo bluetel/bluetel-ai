@@ -1,6 +1,6 @@
 identity:
   name: request_review
-  author: chalkboard
+  author: bluetel-ai
   label:
     en_US: Request Human Review (wait for decision)
 description:

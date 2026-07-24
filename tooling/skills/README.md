@@ -1,4 +1,4 @@
-# @chalkboard/skills
+# @bluetel-ai/skills
 
 The **single distribution source** for this repo's shared AI skills. Any target project pulls
 selected skills from here with a one-command installer â€” no clone of the whole monorepo, no
@@ -28,7 +28,7 @@ The installer runs entirely as **Claude driving `git` / `curl` / POSIX shell** â
 From the target project root, run the published one-liner:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/harrytwigg/universal-react-monorepo/main/tooling/skills/bootstrap/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/bluetel/bluetel-ai/main/tooling/skills/bootstrap/install.sh | sh
 ```
 
 The bootstrap verifies prerequisites, shallow-sparse-clones only this `tooling/skills/` subtree

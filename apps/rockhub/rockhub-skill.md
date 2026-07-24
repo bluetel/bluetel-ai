@@ -67,9 +67,9 @@ The user invokes this skill directly from an OpenClaw chat session with a
 free-form coding request. Arguments follow the skill name:
 
 ```
-/rockhub fix the login bug in harrytwigg/my-app#42
-/rockhub review PR #15 in harrytwigg/my-app
-/rockhub implement feature described in harrytwigg/my-app#7
+/rockhub fix the login bug in bluetel/my-app#42
+/rockhub review PR #15 in bluetel/my-app
+/rockhub implement feature described in bluetel/my-app#7
 ```
 
 ## Hard rules
@@ -379,15 +379,15 @@ After spawning, immediately report:
 ## Direct invocation examples
 
 ```
-User: /rockhub fix the broken CSS in harrytwigg/my-app#23
-→ Parse: repo=harrytwigg/my-app, issue=#23
-→ Fetch issue context with: gh issue view 23 --repo harrytwigg/my-app --json title,body
+User: /rockhub fix the broken CSS in bluetel/my-app#23
+→ Parse: repo=bluetel/my-app, issue=#23
+→ Fetch issue context with: gh issue view 23 --repo bluetel/my-app --json title,body
 → Construct prompt with issue context
 → Launch copilot -p "<prompt>"
 
-User: /rockhub review harrytwigg/my-app#15
-→ Parse: repo=harrytwigg/my-app, PR=#15
-→ Fetch PR context with: gh pr view 15 --repo harrytwigg/my-app --json title,body,files
+User: /rockhub review bluetel/my-app#15
+→ Parse: repo=bluetel/my-app, PR=#15
+→ Fetch PR context with: gh pr view 15 --repo bluetel/my-app --json title,body,files
 → Construct review prompt
 → Launch copilot -p "<prompt>"
 

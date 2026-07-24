@@ -27,10 +27,10 @@ const lint = (code) => {
       sourceType: 'module',
     },
     plugins: {
-      '@chalkboard': { rules: { 'enforce-safe-env': enforceSafeEnv } },
+      '@bluetel-ai': { rules: { 'enforce-safe-env': enforceSafeEnv } },
     },
     rules: {
-      '@chalkboard/enforce-safe-env': 'error',
+      '@bluetel-ai/enforce-safe-env': 'error',
     },
   })
 }
@@ -75,8 +75,8 @@ describe('enforce-safe-env: RuleTester cases', () => {
           code: "import { createEnv } from 'some-other-package'",
         },
         {
-          name: 'createSafeEnv from @chalkboard/env-validation-errors',
-          code: "import { createSafeEnv } from '@chalkboard/env-validation-errors'",
+          name: 'createSafeEnv from @bluetel-ai/env-validation-errors',
+          code: "import { createSafeEnv } from '@bluetel-ai/env-validation-errors'",
         },
         {
           name: 'inline type specifier for createEnv',
@@ -97,7 +97,7 @@ describe('enforce-safe-env: RuleTester cases', () => {
               suggestions: [
                 {
                   messageId: 'replaceWithSafeEnv',
-                  output: "import { createSafeEnv } from '@chalkboard/env-validation-errors'",
+                  output: "import { createSafeEnv } from '@bluetel-ai/env-validation-errors'",
                 },
               ],
             },
@@ -112,7 +112,7 @@ describe('enforce-safe-env: RuleTester cases', () => {
               suggestions: [
                 {
                   messageId: 'replaceWithSafeEnv',
-                  output: "import { createSafeEnv as ce } from '@chalkboard/env-validation-errors'",
+                  output: "import { createSafeEnv as ce } from '@bluetel-ai/env-validation-errors'",
                 },
               ],
             },
@@ -128,7 +128,7 @@ describe('enforce-safe-env: RuleTester cases', () => {
                 {
                   messageId: 'replaceWithSafeEnv',
                   output:
-                    "import { createSafeEnv, type StandardSchemaV1 } from '@chalkboard/env-validation-errors'",
+                    "import { createSafeEnv, type StandardSchemaV1 } from '@bluetel-ai/env-validation-errors'",
                 },
               ],
             },
@@ -232,7 +232,7 @@ describe('Feature: eslint-enforce-safe-env, Property 1: Flagged import detection
         expect(messages).toHaveLength(1)
         expect(messages[0].messageId).toBe('noDirectCreateEnv')
         expect(messages[0].message).toContain('createSafeEnv')
-        expect(messages[0].message).toContain('@chalkboard/env-validation-errors')
+        expect(messages[0].message).toContain('@bluetel-ai/env-validation-errors')
       }),
       { numRuns: 100 },
     )
@@ -270,7 +270,7 @@ describe('Feature: eslint-enforce-safe-env, Property 3: Suggestion fix correctne
    * **Validates: Requirements 9.1, 9.2, 9.3**
    *
    * For any flagged import, the suggestion output contains `createSafeEnv`
-   * and `@chalkboard/env-validation-errors`, and no automatic `fix` is present.
+   * and `@bluetel-ai/env-validation-errors`, and no automatic `fix` is present.
    */
   it('suggestion replaces with createSafeEnv and correct source, no auto-fix', () => {
     fc.assert(
@@ -295,7 +295,7 @@ describe('Feature: eslint-enforce-safe-env, Property 3: Suggestion fix correctne
         // Apply the suggestion to the source and verify the output
         const fixedCode = applyFix(code, suggestion.fix)
         expect(fixedCode).toContain('createSafeEnv')
-        expect(fixedCode).toContain('@chalkboard/env-validation-errors')
+        expect(fixedCode).toContain('@bluetel-ai/env-validation-errors')
         expect(fixedCode).not.toContain('@t3-oss/env-core')
       }),
       { numRuns: 100 },

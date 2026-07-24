@@ -22,11 +22,11 @@
 
 ## Git Workflow
 
-- Feature branches: `feature/URM-XXX`
+- Feature branches: `feature/BTAI-XXX`
 - PRs target `main`; merges to `staging` are direct (not via PR)
 - Never rebase staging onto feature branch — always `git merge --no-ff`
 - Never merge a PR — user merges PRs to main manually
-- Commits use conventional format: `URM-XXX: description`
+- Commits use conventional format: `BTAI-XXX: description`
 
 ## Rules
 

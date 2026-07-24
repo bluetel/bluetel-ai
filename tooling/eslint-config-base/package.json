@@ -1,5 +1,5 @@
 {
-  "name": "@chalkboard/eslint-config-base",
+  "name": "@bluetel-ai/eslint-config-base",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     ".": "./index.mjs"
   },
   "dependencies": {
-    "@chalkboard/eslint-config-internal": "workspace:*"
+    "@bluetel-ai/eslint-config-internal": "workspace:*"
   },
   "devDependencies": {
     "@typescript-eslint/parser": "^8.0.0",

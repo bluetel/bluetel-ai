@@ -1,6 +1,6 @@
 identity:
   name: submit_task
-  author: chalkboard
+  author: bluetel-ai
   label:
     en_US: Submit Task (async)
 description:

@@ -1,16 +1,16 @@
 const BRANCH_PATTERN = /^(main|staging|feature\/.+)$/
 const AUTO_COMMIT_PATTERN = /^(Merge|Revert|Amend|fixup!|squash!)/
-const TICKET_PATTERN = /URM-[0-9]+/
+const TICKET_PATTERN = /BTAI-[0-9]+/
 
 /**
  * Checks whether a branch name follows the allowed naming conventions.
  *
- * Allowed patterns: main, staging, feature/<name> (including feature/URM-<digits>*)
+ * Allowed patterns: main, staging, feature/<name> (including feature/BTAI-<digits>*)
  */
 export const isValidBranchName = (branch: string): boolean => BRANCH_PATTERN.test(branch)
 
 /**
- * Extracts the first URM-<digits> ticket ID from a branch name, or null if none is found.
+ * Extracts the first BTAI-<digits> ticket ID from a branch name, or null if none is found.
  */
 export const extractTicketId = (branch: string): string | null => {
   const match = branch.match(TICKET_PATTERN)
@@ -45,7 +45,7 @@ export const validateCommitMessage = (
     return { valid: true }
   }
 
-  // Ticket branch: message must start with URM-<digits>: <description>
+  // Ticket branch: message must start with BTAI-<digits>: <description>
   const ticket = extractTicketId(branch)
   if (ticket) {
     const pattern = new RegExp(`^${ticket}: .+`)

@@ -1,5 +1,5 @@
 {
-  "name": "@chalkboard/kiro-github-worker",
+  "name": "@bluetel-ai/kiro-github-worker",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
-    "@chalkboard/eslint-config-base": "workspace:*",
+    "@bluetel-ai/eslint-config-base": "workspace:*",
     "@types/express": "^5.0.2",
     "@types/node": "^20",
     "esbuild": "^0.25.12",
