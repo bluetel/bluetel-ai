@@ -1,0 +1,5 @@
+name=speckit-implement
+version=1.0.0
+description=Execute the implementation plan by processing and executing all tasks defined in tasks.md
+argument_hint=Optional implementation guidance or task filter
+requires=

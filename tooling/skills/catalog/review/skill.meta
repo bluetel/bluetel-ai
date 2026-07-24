@@ -1,0 +1,5 @@
+name=review
+version=1.0.0
+description=Structured code review using tiered persona agents, confidence-gated findings, and a merge/dedup pipeline. Monitors GitHub PR CI status (Actions, lint, typecheck, tests). Use when: reviewing code changes before creating a PR, or verifying a PR is ready to merge.
+argument_hint=[mode:agent] [blank to review current branch, or provide PR link]
+requires=

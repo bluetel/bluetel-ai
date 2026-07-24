@@ -1,0 +1,36 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# Dependencies
+node_modules
+
+# Build outputs
+dist
+*.tsbuildinfo
+
+# Nx
+.nx/cache
+.nx/workspace-data
+
+# Next.js
+.next
+out
+
+# SST
+.sst
+
+vite.config.*.timestamp*
+
+# Claude Code
+.claude/settings.local.json
+
+# MacOS
+.DS_Store
+
+# Env
+.env
+.env.*
+!.env.example
+
+*.difypkg
+.nx/polygraph
+.claude/worktrees

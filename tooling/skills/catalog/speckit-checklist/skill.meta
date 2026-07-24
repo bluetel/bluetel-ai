@@ -1,0 +1,5 @@
+name=speckit-checklist
+version=1.0.0
+description=Generate a custom checklist for the current feature based on user requirements.
+argument_hint=Domain or focus area for the checklist
+requires=

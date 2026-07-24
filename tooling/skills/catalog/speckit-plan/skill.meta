@@ -1,0 +1,5 @@
+name=speckit-plan
+version=1.0.0
+description=Execute the implementation planning workflow using the plan template to generate design artifacts.
+argument_hint=Optional guidance for the planning phase
+requires=

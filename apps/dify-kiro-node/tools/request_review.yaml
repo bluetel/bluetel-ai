@@ -1,0 +1,120 @@
+identity:
+  name: request_review
+  author: chalkboard
+  label:
+    en_US: Request Human Review (wait for decision)
+description:
+  human:
+    en_US: Pause the workflow for a human approve/reject decision. Works inside a Loop node (unlike Dify's native Human Input node). Creates a review in the admin dashboard, blocks until a human decides or the timeout elapses, and returns the decision and comment.
+  llm: Requests a human review of some content (e.g. code, a diff, or a draft) and blocks until a person approves or rejects it. Returns the decision (approved/rejected), the reviewer's comment, and routing booleans. Use inside a loop to gate each iteration on human approval.
+parameters:
+  - name: title
+    type: string
+    required: true
+    form: llm
+    label:
+      en_US: Title
+    human_description:
+      en_US: Short headline shown in the reviewer's queue
+    llm_description: A short one-line title summarising what is being reviewed, shown in the reviewer's queue.
+  - name: content
+    type: string
+    required: true
+    form: llm
+    label:
+      en_US: Content to review
+    human_description:
+      en_US: The material the human should review (code, diff, or markdown)
+    llm_description: The full material the human should review — code, a diff, or markdown. This is the primary content shown to the reviewer.
+  - name: context
+    type: string
+    required: false
+    form: llm
+    label:
+      en_US: Context
+    human_description:
+      en_US: Optional background for the reviewer (the task prompt, prior findings)
+    llm_description: Optional background to help the reviewer decide, such as the originating task or findings from previous steps.
+  - name: repository
+    type: string
+    required: false
+    form: llm
+    label:
+      en_US: Repository
+    human_description:
+      en_US: Optional repository this review relates to, as owner/repo
+    llm_description: Optional repository the review relates to, in the form owner/repo.
+  - name: branch
+    type: string
+    required: false
+    form: llm
+    label:
+      en_US: Branch
+    human_description:
+      en_US: Optional branch this review relates to
+    llm_description: Optional git branch the review relates to.
+  - name: iteration
+    type: number
+    required: false
+    form: llm
+    label:
+      en_US: Iteration
+    human_description:
+      en_US: Optional loop iteration number, for multi-round review flows
+    llm_description: Optional loop iteration number (0-based) for multi-round review flows, shown to the reviewer for context.
+  - name: timeout_minutes
+    type: number
+    required: false
+    default: 60
+    min: 1
+    max: 240
+    form: form
+    label:
+      en_US: Timeout (minutes)
+    human_description:
+      en_US: How long to wait for a human decision before returning timed-out (max 240 = 4 hours)
+output_schema:
+  type: object
+  properties:
+    review_id:
+      type: string
+      description: Review identifier
+    status:
+      type: string
+      description: Final review status (approved, rejected, expired, pending when timed out, or error)
+    decision:
+      type: string
+      description: The human decision (approved, rejected, or empty)
+    approved:
+      type: boolean
+      description: True when the reviewer approved — route the loop forward
+    rejected:
+      type: boolean
+      description: True when the reviewer rejected — route the loop back for another round
+    comment:
+      type: string
+      description: The reviewer's comment, to feed into the next iteration
+    reviewer:
+      type: string
+      description: Identifier of the human who decided
+    timed_out:
+      type: boolean
+      description: True when no decision arrived before the timeout
+    expired:
+      type: boolean
+      description: True when the review auto-expired
+    iteration:
+      type: number
+      description: The loop iteration number passed in, echoed back
+    error:
+      type: string
+      description: Error description when the review could not be created or fetched
+    review_url:
+      type: string
+      description: Deep link to the review in the dashboard, when an app URL is configured
+    elapsed_seconds:
+      type: number
+      description: Time spent waiting for the decision
+extra:
+  python:
+    source: tools/request_review.py

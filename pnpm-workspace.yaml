@@ -1,0 +1,63 @@
+packages:
+  - apps/*
+  - packages/*
+  - tooling/*
+
+patchedDependencies: { next@16.2.6: patches/next@16.2.6.patch }
+
+minimumReleaseAge: 10080 # 1 week (in minutes)
+
+minimumReleaseAgeExclude:
+  - tmp
+
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  aws-sdk: true
+  cloudflared: true
+  esbuild: true
+  less: true
+  nx: true
+  protobufjs: true
+  sharp: true
+  unrs-resolver: true
+
+nodeLinker: hoisted
+
+overrides:
+  react: 19.2.0
+  react-dom: 19.2.0
+  react-native: 0.83.2
+  react-native-web: 0.21.1
+  tailwindcss: 3.4.18
+  vite: '>=7.3.2'
+  lexical: 0.41.0
+  '@lexical/headless': 0.41.0
+  '@lexical/html': 0.41.0
+  '@lexical/rich-text': 0.41.0
+  '@lexical/clipboard': 0.41.0
+  '@lexical/link': 0.41.0
+  '@lexical/list': 0.41.0
+  '@lexical/mark': 0.41.0
+  '@lexical/react': 0.41.0
+  '@lexical/selection': 0.41.0
+  '@lexical/table': 0.41.0
+  '@lexical/utils': 0.41.0
+  # Security fixes
+  rollup: '>=4.59.0'
+  minimatch: '>=9.0.7'
+  flatted: '>=3.4.2'
+  picomatch: '>=4.0.4'
+  node-forge: '>=1.4.0'
+  defu: '>=6.1.5'
+  hono: '>=4.12.4'
+  fast-uri: '>=3.1.2'
+  '@xmldom/xmldom': '>=0.8.13'
+  axios: '>=1.16.0'
+  tmp: '>=0.2.6'
+  '@babel/plugin-transform-modules-systemjs': '>=7.29.4'
+  kysely: '>=0.28.17'
+  next: '>=16.2.6'
+  glob: '>=10.5.0'
+  '@modelcontextprotocol/sdk': '>=1.25.2'
+  vitest: '>=4.1.0'

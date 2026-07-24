@@ -1,0 +1,55 @@
+{
+  "name": "universal-react-monorepo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nx run-many -t dev",
+    "build": "nx --no-tui run-many -t build",
+    "typecheck": "nx --no-tui run-many -t typecheck",
+    "format": "nx --no-tui format:write",
+    "format:check": "nx --no-tui format:check",
+    "lint": "nx --no-tui run-many -t lint --configuration=fix",
+    "lint:check": "nx --no-tui run-many -t lint",
+    "test": "nx --no-tui run-many -t test",
+    "knip": "SKIP_ENV_VALIDATION=true knip --no-progress",
+    "qlty": "qlty check --no-formatters",
+    "qlty:diff": "tsx tooling/qlty-diff/src/cli.ts",
+    "prepare": "husky"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@11.3.0",
+  "devDependencies": {
+    "@chalkboard/commit-conventions": "workspace:*",
+    "@chalkboard/eslint-config-base": "workspace:*",
+    "@chalkboard/prettier-config": "workspace:*",
+    "@chalkboard/qlty-diff": "workspace:*",
+    "@nx/eslint": "22.6.1",
+    "@nx/next": "22.6.1",
+    "@nx/vite": "22.6.1",
+    "@nx/web": "22.6.1",
+    "@swc-node/register": "^1.11.1",
+    "@swc/core": "^1.15.21",
+    "@types/node": "^22.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "husky": "9.1.7",
+    "jiti": "2.4.2",
+    "knip": "^6.7.0",
+    "lint-staged": "16.4.0",
+    "nx": "22.6.1",
+    "prettier": "^3.8.1",
+    "prettier-plugin-tailwindcss": "^0.5.14",
+    "tsx": "^4.21.0"
+  },
+  "lint-staged": {
+    "**/*.{js,jsx,ts,tsx}": [
+      "node --max-old-space-size=8192 ./node_modules/.bin/eslint --flag v10_config_lookup_from_file --fix",
+      "prettier --write"
+    ],
+    "**/*.{json,yaml,yml,md}": [
+      "prettier --write"
+    ]
+  }
+}

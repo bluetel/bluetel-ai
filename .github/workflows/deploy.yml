@@ -1,0 +1,129 @@
+name: Deploy
+
+# Triggered when someone comments "/approve" on a deployment approval issue.
+# No CI minutes are burned while waiting for approval — this only fires on the comment event.
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+jobs:
+  deploy:
+    # Only run if: comment is "/approve" AND issue has "deployment" label AND issue is open
+    if: |
+      github.event.issue.state == 'open' &&
+      contains(github.event.issue.labels.*.name, 'deployment') &&
+      github.event.comment.body == '/approve'
+    runs-on: ubuntu-latest
+    steps:
+      - name: React to comment
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes'
+            });
+
+      - name: Check commenter has write permission
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { data: perm } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.actor,
+            });
+            const allowed = ['admin', 'write'].includes(perm.permission);
+            if (!allowed) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: `@${context.actor} does not have write permission and cannot approve deployments.`
+              });
+              core.setFailed(`${context.actor} has permission level '${perm.permission}' — write or admin required`);
+            }
+
+      - name: Parse deployment details from issue body
+        id: parse
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const body = context.payload.issue.body;
+
+            // Extract values from the markdown table in the issue body
+            const appMatch = body.match(/\*\*App\*\*\s*\|\s*`([^`]+)`/);
+            const stageMatch = body.match(/\*\*Stage\*\*\s*\|\s*`([^`]+)`/);
+            const commitMatch = body.match(/\*\*Commit\*\*\s*\|\s*`([^`]+)`/);
+
+            if (!appMatch || !stageMatch || !commitMatch) {
+              core.setFailed('Could not parse deployment details from issue body');
+              return;
+            }
+
+            core.setOutput('app_name', appMatch[1]);
+            core.setOutput('stage', stageMatch[1]);
+            core.setOutput('trigger_sha', commitMatch[1]);
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `Approved by @${context.actor}. Deployment of \`${appMatch[1]}\` to \`${stageMatch[1]}\` is starting.`
+            });
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.parse.outputs.trigger_sha }}
+          filter: tree:0
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        name: Install pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Deploy
+        run: pnpm exec nx run ${{ steps.parse.outputs.app_name }}:deploy --configuration=${{ steps.parse.outputs.stage }}
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-2' }}
+
+      - name: Report outcome
+        if: always()
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const success = '${{ job.status }}' === 'success';
+            const app = '${{ steps.parse.outputs.app_name }}';
+            const stage = '${{ steps.parse.outputs.stage }}';
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: success
+                ? `Deployment of \`${app}\` to \`${stage}\` completed successfully.`
+                : `Deployment of \`${app}\` to \`${stage}\` failed. [View logs](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`
+            });
+
+            if (success) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                state: 'closed',
+                state_reason: 'completed'
+              });
+            }

@@ -1,0 +1,21 @@
+{
+  "name": "@chalkboard/eslint-config-base",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs"
+  },
+  "dependencies": {
+    "@chalkboard/eslint-config-internal": "workspace:*"
+  },
+  "devDependencies": {
+    "@typescript-eslint/parser": "^8.0.0",
+    "fast-check": "^3.23.2",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  }
+}
