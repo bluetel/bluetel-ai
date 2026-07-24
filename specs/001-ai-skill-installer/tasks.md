@@ -21,12 +21,12 @@ New package rooted at `tooling/skills/` (an existing pnpm/Nx workspace glob), mi
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-**Purpose**: Stand up the `@chalkboard/skills` package skeleton so shell + tests have a home.
+**Purpose**: Stand up the `@bluetel-ai/skills` package skeleton so shell + tests have a home.
 
 - [x] T001 Create the package directory tree in `tooling/skills/`: `catalog/`, `bootstrap/`, `skill/`, `lib/` (empty `.gitkeep` where needed) per [plan.md](./plan.md) Project Structure.
-- [x] T002 Create `tooling/skills/package.json` — name `@chalkboard/skills`, `"type": "module"`, private, `devDependencies` matching `tooling/qlty-diff` (vitest, typescript, `@chalkboard/eslint-config-internal`, `@chalkboard/prettier-config`); no runtime deps (installer is shell-only).
+- [x] T002 Create `tooling/skills/package.json` — name `@bluetel-ai/skills`, `"type": "module"`, private, `devDependencies` matching `tooling/qlty-diff` (vitest, typescript, `@bluetel-ai/eslint-config-internal`, `@bluetel-ai/prettier-config`); no runtime deps (installer is shell-only).
 - [x] T003 [P] Create `tooling/skills/project.json` with `typecheck` (`tsc --noEmit`, cwd `tooling/skills`) and `test` (`vitest run`, cwd `tooling/skills`) targets, copied from `tooling/qlty-diff/project.json`.
-- [x] T004 [P] Create `tooling/skills/tsconfig.json`, `tooling/skills/vitest.config.ts`, and `tooling/skills/eslint.config.mjs` mirroring `tooling/qlty-diff` (strict TS, ESM, extend `@chalkboard/eslint-config-internal`).
+- [x] T004 [P] Create `tooling/skills/tsconfig.json`, `tooling/skills/vitest.config.ts`, and `tooling/skills/eslint.config.mjs` mirroring `tooling/qlty-diff` (strict TS, ESM, extend `@bluetel-ai/eslint-config-internal`).
 - [x] T005 [P] Create `tooling/skills/README.md` describing the package purpose (single distribution source; `catalog/`, `bootstrap/`, `skill/`, `lib/` layout) and that the installer is Claude + `git`/`curl`/POSIX shell with no target-side Node.
 
 **Checkpoint**: `pnpm install` resolves the new package; `pnpm nx typecheck skills` and `pnpm nx test skills` run (no tests yet, exit 0).

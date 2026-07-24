@@ -67,8 +67,8 @@ class BuildTaskPayloadTest(unittest.TestCase):
                 build_task_payload(REPO, bad, PROMPT, KIRO)
 
     def test_branch_with_slashes_and_dots_is_accepted(self):
-        payload, _ = build_task_payload(REPO, 'feature/URM-123.x', PROMPT, KIRO)
-        self.assertEqual(payload['baseBranch'], 'feature/URM-123.x')
+        payload, _ = build_task_payload(REPO, 'feature/BTAI-123.x', PROMPT, KIRO)
+        self.assertEqual(payload['baseBranch'], 'feature/BTAI-123.x')
 
     def test_empty_prompt_raises(self):
         with self.assertRaises(ValueError):

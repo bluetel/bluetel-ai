@@ -1,1 +1,1 @@
-export { default } from '@chalkboard/prettier-config'
+export { default } from '@bluetel-ai/prettier-config'

@@ -1,6 +1,6 @@
 # Description
 
-See [URM-XXXX](https://bluetel.atlassian.net/browse/URM-XXXX) for ticket info
+See [BTAI-XXXX](https://bluetel.atlassian.net/browse/BTAI-XXXX) for ticket info
 
 ## Testing instructions
 

@@ -1,5 +1,5 @@
 {
-  "name": "@chalkboard/admin-dashboard",
+  "name": "@bluetel-ai/admin-dashboard",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
@@ -8,7 +8,7 @@
     "react-dom": "19.2.0"
   },
   "devDependencies": {
-    "@chalkboard/eslint-config-base": "workspace:*",
+    "@bluetel-ai/eslint-config-base": "workspace:*",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",

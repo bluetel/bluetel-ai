@@ -11,31 +11,31 @@ Activate when the user asks to create a PR, open a pull request, or push changes
 If on `main`, create and switch to a new branch first:
 
 ```bash
-git checkout -b feature/URM-XXX
+git checkout -b feature/BTAI-XXX
 ```
 
 ### 2. Stage and commit
 
 ```bash
 git add <files>
-git commit -m "URM-XXX: description of changes"
+git commit -m "BTAI-XXX: description of changes"
 ```
 
 ### 3. Push the branch
 
 ```bash
-git push -u origin feature/URM-XXX
+git push -u origin feature/BTAI-XXX
 ```
 
 ### 4. Create the PR
 
 Open a pull request:
 
-- **owner**: `harrytwigg`
-- **repo**: `universal-react-monorepo`
-- **head**: `feature/URM-XXX`
+- **owner**: `bluetel`
+- **repo**: `bluetel-ai`
+- **head**: `feature/BTAI-XXX`
 - **base**: `main`
-- **title**: `URM-XXX: description of changes`
+- **title**: `BTAI-XXX: description of changes`
 - **body**: Summary of what changed and why
 
 Do **not** merge the PR — the user merges PRs to `main` manually.

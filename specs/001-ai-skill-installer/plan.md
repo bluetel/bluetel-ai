@@ -14,7 +14,7 @@ Deliver a one-command installer that lets any target project pull selected share
 
 **Source-repo language (tests/build)**: TypeScript (strict), Node v24, ESM — used only in this repo/CI to test the shell logic and validate `skill.meta` files. Not shipped to or run on targets.
 
-**Primary Dependencies**: Target: **Claude CLI**, **`git` ≥ 2.27** (shallow partial clone + sparse-checkout), `curl` (to fetch the bootstrap one-liner), and base POSIX utilities (`sh`, `cp`, `mv`, `mkdir`, `rm`, `find`, `sort`, `awk`, `sed`, and `sha256sum` **or** `shasum`). `tar` is not required. Source repo/CI: `vitest` (tests shell out to `lib/skills.sh`), `@chalkboard/eslint-config-internal`.
+**Primary Dependencies**: Target: **Claude CLI**, **`git` ≥ 2.27** (shallow partial clone + sparse-checkout), `curl` (to fetch the bootstrap one-liner), and base POSIX utilities (`sh`, `cp`, `mv`, `mkdir`, `rm`, `find`, `sort`, `awk`, `sed`, and `sha256sum` **or** `shasum`). `tar` is not required. Source repo/CI: `vitest` (tests shell out to `lib/skills.sh`), `@bluetel-ai/eslint-config-internal`.
 
 **Storage**: Filesystem only. Per-skill `skill.meta` (KEY=value) in the source catalog; per-skill installed record (`.skill`, KEY=value) in target projects. No database, no JSON manifest on the install path.
 
@@ -22,7 +22,7 @@ Deliver a one-command installer that lets any target project pull selected share
 
 **Target Platform**: Developer machines with a POSIX shell, `git` ≥ 2.27, `curl`, and the Claude CLI (macOS/Linux). Windows out of scope for v1.
 
-**Project Type**: Nx monorepo tooling package — content + shell scripts + shell-out tests (Nx `test`/`typecheck` targets like `@chalkboard/qlty-diff`).
+**Project Type**: Nx monorepo tooling package — content + shell scripts + shell-out tests (Nx `test`/`typecheck` targets like `@bluetel-ai/qlty-diff`).
 
 **Performance Goals**: Not performance-sensitive; a full install/update of the selected skills completes in a few seconds on a normal connection.
 
@@ -68,8 +68,8 @@ specs/001-ai-skill-installer/
 ### Source Code (repository root)
 
 ```text
-tooling/skills/                     # NEW package — @chalkboard/skills (single distribution source)
-├── package.json                    # name @chalkboard/skills, type module (for CI tests only)
+tooling/skills/                     # NEW package — @bluetel-ai/skills (single distribution source)
+├── package.json                    # name @bluetel-ai/skills, type module (for CI tests only)
 ├── project.json                    # Nx typecheck + test targets (mirrors qlty-diff)
 ├── tsconfig.json
 ├── vitest.config.ts
@@ -94,7 +94,7 @@ tooling/skills/                     # NEW package — @chalkboard/skills (single
 .claude/skills/<name>/SKILL.md  →  stub repointed at tooling/skills/catalog/<name>/SKILL.md
 ```
 
-**Structure Decision**: A single new package `@chalkboard/skills` under `tooling/` (already a pnpm/Nx workspace glob). It holds four concerns in separate folders: the canonical skill **catalog/** (distribution source, directory-based, each with `skill.meta`), the single **bootstrap/** file, the interactive **skill/** procedure, and the deterministic **lib/** shell helper (with colocated shell-out tests). The package's Node/vitest surface exists only for CI testing of the shell logic — nothing Node-based is shipped to or executed on targets, which need only Claude CLI + `git` + `curl` + base shell.
+**Structure Decision**: A single new package `@bluetel-ai/skills` under `tooling/` (already a pnpm/Nx workspace glob). It holds four concerns in separate folders: the canonical skill **catalog/** (distribution source, directory-based, each with `skill.meta`), the single **bootstrap/** file, the interactive **skill/** procedure, and the deterministic **lib/** shell helper (with colocated shell-out tests). The package's Node/vitest surface exists only for CI testing of the shell logic — nothing Node-based is shipped to or executed on targets, which need only Claude CLI + `git` + `curl` + base shell.
 
 ## Complexity Tracking
 

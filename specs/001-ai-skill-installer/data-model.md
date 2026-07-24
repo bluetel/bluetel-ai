@@ -8,7 +8,7 @@ The catalog data is **not** bundled with the bootstrap and **not** downloaded as
 
 ```sh
 git clone --depth 1 --filter=blob:none --sparse \
-  --branch "<ref>" https://github.com/harrytwigg/universal-react-monorepo.git "$TMP"
+  --branch "<ref>" https://github.com/bluetel/bluetel-ai.git "$TMP"
 git -C "$TMP" sparse-checkout set tooling/skills   # only the required dirs; narrow to catalog/<name> once selected
 ```
 

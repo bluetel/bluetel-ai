@@ -1,6 +1,6 @@
 import {
   // We are declaring this rule here
-  // eslint-disable-next-line @chalkboard/enforce-safe-env
+  // eslint-disable-next-line @bluetel-ai/enforce-safe-env
   createEnv,
   type EnvOptions,
   type StandardSchemaV1,

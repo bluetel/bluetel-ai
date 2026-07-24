@@ -35,7 +35,7 @@ const monorepoRoot = resolveMonorepoRoot(import.meta.dirname)
  *
  * This is the "internal" config — it does NOT include the enforce-safe-env rule.
  * Tooling packages should import from this package directly.
- * Application packages should import from @chalkboard/eslint-config-base instead,
+ * Application packages should import from @bluetel-ai/eslint-config-base instead,
  * which layers the enforce-safe-env rule on top of this config.
  */
 export const base = tseslint.config(
@@ -202,7 +202,7 @@ export const base = tseslint.config(
  * Adds strictTypeChecked rules that require parserOptions.project (slower but thorough).
  *
  * Usage in eslint.config.mjs:
- *   import { withTypeChecking } from '@chalkboard/eslint-config-internal'
+ *   import { withTypeChecking } from '@bluetel-ai/eslint-config-internal'
  *   export default [...base, ...withTypeChecking(import.meta.dirname)]
  */
 export const withTypeChecking = (projectDir) =>

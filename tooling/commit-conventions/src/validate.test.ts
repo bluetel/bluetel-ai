@@ -19,12 +19,12 @@ describe('Property 1: branch name validation accepts all valid patterns and reje
     const validBranch = fc.oneof(
       fc.constant('main'),
       fc.constant('staging'),
-      // feature/<at least one char> (includes feature/URM-123-foo)
+      // feature/<at least one char> (includes feature/BTAI-123-foo)
       fc.string({ minLength: 1 }).map((s) => `feature/${s}`),
-      // explicit ticket branch: feature/URM-<digits>-<suffix>
+      // explicit ticket branch: feature/BTAI-<digits>-<suffix>
       fc
         .tuple(fc.integer({ min: 0, max: 99999 }), fc.string())
-        .map(([n, suffix]) => `feature/URM-${n}${suffix}`),
+        .map(([n, suffix]) => `feature/BTAI-${n}${suffix}`),
     )
 
     fc.assert(
@@ -63,7 +63,7 @@ describe('Property 2: auto-commit prefix bypass', () => {
       fc.constant('main'),
       fc.constant('staging'),
       fc.string({ minLength: 1 }).map((s) => `feature/${s}`),
-      fc.integer({ min: 0, max: 99999 }).map((n) => `feature/URM-${n}`),
+      fc.integer({ min: 0, max: 99999 }).map((n) => `feature/BTAI-${n}`),
     )
 
     fc.assert(
@@ -82,15 +82,15 @@ describe('Property 3: ticket branch commit message validation', () => {
    * Feature: commit-conventions, Property 3: ticket branch commit message validation
    */
 
-  it('accepts iff message matches ^URM-<digits>: .+', () => {
+  it('accepts iff message matches ^BTAI-<digits>: .+', () => {
     const ticketNum = fc.integer({ min: 0, max: 99999 })
     const description = fc.string({ minLength: 1 })
     const arbitraryMessage = fc.string()
 
     fc.assert(
       fc.property(ticketNum, arbitraryMessage, description, (num, rawMsg, desc) => {
-        const branch = `feature/URM-${num}`
-        const ticket = `URM-${num}`
+        const branch = `feature/BTAI-${num}`
+        const ticket = `BTAI-${num}`
         const validPattern = new RegExp(`^${ticket}: .+`)
 
         // Test with a known-valid message
@@ -116,8 +116,8 @@ describe('Property 4: feature branch commit message validation', () => {
    */
 
   it('accepts iff message matches ^feature/<name>: .+', () => {
-    // Generate feature branch names that do NOT contain a URM ticket ID
-    const featureName = fc.string({ minLength: 1 }).filter((s) => !/URM-[0-9]+/.test(s))
+    // Generate feature branch names that do NOT contain a BTAI ticket ID
+    const featureName = fc.string({ minLength: 1 }).filter((s) => !/BTAI-[0-9]+/.test(s))
     const description = fc.string({ minLength: 1 })
     const arbitraryMessage = fc.string()
 
@@ -158,8 +158,8 @@ describe('Example-based unit tests', () => {
       expect(isValidBranchName('develop')).toBe(false)
     })
 
-    it('rejects bare URM-<digits> branches (must be under feature/)', () => {
-      expect(isValidBranchName('URM-123')).toBe(false)
+    it('rejects bare BTAI-<digits> branches (must be under feature/)', () => {
+      expect(isValidBranchName('BTAI-123')).toBe(false)
     })
 
     it('accepts feature branches', () => {
@@ -167,8 +167,8 @@ describe('Example-based unit tests', () => {
     })
 
     it('accepts ticket branches under feature/', () => {
-      expect(isValidBranchName('feature/URM-123')).toBe(true)
-      expect(isValidBranchName('feature/URM-4567-some-description')).toBe(true)
+      expect(isValidBranchName('feature/BTAI-123')).toBe(true)
+      expect(isValidBranchName('feature/BTAI-4567-some-description')).toBe(true)
     })
 
     it('rejects invalid branch names', () => {
@@ -179,9 +179,9 @@ describe('Example-based unit tests', () => {
   })
 
   describe('extractTicketId', () => {
-    it('extracts ticket ID from feature/URM branch name', () => {
-      expect(extractTicketId('feature/URM-123')).toBe('URM-123')
-      expect(extractTicketId('feature/URM-123-some-feature')).toBe('URM-123')
+    it('extracts ticket ID from feature/BTAI branch name', () => {
+      expect(extractTicketId('feature/BTAI-123')).toBe('BTAI-123')
+      expect(extractTicketId('feature/BTAI-123-some-feature')).toBe('BTAI-123')
     })
 
     it('returns null when no ticket ID is present', () => {
@@ -200,19 +200,19 @@ describe('Example-based unit tests', () => {
     })
 
     it('rejects non-auto-commit messages', () => {
-      expect(isAutoCommit('URM-123: add feature')).toBe(false)
+      expect(isAutoCommit('BTAI-123: add feature')).toBe(false)
       expect(isAutoCommit('feature/login: add form')).toBe(false)
     })
   })
 
   describe('validateCommitMessage', () => {
-    it('accepts URM-123: x on a feature/URM-123 branch', () => {
-      const result = validateCommitMessage('feature/URM-123', 'URM-123: x')
+    it('accepts BTAI-123: x on a feature/BTAI-123 branch', () => {
+      const result = validateCommitMessage('feature/BTAI-123', 'BTAI-123: x')
       expect(result.valid).toBe(true)
     })
 
-    it('rejects URM-123: (missing description) on a feature/URM-123 branch', () => {
-      const result = validateCommitMessage('feature/URM-123', 'URM-123:')
+    it('rejects BTAI-123: (missing description) on a feature/BTAI-123 branch', () => {
+      const result = validateCommitMessage('feature/BTAI-123', 'BTAI-123:')
       expect(result.valid).toBe(false)
       expect(result.error).toBeDefined()
     })

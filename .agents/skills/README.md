@@ -4,7 +4,7 @@ Shared skill definitions used across multiple AI agents (Kiro, Claude, Copilot, 
 
 ## Canonical content lives in the skills catalog
 
-The canonical content for each shared skill now lives in the **`@chalkboard/skills` catalog**:
+The canonical content for each shared skill now lives in the **`@bluetel-ai/skills` catalog**:
 
 ```
 tooling/skills/catalog/<skill-name>/

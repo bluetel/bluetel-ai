@@ -23,11 +23,11 @@
 
 Create a pull request before merging into staging:
 
-- **owner**: `harrytwigg`
-- **repo**: `universal-react-monorepo`
-- **head**: `feature/URM-XXX`
+- **owner**: `bluetel`
+- **repo**: `bluetel-ai`
+- **head**: `feature/BTAI-XXX`
 - **base**: `main`
-- **title**: `URM-XXX: description of changes`
+- **title**: `BTAI-XXX: description of changes`
 - **body**: Reference ticket, include testing instructions
 
 Do **not** merge the PR — the user will do that manually.
@@ -37,7 +37,7 @@ Do **not** merge the PR — the user will do that manually.
 Ensure the latest commits are on the remote before merging:
 
 ```bash
-git checkout feature/URM-XXX
+git checkout feature/BTAI-XXX
 git push
 ```
 
@@ -46,7 +46,7 @@ git push
 ```bash
 git checkout staging
 git pull
-git merge feature/URM-XXX --no-ff -m "staging: merge feature/URM-XXX"
+git merge feature/BTAI-XXX --no-ff -m "staging: merge feature/BTAI-XXX"
 ```
 
 If the merge is **conflict-free**, Git creates the merge commit immediately — skip to step 5.
@@ -76,7 +76,7 @@ If the merge is **conflict-free**, Git creates the merge commit immediately — 
 Only needed when step 4 had conflicts — otherwise the merge commit was already created by `git merge`:
 
 ```bash
-git commit -m "staging: merge feature/URM-XXX"
+git commit -m "staging: merge feature/BTAI-XXX"
 ```
 
 ### 6. Push staging
@@ -89,7 +89,7 @@ git push
 
 ```
 git checkout staging && git pull
-git merge feature/URM-XXX --no-ff -m "staging: merge feature/URM-XXX"
+git merge feature/BTAI-XXX --no-ff -m "staging: merge feature/BTAI-XXX"
 # if conflict-free: merge commit is created — jump to push
 # if lockfile conflict with no manifest changes:
 #   git checkout --ours pnpm-lock.yaml && git add pnpm-lock.yaml
@@ -97,6 +97,6 @@ git merge feature/URM-XXX --no-ff -m "staging: merge feature/URM-XXX"
 # if lockfile conflict with manifest changes:
 #   resolve package.json, then: pnpm install && git add pnpm-lock.yaml
 # commit only if there were conflicts:
-#   git commit -m "staging: merge feature/URM-XXX"
+#   git commit -m "staging: merge feature/BTAI-XXX"
 git push
 ```

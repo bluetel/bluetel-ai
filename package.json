@@ -1,5 +1,5 @@
 {
-  "name": "universal-react-monorepo",
+  "name": "bluetel-ai",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -22,10 +22,10 @@
   "license": "MIT",
   "packageManager": "pnpm@11.3.0",
   "devDependencies": {
-    "@chalkboard/commit-conventions": "workspace:*",
-    "@chalkboard/eslint-config-base": "workspace:*",
-    "@chalkboard/prettier-config": "workspace:*",
-    "@chalkboard/qlty-diff": "workspace:*",
+    "@bluetel-ai/commit-conventions": "workspace:*",
+    "@bluetel-ai/eslint-config-base": "workspace:*",
+    "@bluetel-ai/prettier-config": "workspace:*",
+    "@bluetel-ai/qlty-diff": "workspace:*",
     "@nx/eslint": "22.6.1",
     "@nx/next": "22.6.1",
     "@nx/vite": "22.6.1",

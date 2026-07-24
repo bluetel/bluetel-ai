@@ -1,6 +1,6 @@
 version: 0.1.0
 type: plugin
-author: chalkboard
+author: bluetel-ai
 name: kiro_delegator
 label:
   en_US: Kiro Task Delegator

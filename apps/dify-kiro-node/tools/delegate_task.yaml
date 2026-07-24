@@ -1,6 +1,6 @@
 identity:
   name: delegate_task
-  author: chalkboard
+  author: bluetel-ai
   label:
     en_US: Delegate Task (wait for result)
 description:

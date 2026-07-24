@@ -1,3 +1,3 @@
-import { base, withTypeChecking } from '@chalkboard/eslint-config-internal'
+import { base, withTypeChecking } from '@bluetel-ai/eslint-config-internal'
 
 export default [...base, ...withTypeChecking(import.meta.dirname)]

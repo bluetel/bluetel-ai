@@ -32,7 +32,7 @@ Written by `install`/`update`; read on later runs to derive state.
 name=merging
 version=1.2.0
 installed_hash=9f2c…64hex
-source_repo=harrytwigg/universal-react-monorepo
+source_repo=bluetel/bluetel-ai
 source_ref=v1.4.0
 installed_at=2026-07-23T10:15:00Z
 ```

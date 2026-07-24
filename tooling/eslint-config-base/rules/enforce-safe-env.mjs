@@ -4,13 +4,13 @@ export const enforceSafeEnv = {
     type: 'problem',
     docs: {
       description:
-        'Disallow importing createEnv from @t3-oss/env-core. Use createSafeEnv from @chalkboard/env-validation-errors instead.',
+        'Disallow importing createEnv from @t3-oss/env-core. Use createSafeEnv from @bluetel-ai/env-validation-errors instead.',
     },
     hasSuggestions: true,
     messages: {
       noDirectCreateEnv:
-        'Do not import createEnv directly from @t3-oss/env-core. Use createSafeEnv from @chalkboard/env-validation-errors instead.',
-      replaceWithSafeEnv: 'Replace with createSafeEnv from @chalkboard/env-validation-errors.',
+        'Do not import createEnv directly from @t3-oss/env-core. Use createSafeEnv from @bluetel-ai/env-validation-errors instead.',
+      replaceWithSafeEnv: 'Replace with createSafeEnv from @bluetel-ai/env-validation-errors.',
     },
     schema: [],
   },
@@ -35,7 +35,7 @@ export const enforceSafeEnv = {
                   fixer.replaceText(specifier.imported, 'createSafeEnv'),
                   fixer.replaceTextRange(
                     [node.source.range[0] + 1, node.source.range[1] - 1],
-                    '@chalkboard/env-validation-errors',
+                    '@bluetel-ai/env-validation-errors',
                   ),
                 ],
               },

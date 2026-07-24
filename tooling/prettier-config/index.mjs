@@ -2,7 +2,7 @@
  * Shared Prettier config for the entire monorepo.
  * Projects extend this via their .prettierrc.mjs:
  *
- *   export { default } from '@chalkboard/prettier-config';
+ *   export { default } from '@bluetel-ai/prettier-config';
  */
 
 /** @type {import('prettier').Config} */
