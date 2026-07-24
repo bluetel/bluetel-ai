@@ -1,0 +1,63 @@
+// This file is read by VSCode and AWS Kiro
+{
+  "editor.formatOnPaste": true,
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "always"
+  },
+
+  "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+  // "eslint.format.enable": false,
+
+  "eslint.workingDirectories": [
+    { "pattern": "apps/*" },
+    { "pattern": "packages/*" },
+    { "pattern": "tooling/*" }
+  ],
+
+  "tailwindCSS.classAttributes": [
+    "class",
+    "className",
+    "headerClassName",
+    "contentContainerClassName",
+    "columnWrapperClassName",
+    "endFillColorClassName",
+    "imageClassName",
+    "tintColorClassName",
+    "ios_backgroundColorClassName",
+    "thumbColorClassName",
+    "trackColorOnClassName",
+    "trackColorOffClassName",
+    "selectionColorClassName",
+    "cursorColorClassName",
+    "underlineColorAndroidClassName",
+    "placeholderTextColorClassName",
+    "selectionHandleColorClassName",
+    "colorsClassName",
+    "progressBackgroundColorClassName",
+    "titleColorClassName",
+    "underlayColorClassName",
+    "colorClassName",
+    "drawerBackgroundColorClassName",
+    "statusBarBackgroundColorClassName",
+    "backdropColorClassName",
+    "backgroundColorClassName",
+    "ListFooterComponentClassName",
+    "ListHeaderComponentClassName"
+  ],
+  "tailwindCSS.classFunctions": ["useResolveClassNames"],
+  "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+  "chat.agent.maxRequests": 10000,
+  // Stop node_module error spam
+  // "js/ts.tsserver.experimental.enableProjectDiagnostics": false,
+
+  // Disable Atlassian Bitbucket + Rovo Dev features for all users
+  "atlascode.bitbucket.enabled": false,
+  "atlascode.bitbucket.explorer.enabled": false,
+  "atlascode.rovodev.enabled": false,
+  "atlascode.rovodev.thinkingBlockEnabled": false,
+  "atlascode.issueSuggestion.enabled": false,
+  "atlascode.issueSuggestion.contextLevel": "codeContext",
+  "js/ts.autoClosingTags": false
+}

@@ -1,0 +1,165 @@
+identity:
+  name: delegate_task
+  author: chalkboard
+  label:
+    en_US: Delegate Task (wait for result)
+description:
+  human:
+    en_US: Delegate a coding task to an AWS Kiro (or other) sub-agent via the worker, wait for completion, and return the result with full session logs.
+  llm: Delegates a coding task to a remote coding agent (AWS Kiro by default). Clones the given GitHub repository, runs the agent with the provided prompt, waits for completion, and returns the outcome including a result summary and the full execution session logs.
+parameters:
+  - name: repo_url
+    type: string
+    required: true
+    form: llm
+    label:
+      en_US: Repository URL
+    human_description:
+      en_US: GitHub repository HTTPS URL (https://github.com/{owner}/{repo})
+    llm_description: The GitHub repository HTTPS URL to work in, in the form https://github.com/{owner}/{repo}.
+  - name: base_branch
+    type: string
+    required: true
+    default: main
+    form: llm
+    label:
+      en_US: Base branch
+    human_description:
+      en_US: Branch to clone and base the work on (e.g. main)
+    llm_description: The git branch to clone and base the work on, e.g. main.
+  - name: prompt
+    type: string
+    required: true
+    form: llm
+    label:
+      en_US: Task prompt
+    human_description:
+      en_US: The task instruction for the coding agent
+    llm_description: The task instruction for the coding agent. Describe what should be implemented or fixed.
+  - name: context
+    type: string
+    required: false
+    form: llm
+    label:
+      en_US: Context from previous step
+    human_description:
+      en_US: Optional context handed over from a previous workflow node (e.g. an earlier agent's findings)
+    llm_description: Optional additional context for the task, such as findings or output from a previous step.
+  - name: acceptance_criteria
+    type: string
+    required: false
+    form: llm
+    label:
+      en_US: Acceptance criteria
+    human_description:
+      en_US: Optional conditions the change must satisfy
+    llm_description: Optional acceptance criteria the implemented change must satisfy.
+  - name: engine
+    type: select
+    required: false
+    default: kiro
+    form: form
+    label:
+      en_US: Engine
+    human_description:
+      en_US: Which coding agent engine executes the task
+    options:
+      - value: kiro
+        label:
+          en_US: AWS Kiro
+      - value: copilot
+        label:
+          en_US: GitHub Copilot CLI
+      - value: claude
+        label:
+          en_US: Claude Code
+  - name: agent
+    type: string
+    required: false
+    form: form
+    label:
+      en_US: Agent
+    human_description:
+      en_US: Kiro CLI agent name to use (e.g. spec-orchestrator). Ignored by engines without agent support.
+  - name: model
+    type: string
+    required: false
+    form: form
+    label:
+      en_US: Model
+    human_description:
+      en_US: Model identifier forwarded to the engine (e.g. claude-sonnet-4-6). Ignored by engines without model support.
+  - name: install_script
+    type: string
+    required: false
+    form: form
+    label:
+      en_US: Install script
+    human_description:
+      en_US: Optional shell script to install dependencies. When omitted, the worker runs an LLM-driven setup phase.
+  - name: timeout_minutes
+    type: number
+    required: false
+    default: 15
+    min: 1
+    max: 110
+    form: form
+    label:
+      en_US: Timeout (minutes)
+    human_description:
+      en_US: How long to wait for the task to complete before returning a timed-out result
+output_schema:
+  type: object
+  properties:
+    task_id:
+      type: string
+      description: Worker task identifier
+    status:
+      type: string
+      description: Final task status (completed, failed, canceled, working when timed out, or error)
+    success:
+      type: boolean
+      description: True when the task completed within the timeout
+    timed_out:
+      type: boolean
+      description: True when the wait timed out before the task finished
+    error:
+      type: string
+      description: Error description when the task failed or could not be submitted
+    prompt_summary:
+      type: string
+      description: Worker-generated one-line summary of the prompt
+    result_summary:
+      type: string
+      description: Worker-generated summary of what the agent did
+    stdout:
+      type: string
+      description: Truncated stdout from the coding agent CLI
+    has_changes:
+      type: boolean
+      description: True when the agent pushed commits to a remote branch
+    engine:
+      type: string
+      description: Engine that executed the task
+    agent:
+      type: string
+      description: Agent the worker used, when one was selected
+    warnings:
+      type: array
+      items:
+        type: string
+      description: Parameters that were ignored by the selected engine
+    logs:
+      type: string
+      description: Combined worker session logs (prompt, setup, stdout/stderr) for follow-up steps
+    log_files:
+      type: array
+      items:
+        type: string
+      description: Session log filenames on the worker
+    elapsed_seconds:
+      type: number
+      description: Time spent waiting for the task
+extra:
+  python:
+    source: tools/delegate_task.py

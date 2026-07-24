@@ -1,0 +1,52 @@
+{
+  "name": "kiro-github-worker",
+  "projectType": "application",
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node build.mjs",
+        "cwd": "apps/kiro-github-worker"
+      },
+      "dependsOn": ["^build"],
+      "inputs": ["default", "^default", "{projectRoot}/build.mjs"],
+      "outputs": ["{projectRoot}/dist"],
+      "cache": true
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/main.ts",
+        "cwd": "apps/kiro-github-worker"
+      },
+      "continuous": true,
+      "cache": false
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint .",
+        "cwd": "apps/kiro-github-worker"
+      },
+      "inputs": ["default", "^default", "{projectRoot}/eslint.config.mjs"],
+      "cache": true
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "apps/kiro-github-worker"
+      },
+      "inputs": ["default", "^default", "{projectRoot}/tsconfig.json"],
+      "cache": true
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run",
+        "cwd": "apps/kiro-github-worker"
+      },
+      "cache": true
+    }
+  }
+}

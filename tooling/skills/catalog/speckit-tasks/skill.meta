@@ -1,0 +1,5 @@
+name=speckit-tasks
+version=1.0.0
+description=Generate an actionable, dependency-ordered tasks.md for the feature based on available design artifacts.
+argument_hint=Optional task generation constraints
+requires=

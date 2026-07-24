@@ -1,0 +1,5 @@
+name=merging
+version=1.0.0
+description=Merging a feature branch into staging. Use when: user explicitly asks to merge into staging or deploy to staging.
+argument_hint=The feature branch name to merge into staging
+requires=

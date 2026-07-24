@@ -1,0 +1,18 @@
+# Build outputs
+dist
+.next
+out
+build
+
+# Dependency directories
+node_modules
+
+# Auto-generated
+pnpm-lock.yaml
+src/routeTree.gen.ts
+**/generated/
+**/sst-env.d.ts
+
+# Next
+
+**/next-env.d.ts

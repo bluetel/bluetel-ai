@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    // Nx
+    "nrwl.angular-console",
+    // Prettier
+    "esbenp.prettier-vscode",
+    // Eslint
+    "dbaeumer.vscode-eslint"
+  ]
+}

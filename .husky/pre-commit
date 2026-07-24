@@ -1,0 +1,89 @@
+#!/usr/bin/env sh
+
+# NVM bootstrap — required for GUI editors (VS Code, etc.) where nvm is not on PATH
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+# qlty lives in ~/.qlty/bin, which GUI git clients don't have on PATH
+export PATH="$HOME/.qlty/bin:$PATH"
+
+# Lint + format staged files (lint-staged re-stages anything it auto-fixes)
+npx lint-staged
+
+# --- Run vitest for staged tests and tests covering staged source files ---
+#
+# This is an Nx monorepo: each project owns its own vitest.config.* and must be
+# run from its own directory. So we collect the relevant test files, group them
+# by their owning project, then run `vitest run` (filtered to those files) from
+# inside each project.
+
+# Find the nearest ancestor directory containing a vitest config (the project root).
+find_project_root() {
+  dir=$(dirname "$1")
+  while [ "$dir" != "." ] && [ "$dir" != "/" ]; do
+    for cfg in vitest.config.ts vitest.config.js vitest.config.mts vitest.config.mjs vitest.config.cts; do
+      [ -f "$dir/$cfg" ] && { printf '%s' "$dir"; return 0; }
+    done
+    dir=$(dirname "$dir")
+  done
+  return 1
+}
+
+# Staged code files (added/copied/modified/renamed)
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(ts|tsx|js|jsx)$' || true)
+
+# Test files to run: start with staged files that are themselves tests.
+TEST_FILES=$(printf '%s\n' "$STAGED" | grep -E '\.test\.(ts|tsx|js|jsx)$' || true)
+
+# For each staged source (non-test) file, add its colocated test file if one exists.
+STAGED_SRC=$(printf '%s\n' "$STAGED" | grep -vE '\.test\.(ts|tsx|js|jsx)$' || true)
+if [ -n "$STAGED_SRC" ]; then
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    base="${file%.*}"
+    for ext in ts tsx js jsx; do
+      candidate="${base}.test.${ext}"
+      [ -f "$candidate" ] && TEST_FILES=$(printf '%s\n%s' "$TEST_FILES" "$candidate")
+    done
+  done <<EOF
+$STAGED_SRC
+EOF
+fi
+
+# De-duplicate and drop blank lines.
+TEST_FILES=$(printf '%s\n' "$TEST_FILES" | sed '/^$/d' | sort -u)
+
+if [ -n "$TEST_FILES" ]; then
+  # Map each test file to "<projectRoot>\t<pathRelativeToProjectRoot>".
+  MAP=""
+  while IFS= read -r file; do
+    [ -z "$file" ] && continue
+    root=$(find_project_root "$file") || {
+      echo "⚠ No vitest config found for $file — skipping"
+      continue
+    }
+    rel="${file#"$root"/}"
+    MAP=$(printf '%s\n%s\t%s' "$MAP" "$root" "$rel")
+  done <<EOF
+$TEST_FILES
+EOF
+
+  # Run vitest once per project, filtered to just the relevant files.
+  ROOTS=$(printf '%s\n' "$MAP" | sed '/^$/d' | cut -f1 | sort -u)
+  for root in $ROOTS; do
+    files=$(printf '%s\n' "$MAP" | awk -F'\t' -v r="$root" '$1 == r { print $2 }')
+    echo "▶ Running vitest in $root"
+    ( cd "$root" && printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 pnpm exec vitest run ) || exit 1
+  done
+fi
+
+pnpm typecheck
+
+# Code-health gate for this branch's diff vs origin/main: lint, security,
+# duplication and complexity via qlty. Requires qlty to be installed.
+if command -v qlty >/dev/null 2>&1; then
+  pnpm qlty:diff
+else
+  echo "⚠ qlty not installed — please install to continue (install: https://qlty.sh)"
+  exit 1
+fi

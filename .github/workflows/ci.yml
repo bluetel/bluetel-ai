@@ -1,0 +1,188 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy_all:
+        description: 'Deploy all apps (ignore affected — deploy every project with a trigger-deploy target)'
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  qlty:
+    # Code-health gate for the PR diff: lint & security (qlty check) plus
+    # duplication & complexity (qlty smells). Fails when the changed files
+    # breach a threshold — all thresholds live in
+    # tooling/qlty-diff/src/config.ts (override per-run with the QLTY_* env vars).
+    # Independent of the nx job below: qlty is not nx-aware and does its own
+    # git-based change detection.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: qltysh/qlty-action/install@08a0a862c159eae9b9003081da6663d96efef637 # v2.3.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        name: Install pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Code-health gate (lint, security, duplication, complexity)
+        run: pnpm qlty:diff "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+
+  main:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy-needed: ${{ steps.check-deploy.outputs.deploy-needed }}
+      affected-apps: ${{ steps.check-deploy.outputs.affected-apps }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          filter: tree:0
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        name: Install pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
+
+      - run: pnpm exec nx affected -t lint test typecheck --parallel=$(nproc)
+
+      - name: Check if deploy is needed
+        id: check-deploy
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.deploy_all }}" = "true" ]; then
+            # Manual trigger with deploy_all: target every project that has trigger-deploy, not just affected
+            AFFECTED=$(pnpm exec nx show projects --withTarget=trigger-deploy 2>/dev/null || echo "")
+          else
+            # List affected projects that have a trigger-deploy target
+            AFFECTED=$(pnpm exec nx show projects --affected --withTarget=trigger-deploy 2>/dev/null || echo "")
+          fi
+          if [ -n "$AFFECTED" ]; then
+            # Convert newline-separated list to compact single-line JSON array for matrix
+            JSON=$(echo "$AFFECTED" | sed 's/^[[:space:]]*//' | jq -Rsc 'split("\n") | map(select(length > 0))')
+            echo "deploy-needed=true" >> "$GITHUB_OUTPUT"
+            echo "affected-apps=$JSON" >> "$GITHUB_OUTPUT"
+            echo "Deploy needed for: $AFFECTED"
+          else
+            echo "deploy-needed=false" >> "$GITHUB_OUTPUT"
+            echo "affected-apps=[]" >> "$GITHUB_OUTPUT"
+            echo "No deployment needed"
+          fi
+
+  dispatch-deploy:
+    needs: main
+    if: needs.main.outputs.deploy-needed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    strategy:
+      matrix:
+        app: ${{ fromJson(needs.main.outputs.affected-apps) }}
+    steps:
+      - name: Determine stage
+        id: stage
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$REF" = "refs/heads/main" ]; then
+            echo "stage=production" >> "$GITHUB_OUTPUT"
+          elif [ "$REF" = "refs/heads/staging" ]; then
+            echo "stage=staging" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create approval issue
+        uses: actions/github-script@v9
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        with:
+          script: |
+            const app = '${{ matrix.app }}';
+            const stage = '${{ steps.stage.outputs.stage }}';
+            const sha = context.sha;
+
+            // Close any existing open approval issue for the same app+stage
+            // to avoid stale deployments being approved
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: `deployment,${stage}`,
+              per_page: 100,
+            });
+
+            for (const issue of existing.data) {
+              const appMatch = issue.body?.match(/\*\*App\*\*\s*\|\s*`([^`]+)`/);
+              if (appMatch?.[1] === app) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `Superseded by a newer deployment (commit \`${sha}\`). Closing.`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                  state_reason: 'not_planned',
+                });
+                core.notice(`Closed superseded issue #${issue.number}`);
+              }
+            }
+
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Deploy Approval: ${app} → ${stage}`,
+              body: [
+                `## Deployment Request`,
+                ``,
+                `| Field | Value |`,
+                `|-------|-------|`,
+                `| **App** | \`${app}\` |`,
+                `| **Stage** | \`${stage}\` |`,
+                `| **Commit** | \`${sha}\` |`,
+                `| **Branch** | \`${process.env.REF_NAME}\` |`,
+                `| **Triggered by** | @${context.actor} |`,
+                ``,
+                `---`,
+                ``,
+                `### To approve, comment \`/approve\``,
+                `### To reject, close this issue`,
+                ``,
+                `> Commenting \`/approve\` triggers the deployment immediately. No CI minutes are burned while waiting.`,
+                `>`,
+                `> If the deployment fails, this issue remains open. Comment \`/approve\` again to retry against the same commit.`,
+              ].join('\n'),
+              labels: ['deployment', stage]
+            });
+            core.notice(`Approval issue created: #${issue.data.number}`);
