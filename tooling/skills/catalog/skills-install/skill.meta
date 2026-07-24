@@ -1,0 +1,5 @@
+name=skills-install
+version=1.0.0
+description=Install, list, and update the shared @bluetel-ai/skills in this project — re-fetches the latest catalog on demand. Use when: adding, updating, or listing shared skills.
+argument_hint=Optional: space-separated skill names to install non-interactively
+requires=

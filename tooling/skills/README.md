@@ -6,12 +6,11 @@ Node on the target.
 
 ## Layout
 
-| Folder       | Purpose                                                                                                                                  |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `catalog/`   | Canonical skill content. One dir per skill (`<name>/SKILL.md` + `skill.meta`). The catalog **is** the directory scan — no manifest file. |
-| `bootstrap/` | `install.sh` — the one publishable file (`curl … \| sh`). Verifies tools, shallow-sparse-clones this subtree, launches Claude.           |
-| `skill/`     | `SKILL.md` — the interactive install procedure Claude runs against a downloaded snapshot.                                                |
-| `lib/`       | `skills.sh` — the deterministic POSIX-shell core (`list`/`status`/`install`/`update`) + colocated vitest shell-out tests.                |
+| Folder       | Purpose                                                                                                                                                                                                                                            |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `catalog/`   | Canonical skill content. One dir per skill (`<name>/SKILL.md` + `skill.meta`). The catalog **is** the directory scan — no manifest file. This includes `skills-install/`, the interactive install procedure, so it is itself an installable skill. |
+| `bootstrap/` | `install.sh` — the one publishable file (`curl … \| sh`). Verifies tools, shallow-sparse-clones this subtree, launches Claude on `catalog/skills-install/SKILL.md`.                                                                                |
+| `lib/`       | `skills.sh` — the deterministic POSIX-shell core (`list`/`status`/`install`/`update`) + colocated vitest shell-out tests.                                                                                                                          |
 
 ## Target requirements
 
@@ -32,8 +31,14 @@ curl -fsSL https://raw.githubusercontent.com/bluetel/bluetel-ai/main/tooling/ski
 ```
 
 The bootstrap verifies prerequisites, shallow-sparse-clones only this `tooling/skills/` subtree
-into a temp dir, and launches Claude on the interactive install skill. Override the source with
+into a temp dir, and launches Claude on the `skills-install` skill. Override the source with
 `SKILLS_REPO_URL` / `SKILLS_REPO_REF` env vars.
+
+**Self-service updates (no `curl`):** `skills-install` is itself a catalog skill, so a target can
+install it once (via the one-liner above) and thereafter run `/skills-install` directly. When
+invoked from an installed copy, it re-fetches a fresh catalog snapshot on demand (using the
+`source_repo` / `source_ref` recorded in its `.skill`), then runs the same list/install/update
+flow — closing the loop without re-piping the bootstrap.
 
 **Non-interactive / scripted** (no Claude, directly against the catalog):
 

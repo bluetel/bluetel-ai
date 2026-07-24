@@ -71,8 +71,9 @@ git -C "$TMP/repo" sparse-checkout set "$SUBTREE" >/dev/null 2>&1 || {
 }
 
 SNAPSHOT="$TMP/repo/$SUBTREE"
-if [ ! -f "$SNAPSHOT/skill/SKILL.md" ]; then
-  err "error: snapshot missing $SUBTREE/skill/SKILL.md — repo layout changed?"
+INSTALL_SKILL="catalog/skills-install/SKILL.md"
+if [ ! -f "$SNAPSHOT/$INSTALL_SKILL" ]; then
+  err "error: snapshot missing $SUBTREE/$INSTALL_SKILL — repo layout changed?"
   exit 1
 fi
 
@@ -83,4 +84,4 @@ export SKILLS_SNAPSHOT="$SNAPSHOT"
 export SKILLS_TARGET="$TARGET"
 
 printf 'Launching Claude to install skills into %s …\n' "$TARGET"
-exec claude "$SNAPSHOT/skill/SKILL.md"
+exec claude "$SNAPSHOT/$INSTALL_SKILL"

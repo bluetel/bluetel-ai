@@ -1,20 +1,53 @@
 ---
 name: skills-install
-description: 'Interactively install and update shared AI skills from the @bluetel-ai/skills catalog into the current project.'
+description: 'Interactively install, list, and update shared AI skills from the @bluetel-ai/skills catalog into the current project.'
 argument-hint: 'Optional: space-separated skill names to install non-interactively'
 ---
 
-# Install Shared Skills
+# Install & Update Shared Skills
 
-You are running from a downloaded snapshot of `@bluetel-ai/skills`. Your job is to help
-the user choose which shared skills to install into their project, then materialize the
-selection deterministically via the shell helper. **All deterministic work is done by
-`lib/skills.sh`** — you own conversation, selection, and the final summary. Never hand-write
-skill files; always go through the helper.
+Your job is to help the user choose which shared skills to install (or update) into their
+project, then materialize the selection deterministically via the shell helper. **All
+deterministic work is done by `lib/skills.sh`** — you own conversation, selection, and the final
+summary. Never hand-write skill files; always go through the helper.
+
+This skill runs in two ways, and step 0 makes them equivalent:
+
+- **From the bootstrap** (`curl … | sh`) — a fresh snapshot is already downloaded and the
+  `SKILLS_*` env vars below are exported. Skip straight to step 1.
+- **From an installed copy** — the user invoked this skill inside a target project (it was
+  itself installed from the catalog). No snapshot exists yet, so **step 0 re-fetches one**.
+
+## 0. Ensure a snapshot exists
+
+If `SKILLS_SNAPSHOT` is already set and points at a dir containing `lib/skills.sh`, use it as-is
+and continue to step 1.
+
+Otherwise, re-fetch the catalog + helper from the recorded source. Read this skill's own install
+record to learn where it came from, then shallow-sparse-clone only the `tooling/skills` subtree
+into a temp dir (same approach as the bootstrap — no full monorepo, no history):
+
+```sh
+REC=".agents/skills/skills-install/.skill"
+REPO=$(sed -n 's/^source_repo=//p' "$REC")
+REF=$(sed -n 's/^source_ref=//p' "$REC")
+[ -n "$REPO" ] || REPO="https://github.com/bluetel/bluetel-ai.git"
+[ -n "$REF" ] || REF="main"
+
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/skills-refresh.XXXXXX")
+git clone --depth 1 --filter=blob:none --sparse --branch "$REF" "$REPO" "$TMP/repo" >/dev/null 2>&1
+git -C "$TMP/repo" sparse-checkout set tooling/skills >/dev/null 2>&1
+
+export SKILLS_SNAPSHOT="$TMP/repo/tooling/skills"
+export SKILLS_TARGET="$PWD"
+export SKILLS_SOURCE_REPO="$REPO"
+export SKILLS_SOURCE_REF="$REF"
+```
+
+If the clone fails (bad ref, no network), stop and report it — change nothing. Clean up `$TMP`
+when you finish.
 
 ## Environment
-
-The bootstrap exports these (fall back sensibly if unset):
 
 - `SKILLS_SNAPSHOT` — the snapshot's `tooling/skills/` dir. The helper is `$SKILLS_SNAPSHOT/lib/skills.sh`; the catalog is `$SKILLS_SNAPSHOT/catalog`.
 - `SKILLS_TARGET` — the target project root (defaults to `$PWD`).
@@ -58,6 +91,10 @@ Group by state so the user understands the current situation:
 
 The user may pick **multiple** skills in one run. Confirm the selection before writing.
 **If the user selects nothing, exit and change nothing** (spec AS-4).
+
+**Self-service updates:** `skills-install` appears in the catalog like any other skill. Offer to
+install it into the target so future installs/updates are a plain `/skills-install` invocation —
+no `curl … | sh` needed. When it is installed, step 0 above re-fetches the catalog on demand.
 
 ### 4. Install fresh selections
 
