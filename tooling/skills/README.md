@@ -47,6 +47,48 @@ sh lib/skills.sh install merging pr-creation --catalog ./catalog --target /path/
 sh lib/skills.sh update --all --catalog ./catalog --target /path/to/project
 ```
 
+## Per-repo configuration
+
+Workflow skills (`pr-creation`, `merging`, `jira-ticket`) are **repo-agnostic**: the ticket prefix,
+branch pattern, staging/base branch, GitHub target, and Jira coordinates differ per project, so
+those values live in a small `.agents/skills.config` (`key=value`) file in the target — **not** baked
+into the skill content. This keeps every installed skill byte-identical to the catalog, so the
+hash-based update model never sees a personalised repo as "locally-modified". The config is data:
+never hashed, never overwritten by `update`.
+
+`skills-install` prompts for these values during install (step 6) whenever a config-consuming skill
+is installed, asking only for the keys those skills actually use. You can also manage them directly:
+
+```sh
+sh lib/skills.sh config show                 # KEY<TAB>VALUE<TAB>SOURCE (default|set)
+sh lib/skills.sh config get branch_pattern
+sh lib/skills.sh config set 'ticket_prefix=ACME' 'repo_owner=acme' --target /path/to/project
+```
+
+| Key                | Default                        | Used by                      |
+| ------------------ | ------------------------------ | ---------------------------- |
+| `ticket_prefix`    | `BTAI`                         | `pr-creation`, `merging`     |
+| `branch_pattern`   | `feature/{ticket}`             | `pr-creation`, `merging`     |
+| `commit_format`    | `{ticket}: {description}`      | `pr-creation`, `merging`     |
+| `staging_branch`   | `staging`                      | `merging`                    |
+| `base_branch`      | `main`                         | `pr-creation`, `merging`     |
+| `repo_owner`       | `bluetel`                      | `pr-creation`, `merging`     |
+| `repo_name`        | `bluetel-ai`                   | `pr-creation`, `merging`     |
+| `jira_site`        | `bluetel.atlassian.net`        | `jira-ticket`                |
+| `jira_project_key` | _derived from_ `ticket_prefix` | `jira-ticket`                |
+| `jira_board_id`    | _(empty)_                      | `jira-ticket` (sprint moves) |
+| `jira_epic_key`    | _(empty)_                      | `jira-ticket` (`--parent`)   |
+
+Only explicitly-set keys are written to the file; anything absent resolves to the default, so
+derived values (`jira_project_key`) keep tracking their source. Keys with an empty default have no
+sensible cross-repo value — the consuming skill asks rather than guessing, and degrades gracefully
+(no `jira_board_id` → the sprint step is skipped, not guessed). Skills substitute `{ticket}` /
+`{description}` per task.
+
+**Credentials are never stored here** — the file is committed. `JIRA_EMAIL` is per-user (shell
+profile) and the Jira API token lives in the OS keychain; see the header of
+`catalog/jira-ticket/scripts/jira-sprint.sh` for the one-time setup.
+
 ## Publishing (maintainers)
 
 The catalog **is** the set of directories under `catalog/` — there is no build or publish

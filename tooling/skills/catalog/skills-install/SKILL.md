@@ -112,7 +112,86 @@ skill lands at `.agents/skills/<name>/` (content + `.skill` record) and `.claude
 If any selected skill is `outdated` or in a conflict state, follow the **update flow** in the
 "Updating" section below rather than `install`.
 
-### 6. Final summary (SC-004)
+### 6. Configure per-repo conventions
+
+Some skills (`pr-creation`, `merging`, `jira-ticket`, and any future workflow skills) are
+repo-agnostic: they read this project's ticket prefix, branch pattern, staging branch, target repo,
+and Jira coordinates from a small per-repo config file at `.agents/skills.config`. This config is
+**data** — it is never hashed and never overwritten by an `update`, so it is safe to populate once.
+
+Run this step **whenever a config-consuming skill (`pr-creation`, `merging`, or `jira-ticket`) is
+among the skills installed or updated in this run.** Skip it otherwise, and skip it when there is no
+interactive TTY.
+
+**Only ask for the keys the installed skills actually use** — don't walk the Jira keys for a repo
+that only installed `pr-creation`, and don't walk the git keys for a Jira-only install:
+
+| Installed skill | Keys to walk                                                                                 |
+| --------------- | -------------------------------------------------------------------------------------------- |
+| `pr-creation`   | `ticket_prefix`, `branch_pattern`, `commit_format`, `base_branch`, `repo_owner`, `repo_name` |
+| `merging`       | the above plus `staging_branch`                                                              |
+| `jira-ticket`   | `jira_site`, `jira_project_key`, `jira_board_id`, `jira_epic_key` (+ `ticket_prefix`)        |
+
+**Only prompt when it is actually necessary** — the config is data and is preserved across updates,
+so a repo that is already configured must not be re-nagged:
+
+1. Show the current effective values (defaults until the user sets them):
+
+   ```sh
+   sh "$SKILLS_SNAPSHOT/lib/skills.sh" config show --target "$SKILLS_TARGET"
+   ```
+
+   Each line is `KEY<TAB>VALUE<TAB>SOURCE` where `SOURCE` is `default` or `set`.
+   - **Fresh install** of a config-consuming skill → walk the keys (step 2).
+   - **Update** of an already-configured repo (at least one key shows `SOURCE=set`) → **do not
+     re-walk**. Print the current config for confirmation and continue; only prompt for a specific
+     key if it still shows `SOURCE=default` **and** a newly updated skill now needs it (e.g. an
+     update added a config key the file predates). Offer a one-line "want to change any of these?"
+     escape hatch rather than stepping through every value.
+   - **No config yet** (every key `SOURCE=default`) → walk the keys (step 2), same as a fresh install.
+
+2. **Ask the user for each value** (only in the walk cases above), presenting the current value as the default they can accept
+   with Enter. Pre-fill smart guesses where you can (e.g. infer `ticket_prefix` from recent
+   `git branch --list` names or the project's `AGENTS.md` (then `CLAUDE.md`), and `repo_owner` / `repo_name` from
+   `git remote get-url origin`). The keys:
+   - `ticket_prefix` — ticket namespace (e.g. `BTAI`, `ACME`).
+   - `branch_pattern` — feature-branch shape; keep the literal `{ticket}` placeholder (e.g. `feature/{ticket}`).
+   - `commit_format` — commit subject shape; keep `{ticket}` and `{description}` (e.g. `{ticket}: {description}`).
+   - `staging_branch` — branch feature work merges into (e.g. `staging`).
+   - `base_branch` — branch PRs target (e.g. `main`).
+   - `repo_owner` / `repo_name` — the GitHub target.
+
+   Jira keys (only when `jira-ticket` is involved):
+   - `jira_site` — Atlassian host (e.g. `bluetel.atlassian.net`).
+   - `jira_project_key` — project key for new issues. **Defaults to `ticket_prefix`**, so accept the
+     default unless the Jira project genuinely differs from the branch/ticket prefix.
+   - `jira_board_id` — numeric board id, used to find the active sprint. No default; if the user
+     doesn't know it, it's in the board URL (`…/boards/<id>`). Leaving it empty is fine — the sprint
+     step is then skipped rather than guessed.
+   - `jira_epic_key` — parent epic every new ticket is linked to (e.g. `ACME-100`). No default; empty
+     means tickets are created without `--parent`.
+
+   **Never** prompt for or store credentials. `JIRA_EMAIL` is per-user (shell profile) and the API
+   token lives in the OS keychain — the config file is committed, so neither belongs there. If the
+   user asks, point them at the setup notes in `jira-ticket/scripts/jira-sprint.sh`.
+
+3. Write only the keys the user changed (unchanged keys keep their value automatically, and keys left
+   at their default are deliberately not written out). **Quote each pair** so values containing
+   spaces survive:
+
+   ```sh
+   sh "$SKILLS_SNAPSHOT/lib/skills.sh" config set \
+     'ticket_prefix=ACME' 'branch_pattern=feature/{ticket}' 'repo_owner=acme' 'repo_name=web' \
+     --target "$SKILLS_TARGET"
+   ```
+
+   The helper validates keys (unknown key → exit 1, nothing written) and rewrites the file
+   atomically. If the config already exists and the user is happy with it, skip the write.
+
+4. If `jira-ticket` was installed, note in the summary that it also needs the `acli` CLI
+   (`acli jira auth`) plus `JIRA_EMAIL` + a keychain token before first use.
+
+### 7. Final summary (SC-004)
 
 After the helper runs, print a human summary:
 
@@ -135,3 +214,7 @@ See the companion behavior for `status` / `update` / conflict resolution. In bri
    _before any write_ and pass it via `--on-conflict`. After a `merge-conflict` (exit `6`), show
    the marked regions and, only if the user asks, offer a Claude-proposed resolution for them to
    review — never auto-apply it.
+4. If the update touched a config-consuming skill (`pr-creation` / `merging`), finish by running
+   **step 6 (Configure per-repo conventions)** under its "necessary only" rule — it re-prompts only
+   when the config is missing or a needed key is still at its default, never for an
+   already-configured repo.

@@ -42,6 +42,7 @@ Usage:
   sh skills.sh status [--catalog <dir>] [--target <dir>]
   sh skills.sh install <name...> [--force] [--on-conflict <mode>] [--catalog <dir>] [--target <dir>]
   sh skills.sh update  <name...>|--all [--force] [--on-conflict <mode>] [--catalog <dir>] [--target <dir>]
+  sh skills.sh config  show | get <key> | set <key=value>… [--target <dir>]
 
 Options:
   --force              alias for --on-conflict overwrite
@@ -295,6 +296,192 @@ skill_state() {
     return
   fi
   printf 'up-to-date'
+}
+
+# ---------------------------------------------------------------------------
+# Per-repo config (.agents/skills.config)
+# ---------------------------------------------------------------------------
+#
+# A small key=value file holding this project's conventions (ticket prefix,
+# branch pattern, target repo, …). It is DATA consumed by skills at runtime —
+# NOT part of any skill's tracked content, so it is never hashed and never
+# touched by `update`. Written through this helper so the format is consistent
+# and the write is atomic. Values may contain spaces (e.g. commit_format), so
+# `set` operands are handled outside the space-split NAMES accumulator.
+
+CONFIG_KEYS="ticket_prefix branch_pattern commit_format staging_branch base_branch repo_owner repo_name jira_site jira_project_key jira_board_id jira_epic_key"
+
+config_path() { printf '%s' "$TARGET/.agents/skills.config"; }
+
+# config_default <key> — the built-in fallback (this catalog's own conventions).
+# Keys with no sensible cross-repo default resolve to empty; the consuming skill
+# is responsible for asking rather than guessing. Deliberately NO credential or
+# per-user keys here (e.g. JIRA_EMAIL / API tokens stay in the env + keychain).
+config_default() {
+  case "$1" in
+    ticket_prefix) printf 'BTAI' ;;
+    branch_pattern) printf 'feature/{ticket}' ;;
+    commit_format) printf '{ticket}: {description}' ;;
+    staging_branch) printf 'staging' ;;
+    base_branch) printf 'main' ;;
+    repo_owner) printf 'bluetel' ;;
+    repo_name) printf 'bluetel-ai' ;;
+    jira_site) printf 'bluetel.atlassian.net' ;;
+    # The Jira project key is nearly always the ticket prefix, so derive it
+    # rather than making the user state the same string twice.
+    jira_project_key) config_effective ticket_prefix ;;
+    jira_board_id) printf '' ;;
+    jira_epic_key) printf '' ;;
+    *) return 1 ;;
+  esac
+}
+
+config_is_key() {
+  for _ck in $CONFIG_KEYS; do
+    [ "$_ck" = "$1" ] && return 0
+  done
+  return 1
+}
+
+# config_effective <key> — file value if present & non-empty, else the default.
+config_effective() {
+  _ce_key="$1"
+  _ce_file=$(config_path)
+  _ce_val=""
+  [ -f "$_ce_file" ] && _ce_val=$(meta_get "$_ce_file" "$_ce_key")
+  if [ -n "$_ce_val" ]; then
+    printf '%s' "$_ce_val"
+  else
+    config_default "$_ce_key"
+  fi
+}
+
+fail_config() {
+  printf '%s\n' "write error: $1" >&2
+  exit 4
+}
+
+# config_show — one KEY<TAB>VALUE<TAB>SOURCE line per known key (SOURCE: set|default).
+config_show() {
+  _cs_file=$(config_path)
+  for _ck in $CONFIG_KEYS; do
+    _src=default
+    if [ -f "$_cs_file" ] && [ -n "$(meta_get "$_cs_file" "$_ck")" ]; then
+      _src=set
+    fi
+    printf '%s\t%s\t%s\n' "$_ck" "$(config_effective "$_ck")" "$_src"
+  done
+}
+
+# config_set <newline-separated key=value operands> — validate then atomically
+# rewrite the managed file with every known key (overrides win, else current
+# effective value is preserved).
+config_set() {
+  _cset_ops="$1"
+  # Validate every operand first — reject typos before touching the file.
+  _IFS_SAVE=$IFS
+  IFS='
+'
+  for _pair in $_cset_ops; do
+    IFS=$_IFS_SAVE
+    case "$_pair" in
+      *=*) : ;;
+      *) die_usage "config set expects key=value, got: $_pair" ;;
+    esac
+    _pk=${_pair%%=*}
+    config_is_key "$_pk" || die_usage "unknown config key '$_pk' (known: $CONFIG_KEYS)"
+    IFS='
+'
+  done
+  IFS=$_IFS_SAVE
+
+  _cset_file=$(config_path)
+  _cset_tmp="$_cset_file.tmp.$$"
+  mkdir -p "$(dirname "$_cset_file")" || fail_config "cannot create $(dirname "$_cset_file")"
+
+  # Persist ONLY explicit decisions: keys overridden in this call, plus keys
+  # already explicitly set in the file. Never materialize a default — writing
+  # them out would freeze derived values (e.g. jira_project_key, which tracks
+  # ticket_prefix) and silently stop them following their source.
+  {
+    printf '# Managed by skills-install (sh skills.sh config set …).\n'
+    printf '# Per-repo conventions consumed by shared skills. Safe to hand-edit values.\n'
+    printf '# Only explicitly-set keys are listed; anything absent uses the catalog default.\n'
+    for _ck in $CONFIG_KEYS; do
+      _val=""
+      _found=0
+      IFS='
+'
+      for _pair in $_cset_ops; do
+        case "$_pair" in
+          "$_ck="*)
+            _val=${_pair#*=}
+            _found=1
+            ;;
+        esac
+      done
+      IFS=$_IFS_SAVE
+      if [ "$_found" -eq 0 ]; then
+        # Not touched now — carry over only a pre-existing explicit value.
+        [ -f "$_cset_file" ] && _val=$(meta_get "$_cset_file" "$_ck")
+      fi
+      # An empty value means "use the default" — omit the line entirely.
+      # A plain `[ … ] && printf` would make the block exit non-zero whenever the
+      # last key is empty, tripping the write-failure path; use an explicit if.
+      if [ -n "$_val" ]; then
+        printf '%s=%s\n' "$_ck" "$_val"
+      fi
+    done
+  } >"$_cset_tmp" || { rm -f "$_cset_tmp"; fail_config "cannot write config"; }
+  mv "$_cset_tmp" "$_cset_file" || { rm -f "$_cset_tmp"; fail_config "cannot move config into place"; }
+  printf 'wrote %s\n' "$_cset_file"
+}
+
+# cmd_config <subcommand> [operands…] — its own arg handling (values may contain
+# spaces), invoked from main() before parse_args.
+cmd_config() {
+  _sub="${1:-}"
+  [ -n "$_sub" ] || die_usage "config needs a subcommand: show | get <key> | set <key=value>…"
+  shift
+  _cfg_ops=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --target)
+        shift
+        [ $# -gt 0 ] || die_usage "--target needs a dir"
+        TARGET="$1"
+        ;;
+      --catalog)
+        shift
+        [ $# -gt 0 ] || die_usage "--catalog needs a dir"
+        CATALOG="$1"
+        ;;
+      --*) die_usage "unknown flag: $1" ;;
+      *) _cfg_ops="${_cfg_ops}$1
+" ;;
+    esac
+    shift
+  done
+
+  case "$_sub" in
+    path)
+      config_path
+      printf '\n'
+      ;;
+    show) config_show ;;
+    get)
+      _key=$(printf '%s' "$_cfg_ops" | head -n1)
+      [ -n "$_key" ] || die_usage "config get needs a key"
+      config_is_key "$_key" || die_usage "unknown config key '$_key' (known: $CONFIG_KEYS)"
+      config_effective "$_key"
+      printf '\n'
+      ;;
+    set)
+      [ -n "$_cfg_ops" ] || die_usage "config set needs at least one key=value"
+      config_set "$_cfg_ops"
+      ;;
+    *) die_usage "unknown config subcommand: $_sub" ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -678,6 +865,13 @@ fetch_merge_base() {
 # ---------------------------------------------------------------------------
 
 main() {
+  # config has its own arg handling (values may contain spaces) and needs no
+  # sha tooling — route it before the generic parser.
+  if [ "${1:-}" = config ]; then
+    shift
+    cmd_config "$@"
+    exit 0
+  fi
   parse_args "$@"
   case "$COMMAND" in
     help | -h | --help)

@@ -10,24 +10,44 @@
 
 **Do not automatically merge to staging** just because a PR was created. Always wait for explicit user instruction.
 
+## Project conventions (read first)
+
+This skill is repo-agnostic. The concrete branch names and target repo come from this project's
+config file — **never assume the `bluetel` / `BTAI` / `staging` defaults apply here.**
+
+Read `.agents/skills.config` (a `key=value` file at the target root). Relevant keys:
+
+| Key              | Meaning                                    | Example            |
+| ---------------- | ------------------------------------------ | ------------------ |
+| `branch_pattern` | Feature-branch shape; `{ticket}` = full id | `feature/{ticket}` |
+| `staging_branch` | Branch feature work is merged into         | `staging`          |
+| `base_branch`    | Branch PRs target                          | `main`             |
+| `repo_owner`     | GitHub owner/org                           | `bluetel`          |
+| `repo_name`      | GitHub repo                                | `bluetel-ai`       |
+
+Resolve them in this order: (1) `.agents/skills.config` if present; (2) otherwise the project's
+`AGENTS.md`, then `CLAUDE.md` git-workflow section; (3) if neither is available, **ask the user**. Below, `<feature>`
+is the resolved feature branch, `<staging>` the staging branch, `<base>` the PR base, and
+`<owner>` / `<repo>` the GitHub target.
+
 ## Rules
 
-- **Never rebase** staging onto a feature branch. Always use `git merge --no-ff`.
-- **Never merge the PR** — only the user merges PRs to `main`.
-- The feature branch is merged into `staging` directly (not via a PR).
+- **Never rebase** `<staging>` onto a feature branch. Always use `git merge --no-ff`.
+- **Never merge the PR** — only the user merges PRs to `<base>`.
+- The feature branch is merged into `<staging>` directly (not via a PR).
 - Always use `--no-ff` to preserve a named merge commit in the staging history.
 
 ## Full Procedure
 
-### 1. Open a PR targeting `main`
+### 1. Open a PR targeting `<base>`
 
 Create a pull request before merging into staging:
 
-- **owner**: `bluetel`
-- **repo**: `bluetel-ai`
-- **head**: `feature/BTAI-XXX`
-- **base**: `main`
-- **title**: `BTAI-XXX: description of changes`
+- **owner**: `<owner>`
+- **repo**: `<repo>`
+- **head**: `<feature>`
+- **base**: `<base>`
+- **title**: the commit subject (see `commit_format`, e.g. `BTAI-XXX: description of changes`)
 - **body**: Reference ticket, include testing instructions
 
 Do **not** merge the PR — the user will do that manually.
@@ -37,16 +57,16 @@ Do **not** merge the PR — the user will do that manually.
 Ensure the latest commits are on the remote before merging:
 
 ```bash
-git checkout feature/BTAI-XXX
+git checkout <feature>
 git push
 ```
 
 ### 3. Merge into staging
 
 ```bash
-git checkout staging
+git checkout <staging>
 git pull
-git merge feature/BTAI-XXX --no-ff -m "staging: merge feature/BTAI-XXX"
+git merge <feature> --no-ff -m "<staging>: merge <feature>"
 ```
 
 If the merge is **conflict-free**, Git creates the merge commit immediately — skip to step 5.
@@ -76,7 +96,7 @@ If the merge is **conflict-free**, Git creates the merge commit immediately — 
 Only needed when step 4 had conflicts — otherwise the merge commit was already created by `git merge`:
 
 ```bash
-git commit -m "staging: merge feature/BTAI-XXX"
+git commit -m "<staging>: merge <feature>"
 ```
 
 ### 6. Push staging
@@ -88,8 +108,8 @@ git push
 ## Summary
 
 ```
-git checkout staging && git pull
-git merge feature/BTAI-XXX --no-ff -m "staging: merge feature/BTAI-XXX"
+git checkout <staging> && git pull
+git merge <feature> --no-ff -m "<staging>: merge <feature>"
 # if conflict-free: merge commit is created — jump to push
 # if lockfile conflict with no manifest changes:
 #   git checkout --ours pnpm-lock.yaml && git add pnpm-lock.yaml
@@ -97,6 +117,6 @@ git merge feature/BTAI-XXX --no-ff -m "staging: merge feature/BTAI-XXX"
 # if lockfile conflict with manifest changes:
 #   resolve package.json, then: pnpm install && git add pnpm-lock.yaml
 # commit only if there were conflicts:
-#   git commit -m "staging: merge feature/BTAI-XXX"
+#   git commit -m "<staging>: merge <feature>"
 git push
 ```

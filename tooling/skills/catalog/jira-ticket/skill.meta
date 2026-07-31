@@ -1,0 +1,5 @@
+name=jira-ticket
+version=1.0.0
+description=Create and manage Jira tickets (bugs/tasks) via acli, linking to the configured epic and active sprint. Use when: creating a Jira ticket, raising a bug, logging a task, or moving an issue to a sprint.
+argument_hint=Optional: the issue type and summary, e.g. "Bug login button does nothing"
+requires=
