@@ -16,6 +16,10 @@ export interface FixtureSkill {
   requires?: string[]
   /** Relative-path → contents. `SKILL.md` is defaulted when omitted. */
   files?: Record<string, string>
+  /** Shared asset bundles seeded into the target root (see `writeAssetBundle`). */
+  assets?: string[]
+  /** Post-install recommendations, each `action|why[|when]`. */
+  nextSteps?: string[]
 }
 
 /** Result of shelling out to skills.sh. */
@@ -37,14 +41,35 @@ const metaBody = (skill: FixtureSkill): string => {
   ]
   if (skill.argumentHint !== undefined) lines.push(`argument_hint=${skill.argumentHint}`)
   lines.push(`requires=${(skill.requires ?? []).join(' ')}`)
+  if (skill.assets?.length) lines.push(`assets=${skill.assets.join(' ')}`)
+  for (const step of skill.nextSteps ?? []) lines.push(`next_step=${step}`)
   return lines.join('\n') + '\n'
 }
 
-/** Build a catalog dir populated with the given skills; returns its path. */
+/**
+ * Build a catalog dir populated with the given skills; returns its path.
+ *
+ * Mirrors the published snapshot layout — `<root>/catalog` beside `<root>/assets`
+ * — so `assets=` bundles resolve the same way they do for a real install.
+ */
 export const makeCatalog = (skills: FixtureSkill[]): string => {
-  const catalog = makeTempDir('skills-catalog-')
+  const catalog = join(makeTempDir('skills-snapshot-'), 'catalog')
+  mkdirSync(catalog, { recursive: true })
   for (const skill of skills) writeSkill(catalog, skill)
   return catalog
+}
+
+/** Write a shared asset bundle (target-root-relative paths) beside a catalog. */
+export const writeAssetBundle = (
+  catalog: string,
+  bundle: string,
+  files: Record<string, string>,
+): void => {
+  for (const [rel, contents] of Object.entries(files)) {
+    const dest = join(catalog, '..', 'assets', bundle, rel)
+    mkdirSync(dirname(dest), { recursive: true })
+    writeFileSync(dest, contents)
+  }
 }
 
 /** Write (or overwrite) one skill into an existing catalog dir. */
@@ -114,6 +139,18 @@ export const parseActions = (stdout: string): { name: string; action: string; ve
     .map((l) => l.split('\t'))
     .filter((cols) => cols.length >= 3)
     .map(([name, action, version]) => ({ name, action, version }))
+
+/** Parse `next-steps` TSV lines (`NAME<TAB>ACTION<TAB>WHY<TAB>WHEN`). */
+export const parseNextSteps = (
+  stdout: string,
+): { name: string; action: string; why: string; when: string }[] =>
+  stdout
+    .split('\n')
+    .map((l) => l.replace(/^# next: /, ''))
+    .filter((l) => l.length > 0 && !l.startsWith(' ') && !l.startsWith('#'))
+    .map((l) => l.split('\t'))
+    .filter((cols) => cols.length === 4)
+    .map(([name, action, why, when]) => ({ name, action, why, when }))
 
 /** Parse list/status TSV lines into structured rows. */
 export const parseList = (

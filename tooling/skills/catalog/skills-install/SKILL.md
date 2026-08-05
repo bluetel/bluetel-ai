@@ -107,6 +107,23 @@ sh "$SKILLS_SNAPSHOT/lib/skills.sh" install <names...> --catalog "$SKILLS_SNAPSH
 `requires` are expanded transitively and reported (`# also installing required: …`). Each
 skill lands at `.agents/skills/<name>/` (content + `.skill` record) and `.claude/skills/<name>/` (stub).
 
+**Project scaffolding.** Some skills need files outside those two roots to work at all — the
+`speckit-*` family is inert without the `.specify/` templates and scripts its procedures run. Those
+skills declare an **asset bundle**, and the helper seeds it into the target root, reporting each
+path on a `#`-prefixed line:
+
+```
+# assets (speckit):
+#   + .specify/templates/spec-template.md
+#   = .specify/templates/plan-template.md (kept; differs from the bundle — --force to overwrite)
+# assets (speckit): 11 file(s) written under /path/to/project
+```
+
+Bundle files are **data**: a missing one is seeded (so a target whose `.specify/` was deleted heals
+by re-running install), and an existing one is never silently replaced. If any line reports `kept`,
+surface it in the final summary — the project's copy has diverged from the catalog, and the user
+decides whether to keep it or re-run with `--force`. Never hand-write these files yourself.
+
 ### 5. Handle already-installed selections
 
 If any selected skill is `outdated` or in a conflict state, follow the **update flow** in the
@@ -191,12 +208,53 @@ so a repo that is already configured must not be re-nagged:
 4. If `jira-ticket` was installed, note in the summary that it also needs the `acli` CLI
    (`acli jira auth`) plus `JIRA_EMAIL` + a keychain token before first use.
 
-### 7. Final summary (SC-004)
+### 7. Recommend follow-up actions
+
+Installing a skill is rarely the last thing a project needs: `speckit-*` is only half-configured
+until the constitution is ratified, `jira-ticket` is inert until `acli` is authenticated. Each skill
+states its own follow-up in its `skill.meta`, so **read them from the helper — never invent them**:
+
+```sh
+sh "$SKILLS_SNAPSHOT/lib/skills.sh" next-steps <names...> --catalog "$SKILLS_SNAPSHOT/catalog" --target "$SKILLS_TARGET"
+```
+
+Pass the skills installed or updated in this run. With no names it reports for every installed
+skill — useful when the user asks "what else should I set up?" later. Each line is
+`NAME<TAB>ACTION<TAB>WHY<TAB>WHEN`; identical recommendations are already deduped across skills, so
+the nine `speckit-*` skills yield one constitution recommendation, not nine. (`install` and `update`
+also print these as `# next: …` lines, so you may already have them.)
+
+**`WHEN` is a precondition in prose, and checking it is your job** — the helper never evaluates it.
+For each recommendation:
+
+1. If `WHEN` is empty, the recommendation always applies.
+2. Otherwise **check it against the actual project** before showing anything — run the command it
+   names (`gh auth status`, `acli jira auth status`), grep the file it names, or inspect the config.
+   If the project has already done it, **drop the recommendation silently**. A repo that authenticated
+   `gh` months ago must not be told to authenticate `gh`.
+3. Never run the action yourself. These are the user's decisions — several (ratifying a constitution,
+   choosing a Jira epic) require judgement you do not have, and one (`/speckit-constitution`) starts a
+   whole interactive workflow. Offer, and let them choose.
+
+Present what survives as a short list, **`ACTION` first and `WHY` verbatim** — the reason is what
+lets the user decide whether the step matters for their project rather than just following an
+instruction. Don't paraphrase it into "recommended best practice". If nothing survives the checks,
+say so in one line and move on; an already-configured project deserves silence, not a checklist.
+
+**Group by `ACTION`.** The helper only dedupes lines that match on _both_ action and why, so one
+action can arrive several times with different reasons — `gh auth status` is asked for by
+`pr-creation`, `review`, and `speckit-taskstoissues`, each for its own reason. Present that as **one**
+action carrying all of its reasons, not three near-identical bullets. And check its `WHEN` once: if
+`gh` is already authenticated, the whole group disappears.
+
+### 8. Final summary (SC-004)
 
 After the helper runs, print a human summary:
 
 - What was installed / updated / skipped / kept, with versions.
 - The exact paths written (the helper prints these indented under each action line).
+- Any project scaffolding seeded, plus any bundle file reported as `kept` (see step 4).
+- The follow-up actions that survived step 7, if any.
 - A **discoverability confirmation**: the skills are now available under `.claude/skills/<name>/`
   and their canonical content under `.agents/skills/<name>/`, so the user's agents can find them.
 
@@ -218,3 +276,5 @@ See the companion behavior for `status` / `update` / conflict resolution. In bri
    **step 6 (Configure per-repo conventions)** under its "necessary only" rule — it re-prompts only
    when the config is missing or a needed key is still at its default, never for an
    already-configured repo.
+5. Then run **step 7 (Recommend follow-up actions)** for the updated skills. An update can introduce
+   a new recommendation, and the `WHEN` checks keep already-done steps out of the way.

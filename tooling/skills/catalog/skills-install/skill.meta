@@ -1,5 +1,7 @@
 name=skills-install
-version=1.2.0
+version=1.4.0
 description=Install, list, and update the shared @bluetel-ai/skills in this project — re-fetches the latest catalog on demand. Use when: adding, updating, or listing shared skills.
 argument_hint=Optional: space-separated skill names to install non-interactively
 requires=
+next_step=Commit .agents/ and .claude/|The installed skills and their records are project files, not machine-local state. Committing them is what makes the whole team — and CI agents — pick up the same skills at the same versions.|the newly written files are still untracked or unstaged
+next_step=/skills-install|Re-run this skill later to pull catalog updates. It re-fetches a fresh snapshot on demand and reports which installed skills are outdated, so no `curl … | sh` is needed again.|

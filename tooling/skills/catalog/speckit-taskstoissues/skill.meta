@@ -1,5 +1,9 @@
 name=speckit-taskstoissues
-version=1.0.0
+version=1.0.2
 description=Convert existing tasks into actionable, dependency-ordered GitHub issues for the feature based on available design artifacts.
 argument_hint=Optional filter or label for GitHub issues
 requires=
+assets=speckit
+next_step=/speckit-constitution|Fill in the project constitution. The installer seeds .specify/memory/constitution.md as an unfilled placeholder, and every other speckit command gates its spec, plan, tasks, and analysis against those principles — until it is ratified those gates check against nothing.|.specify/memory/constitution.md still contains [BRACKETED_PLACEHOLDER] tokens
+next_step=/speckit-specify, then /speckit-plan, /speckit-tasks, /speckit-implement|Run the speckit phases in order. Each one reads the artifacts the previous phase wrote (spec.md → plan.md → tasks.md), so starting mid-pipeline fails on a missing prerequisite rather than inferring the gap.|the user has not run a speckit feature in this project before
+next_step=gh auth status|Authenticate the GitHub CLI. This skill opens one issue per task through `gh`; without a logged-in `gh` the whole batch fails after tasks.md has already been parsed.|`gh auth status` does not report a logged-in account

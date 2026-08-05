@@ -11,6 +11,7 @@ Node on the target.
 | `catalog/`   | Canonical skill content. One dir per skill (`<name>/SKILL.md` + `skill.meta`). The catalog **is** the directory scan — no manifest file. This includes `skills-install/`, the interactive install procedure, so it is itself an installable skill. |
 | `bootstrap/` | `install.sh` — the one publishable file (`curl … \| sh`). Verifies tools, shallow-sparse-clones this subtree, launches Claude on `catalog/skills-install/SKILL.md`.                                                                                |
 | `lib/`       | `skills.sh` — the deterministic POSIX-shell core (`list`/`status`/`install`/`update`) + colocated vitest shell-out tests.                                                                                                                          |
+| `assets/`    | Shared **asset bundles** — project scaffolding a skill needs outside `.agents/`/`.claude/` (currently `speckit/`, holding the `.specify/` tree the `speckit-*` skills drive). See below.                                                           |
 
 ## Target requirements
 
@@ -89,13 +90,80 @@ sensible cross-repo value — the consuming skill asks rather than guessing, and
 profile) and the Jira API token lives in the OS keychain; see the header of
 `catalog/jira-ticket/scripts/jira-sprint.sh` for the one-time setup.
 
+## Asset bundles (project scaffolding)
+
+Most skills are self-contained: a `SKILL.md` is all the agent needs. Some are not. The
+`speckit-*` family drives a **Spec Kit** project — its procedures run `.specify/scripts/bash/*.sh`
+and read `.specify/templates/*.md` — so installing those skills into a project that has never run
+the Spec Kit CLI leaves them inert, pointing at files that do not exist.
+
+A skill declares the scaffolding it needs with an `assets=<bundle>` key in its `skill.meta`. A
+bundle is a directory under `assets/` whose file tree is laid out **relative to the target root**:
+
+```
+assets/speckit/
+  .specify/templates/*.md        → <target>/.specify/templates/*.md
+  .specify/scripts/bash/*.sh     → <target>/.specify/scripts/bash/*.sh
+  .specify/memory/constitution.md → <target>/.specify/memory/constitution.md
+```
+
+Bundle files are **data, like `.agents/skills.config`** — Spec Kit's templates are meant to be
+tailored per project (`/speckit-constitution` rewrites them in place), so:
+
+- they are **never hashed** into the skill's content hash — editing a template never flips a skill
+  to `locally-modified`;
+- a **missing** file is seeded, on `install` _and_ on `skip`/`update`, so a target whose `.specify/`
+  was deleted heals by re-running the installer;
+- an **existing** file that differs from the bundle is **kept** and reported, never silently
+  replaced. `--force` (`--on-conflict overwrite`) replaces it;
+- only files created in this run are removed if the install rolls back — a pre-existing file is
+  never touched.
+
+Several skills may share one bundle (all nine `speckit-*` skills do); it is seeded once per run.
+
+## Post-install recommendations
+
+Installing a skill is rarely the last thing a project needs — `speckit-*` is only half-configured
+until the constitution is ratified, `jira-ticket` is inert until `acli` is authenticated. Each skill
+states its own follow-up in its `skill.meta`, as one or more repeatable lines:
+
+```
+next_step=<action>|<why>[|<when>]
+```
+
+| Field    | Meaning                                                                                                                                                                      |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `action` | The concrete thing to do — `/speckit-constitution`, `gh auth status`, `Set jira_board_id`.                                                                                   |
+| `why`    | Why it matters. Shown **verbatim**, so the user can judge whether it applies to their project instead of following an instruction blindly.                                   |
+| `when`   | _Optional._ A precondition **in prose**. The shell never evaluates it — the agent checks it and drops steps the project has already done, so a configured repo isn't nagged. |
+
+`install` and `update` print them as `# next: …` advisory lines; `next-steps` emits them as plain
+TSV (`NAME<TAB>ACTION<TAB>WHY<TAB>WHEN`) for an agent to consume:
+
+```sh
+sh lib/skills.sh next-steps                       # every installed skill
+sh lib/skills.sh next-steps speckit-plan review   # just these
+```
+
+Recommendations are **deduped by `action`+`why`**, so all nine `speckit-*` skills asking for
+`/speckit-constitution` produce one line, not nine. Matching on both fields means one action can
+still appear more than once when the reasons genuinely differ (`gh auth status` matters to
+`pr-creation`, `review`, and `speckit-taskstoissues` for three different reasons) — `skills-install`
+groups those into one action carrying all its reasons when it presents them.
+
+That step also checks each `when` against the real project and presents only what survives. It never
+runs the action itself: these are the user's decisions, and `/speckit-constitution` is a whole
+interactive workflow.
+
 ## Publishing (maintainers)
 
 The catalog **is** the set of directories under `catalog/` — there is no build or publish
 pipeline. To make new/updated skills available to targets:
 
 1. Add or edit a skill under `catalog/<name>/` (a `SKILL.md` + a `skill.meta` with a bumped
-   semver `version` whenever content changes — that version drives "update available").
+   semver `version` whenever content changes — that version drives "update available"). If the
+   skill needs project scaffolding, add it under `assets/<bundle>/` and point at it with
+   `assets=<bundle>`; a declared bundle that does not exist is a catalog error (exit `2`).
 2. Commit and push to the branch/tag the bootstrap pins (`SKILLS_REPO_REF`, default `main`).
    Pin a **release tag** for a stable snapshot so a target's catalog and content never disagree
    mid-run; point `SKILLS_REPO_REF` at that tag in the published one-liner.

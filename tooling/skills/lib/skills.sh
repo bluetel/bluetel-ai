@@ -4,10 +4,14 @@
 # Usage: sh lib/skills.sh <command> [name...] [--force] [--on-conflict <mode>]
 #                         [--target <dir>] [--catalog <dir>] [--all]
 #
-# Commands: list | status | install | update | help
+# Commands: list | status | install | update | next-steps | help
 #
 # POSIX sh only (no bashisms). Human/line-based output — no JSON, no jq.
 # The script never touches the network; the bootstrap owns downloading.
+#
+# A skill writes to `.agents/skills/<name>/` + `.claude/skills/<name>/`, and — if
+# it declares `assets=<bundle>` — seeds that bundle's file tree into the target
+# root as well (see "Asset bundles" below).
 #
 # Exit codes (stable contract):
 #   0  success (including "nothing to do")
@@ -33,6 +37,10 @@ ON_CONFLICT=""
 ALL=0
 NAMES=""
 
+# Shared asset bundles live beside the catalog (snapshot layout: catalog/ + assets/).
+# Resolved lazily so an explicit --catalog moves both together.
+assets_root() { printf '%s' "${SKILLS_ASSETS_DIR:-$CATALOG/../assets}"; }
+
 usage() {
   cat <<'EOF'
 skills.sh — install and update shared AI skills
@@ -42,10 +50,11 @@ Usage:
   sh skills.sh status [--catalog <dir>] [--target <dir>]
   sh skills.sh install <name...> [--force] [--on-conflict <mode>] [--catalog <dir>] [--target <dir>]
   sh skills.sh update  <name...>|--all [--force] [--on-conflict <mode>] [--catalog <dir>] [--target <dir>]
+  sh skills.sh next-steps [<name...>] [--catalog <dir>] [--target <dir>]
   sh skills.sh config  show | get <key> | set <key=value>… [--target <dir>]
 
 Options:
-  --force              alias for --on-conflict overwrite
+  --force              alias for --on-conflict overwrite (also replaces diverged asset files)
   --on-conflict <mode> keep | overwrite | resolve (how to treat a locally-modified skill)
   --all                (update) target every installed outdated skill
   --target <dir>       target project root (default: $PWD)
@@ -155,6 +164,23 @@ meta_get() {
   printf '%s' "$_mg_val"
 }
 
+# meta_get_all <file> <key> — echo every value for KEY, one per line. Used for
+# repeatable keys (next_step); meta_get keeps the first-match-wins contract.
+meta_get_all() {
+  _mga_file="$1"
+  _mga_key="$2"
+  while IFS='=' read -r key val || [ -n "$key" ]; do
+    case "$key" in
+      '#'*) continue ;;
+      '') continue ;;
+    esac
+    if [ "$key" = "$_mga_key" ]; then
+      printf '%s\n' "$val"
+    fi
+  done <"$_mga_file"
+  return 0
+}
+
 is_kebab() {
   printf '%s' "$1" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$'
 }
@@ -199,6 +225,26 @@ validate_entry() {
   for r in $_ve_req; do
     [ -d "$CATALOG/$r" ] && [ -f "$CATALOG/$r/skill.meta" ] || catalog_die "$_ve_name: requires missing skill '$r'"
   done
+  # a declared asset bundle must exist
+  _ve_assets=$(meta_get "$_ve_dir/skill.meta" assets)
+  for a in $_ve_assets; do
+    [ -d "$(assets_root)/$a" ] || catalog_die "$_ve_name: missing asset bundle '$a' (looked in $(assets_root))"
+  done
+  # every next_step must carry both an action and a reason
+  _ve_ifs=$IFS
+  IFS='
+'
+  for s in $(meta_get_all "$_ve_dir/skill.meta" next_step); do
+    IFS=$_ve_ifs
+    case "$s" in
+      *"|"*) [ -n "${s%%|*}" ] && [ -n "$(printf '%s' "${s#*|}" | cut -d'|' -f1)" ] ||
+        catalog_die "$_ve_name: next_step needs a non-empty action and why: '$s'" ;;
+      *) catalog_die "$_ve_name: next_step must be 'action|why[|when]', got: '$s'" ;;
+    esac
+    IFS='
+'
+  done
+  IFS=$_ve_ifs
 }
 
 # ---------------------------------------------------------------------------
@@ -240,6 +286,7 @@ write_record() {
     printf 'installed_hash=%s\n' "$3"
     printf 'source_repo=%s\n' "${SKILLS_SOURCE_REPO:-}"
     printf 'source_ref=%s\n' "$4"
+    printf 'assets=%s\n' "$(meta_get "$CATALOG/$1/skill.meta" assets)"
     printf 'installed_at=%s\n' "$(now_utc)"
   } >"$_wr_file"
 }
@@ -516,6 +563,8 @@ generate_stub() {
 # Space-separated list of skill names written this invocation (for rollback).
 WRITTEN_SKILLS=""
 STAGING_DIRS=""
+# Newline-separated asset paths created this invocation (for rollback).
+WRITTEN_ASSETS=""
 
 rollback() {
   for s in $STAGING_DIRS; do
@@ -525,12 +574,121 @@ rollback() {
     rm -rf "$(content_dir "$s")" 2>/dev/null || true
     rm -rf "$(dirname "$(stub_path "$s")")" 2>/dev/null || true
   done
+  # Only files this run created are removed — a pre-existing scaffold file was
+  # never touched, so there is nothing to restore.
+  _rb_ifs=$IFS
+  IFS='
+'
+  for p in $WRITTEN_ASSETS; do
+    IFS=$_rb_ifs
+    rm -f "$p" 2>/dev/null || true
+    prune_empty_dirs "$(dirname "$p")"
+    IFS='
+'
+  done
+  IFS=$_rb_ifs
+}
+
+# prune_empty_dirs <dir> — rmdir <dir> and its parents while they are empty,
+# stopping at $TARGET. Never walks above the target root (a plain `rmdir -p`
+# would happily keep going once the target itself emptied out).
+prune_empty_dirs() {
+  _pd_dir="$1"
+  while [ "$_pd_dir" != "$TARGET" ] && [ "$_pd_dir" != "/" ] && [ "$_pd_dir" != "." ]; do
+    rmdir "$_pd_dir" 2>/dev/null || return 0
+    _pd_dir=$(dirname "$_pd_dir")
+  done
 }
 
 fail_write() {
   printf '%s\n' "write error: $1" >&2
   rollback
   exit 4
+}
+
+# ---------------------------------------------------------------------------
+# Asset bundles
+# ---------------------------------------------------------------------------
+#
+# Some skills need project scaffolding that lives OUTSIDE `.agents/skills/` — the
+# `speckit-*` family, for instance, is inert without `.specify/templates/` and
+# `.specify/scripts/`. A skill declares one via `assets=<bundle>` in its
+# skill.meta; the bundle is a dir under `assets/` whose file tree is laid out
+# relative to the target root.
+#
+# Bundle files are DATA, like `.agents/skills.config`: spec-kit's templates and
+# scripts are meant to be tailored per project (`/speckit-constitution` rewrites
+# them in place), so they are never hashed into the skill's content hash and an
+# existing file is never silently replaced. Missing files are created; a file
+# that has diverged is kept and reported, unless the caller asked to overwrite.
+
+# Space-separated list of bundles already handled this invocation — nine
+# speckit skills share one bundle, so seed it once and report it once.
+ASSETS_DONE=""
+
+# install_bundle <bundle>
+install_bundle() {
+  _ib_bundle="$1"
+  case " $ASSETS_DONE " in
+    *" $_ib_bundle "*) return 0 ;;
+  esac
+  ASSETS_DONE="${ASSETS_DONE:+$ASSETS_DONE }$_ib_bundle"
+
+  _ib_src="$(assets_root)/$_ib_bundle"
+  [ -d "$_ib_src" ] || fail_write "asset bundle not found: $_ib_src"
+
+  _ib_files=$(cd "$_ib_src" && find . -type f | LC_ALL=C sort) ||
+    fail_write "cannot read asset bundle: $_ib_src"
+  _ib_wrote=0
+  _ib_header=0
+
+  _ib_ifs=$IFS
+  IFS='
+'
+  for f in $_ib_files; do
+    IFS=$_ib_ifs
+    _ib_rel=${f#./}
+    _ib_dst="$TARGET/$_ib_rel"
+    _ib_note=""
+    if [ -e "$_ib_dst" ]; then
+      if cmp -s "$_ib_src/$_ib_rel" "$_ib_dst"; then
+        : # already identical — nothing to do, nothing to report
+      elif [ "$ON_CONFLICT" = overwrite ]; then
+        cp "$_ib_src/$_ib_rel" "$_ib_dst" || fail_write "asset $_ib_rel: copy failed"
+        _ib_note="~ $_ib_rel"
+        _ib_wrote=$((_ib_wrote + 1))
+      else
+        _ib_note="= $_ib_rel (kept; differs from the bundle — --force to overwrite)"
+      fi
+    else
+      mkdir -p "$(dirname "$_ib_dst")" || fail_write "asset $_ib_rel: cannot create dir"
+      cp "$_ib_src/$_ib_rel" "$_ib_dst" || fail_write "asset $_ib_rel: copy failed"
+      WRITTEN_ASSETS="${WRITTEN_ASSETS:+$WRITTEN_ASSETS
+}$_ib_dst"
+      _ib_note="+ $_ib_rel"
+      _ib_wrote=$((_ib_wrote + 1))
+    fi
+    if [ -n "$_ib_note" ]; then
+      # Every line here is a '#' comment: asset paths are reported alongside —
+      # not underneath — the per-skill action lines.
+      [ "$_ib_header" -eq 1 ] || printf '# assets (%s):\n' "$_ib_bundle"
+      _ib_header=1
+      printf '#   %s\n' "$_ib_note"
+    fi
+    IFS='
+'
+  done
+  IFS=$_ib_ifs
+
+  [ "$_ib_wrote" -eq 0 ] || printf '# assets (%s): %s file(s) written under %s\n' \
+    "$_ib_bundle" "$_ib_wrote" "$TARGET"
+}
+
+# install_skill_assets <name> — seed every bundle the skill declares.
+install_skill_assets() {
+  for a in $(meta_get "$CATALOG/$1/skill.meta" assets); do
+    install_bundle "$a"
+  done
 }
 
 # stage_and_commit <name> <version> <source_ref>
@@ -573,6 +731,9 @@ stage_and_commit() {
 
   # Record.
   write_record "$_sc_name" "$_sc_version" "$_sc_hash" "$_sc_ref" || fail_write "$_sc_name: record failed"
+
+  # Project scaffolding the skill needs outside .agents/.claude (e.g. .specify/).
+  install_skill_assets "$_sc_name"
 
   # Test hook: fail after a named skill to exercise rollback.
   if [ -n "${SKILLS_FAIL_AFTER:-}" ] && [ "$SKILLS_FAIL_AFTER" = "$_sc_name" ]; then
@@ -638,6 +799,80 @@ cmd_status() {
   done
 }
 
+# ---------------------------------------------------------------------------
+# Post-install recommendations (next_step)
+# ---------------------------------------------------------------------------
+#
+# Installing a skill is rarely the last thing a project needs — `speckit-*` is
+# only half-configured until the constitution is ratified, `jira-ticket` needs
+# `acli` authenticated, and so on. A skill states that follow-up itself, as one
+# or more repeatable lines in its skill.meta:
+#
+#   next_step=<action>|<why>[|<when>]
+#
+#   action — the concrete thing to do (`/speckit-constitution`, `gh auth login`)
+#   why    — why it matters, shown verbatim so the user can judge rather than obey
+#   when   — OPTIONAL precondition, in prose. The shell never evaluates it; it is
+#            a hint for the agent, which checks it and drops steps a project has
+#            already done instead of nagging.
+#
+# Recommendations are deduped by action+why: all nine `speckit-*` skills point at
+# `/speckit-constitution`, and the user should hear that once.
+
+NL='
+'
+
+# emit_next_steps <line-prefix> <name...> — one TSV line per distinct
+# recommendation: NAME<TAB>ACTION<TAB>WHY<TAB>WHEN.
+emit_next_steps() {
+  _ens_prefix="$1"
+  shift
+  _ens_seen=""
+  for n in "$@"; do
+    [ -f "$CATALOG/$n/skill.meta" ] || continue
+    _ens_ifs=$IFS
+    IFS=$NL
+    for s in $(meta_get_all "$CATALOG/$n/skill.meta" next_step); do
+      IFS=$_ens_ifs
+      _ens_action=${s%%|*}
+      _ens_rest=${s#*|}
+      _ens_why=${_ens_rest%%|*}
+      _ens_when=""
+      case "$_ens_rest" in
+        *"|"*) _ens_when=${_ens_rest#*|} ;;
+      esac
+      _ens_key="$_ens_action|$_ens_why"
+      case "$NL$_ens_seen$NL" in
+        *"$NL$_ens_key$NL"*)
+          IFS=$NL
+          continue
+          ;;
+      esac
+      _ens_seen="${_ens_seen:+$_ens_seen$NL}$_ens_key"
+      printf '%s%s\t%s\t%s\t%s\n' \
+        "$_ens_prefix" "$n" "$_ens_action" "$_ens_why" "$_ens_when"
+      IFS=$NL
+    done
+    IFS=$_ens_ifs
+  done
+}
+
+# cmd_next_steps — recommendations for the named skills, or for every installed
+# skill when none are named.
+cmd_next_steps() {
+  if [ -z "$NAMES" ]; then
+    for name in $(catalog_names); do
+      case "$(skill_state "$name")" in
+        not-installed) continue ;;
+      esac
+      NAMES="${NAMES:+$NAMES }$name"
+    done
+  fi
+  [ -n "$NAMES" ] || return 0
+  # shellcheck disable=SC2086
+  emit_next_steps "" $NAMES
+}
+
 emit_action() {
   # <name> <action> <version> [paths...]
   _ea_name="$1"
@@ -684,6 +919,9 @@ cmd_install() {
         emit_action "$name" install "$_cv" $(written_paths "$name")
         ;;
       up-to-date)
+        # Still top up missing scaffolding — a target whose .specify/ was never
+        # seeded (or was deleted) must heal by re-running install, not stay broken.
+        install_skill_assets "$name"
         emit_action "$name" skip "$_cv"
         ;;
       outdated)
@@ -694,6 +932,10 @@ cmd_install() {
         ;;
     esac
   done
+
+  # Advisory, so '#'-prefixed: it must not be mistaken for an action line.
+  # shellcheck disable=SC2086
+  emit_next_steps '# next: ' $_targets
 }
 
 cmd_update() {
@@ -713,6 +955,8 @@ cmd_update() {
   for name in $NAMES; do
     do_update_one "$name"
   done
+  # shellcheck disable=SC2086
+  emit_next_steps '# next: ' $NAMES
 }
 
 # do_update_one <name> — apply the update/conflict policy to one skill.
@@ -727,6 +971,7 @@ do_update_one() {
       emit_action "$name" install "$_cv" $(written_paths "$name")
       ;;
     up-to-date)
+      install_skill_assets "$name"
       emit_action "$name" skip "$_cv"
       ;;
     outdated)
@@ -750,6 +995,7 @@ resolve_conflict() {
       exit 3
       ;;
     keep)
+      install_skill_assets "$name"
       emit_action "$name" keep "$_cv"
       ;;
     overwrite)
@@ -825,6 +1071,7 @@ merge_resolve() {
   _newhash=$(skill_hash "$_cdir")
   generate_stub "$name" "$(stub_path "$name")"
   write_record "$name" "$_cv" "$_newhash" "${SKILLS_SOURCE_REF:-$_ref}"
+  install_skill_assets "$name"
   # shellcheck disable=SC2046
   emit_action "$name" merge "$_cv" $(written_paths "$name")
 }
@@ -885,6 +1132,7 @@ main() {
     status) cmd_status ;;
     install) cmd_install ;;
     update) cmd_update ;;
+    next-steps) cmd_next_steps ;;
     *) die_usage "unknown command: $COMMAND" ;;
   esac
 }

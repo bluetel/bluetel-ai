@@ -1,5 +1,6 @@
 name=merging
-version=1.1.0
+version=1.2.0
 description=Merging a feature branch into staging. Use when: user explicitly asks to merge into staging or deploy to staging.
 argument_hint=The feature branch name to merge into staging
 requires=
+next_step=Confirm staging_branch in .agents/skills.config|This skill merges into whatever staging_branch names, defaulting to `staging`. A project that calls the branch something else (develop, integration) would have work merged into the wrong place, or fail on a branch that does not exist.|`skills.sh config show` reports staging_branch as SOURCE=default and no `staging` branch exists
