@@ -34,3 +34,6 @@ vite.config.*.timestamp*
 *.difypkg
 .nx/polygraph
 .claude/worktrees
+
+# Spec Kit
+.specify/feature.json
