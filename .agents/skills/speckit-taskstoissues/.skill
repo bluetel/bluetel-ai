@@ -1,0 +1,7 @@
+name=speckit-taskstoissues
+version=1.0.2
+installed_hash=58cbffbef775b29f499694287e1fdf8811d4643170ff7c5a9c19c1b476a0529b
+source_repo=https://github.com/bluetel/bluetel-ai.git
+source_ref=main
+assets=speckit
+installed_at=2026-08-05T13:09:56Z

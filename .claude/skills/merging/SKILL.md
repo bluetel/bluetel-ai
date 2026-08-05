@@ -4,4 +4,4 @@ description: 'Merging a feature branch into staging. Use when: user explicitly a
 argument-hint: 'The feature branch name to merge into staging'
 ---
 
-> **IMPORTANT:** You MUST read and follow the shared skill file at `tooling/skills/catalog/merging/SKILL.md` for the full procedure.
+> **IMPORTANT:** You MUST read and follow the shared skill file at `.agents/skills/merging/SKILL.md` for the full procedure.

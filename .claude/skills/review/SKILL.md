@@ -4,4 +4,4 @@ description: 'Structured code review using tiered persona agents, confidence-gat
 argument-hint: '[mode:agent] [blank to review current branch, or provide PR link]'
 ---
 
-> **IMPORTANT:** You MUST read and follow the shared skill file at `tooling/skills/catalog/review/SKILL.md` for the full procedure.
+> **IMPORTANT:** You MUST read and follow the shared skill file at `.agents/skills/review/SKILL.md` for the full procedure.

@@ -1,0 +1,7 @@
+name=speckit-implement
+version=1.0.2
+installed_hash=f6bc10575525b08ed856f8eecda75a499f7446fe6f6f81fdf94348273a60f5a3
+source_repo=https://github.com/bluetel/bluetel-ai.git
+source_ref=main
+assets=speckit
+installed_at=2026-08-05T13:09:55Z

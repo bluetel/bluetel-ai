@@ -1,0 +1,7 @@
+name=speckit-constitution
+version=1.0.2
+installed_hash=cedda2575f8c5093c55c4715f9716de05b2d003dcebd73e0b7756aa12517cfcf
+source_repo=https://github.com/bluetel/bluetel-ai.git
+source_ref=main
+assets=speckit
+installed_at=2026-08-05T13:09:54Z

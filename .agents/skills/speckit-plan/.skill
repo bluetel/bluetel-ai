@@ -1,0 +1,7 @@
+name=speckit-plan
+version=1.0.2
+installed_hash=7510167fd6398211b455746871cd96c502ba686cbf5ce5d5518fde8110a59798
+source_repo=https://github.com/bluetel/bluetel-ai.git
+source_ref=main
+assets=speckit
+installed_at=2026-08-05T13:09:55Z

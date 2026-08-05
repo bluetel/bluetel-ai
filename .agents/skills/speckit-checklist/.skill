@@ -1,0 +1,7 @@
+name=speckit-checklist
+version=1.0.2
+installed_hash=695d152fc92f928f5c3893f3c07eb471acd5924ed19dbe6d796fe68fd455b25c
+source_repo=https://github.com/bluetel/bluetel-ai.git
+source_ref=main
+assets=speckit
+installed_at=2026-08-05T13:09:54Z

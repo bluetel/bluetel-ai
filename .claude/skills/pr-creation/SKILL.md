@@ -4,4 +4,4 @@ description: 'Creating a pull request for the current feature branch. Use when: 
 argument-hint: 'Optional: the branch name and PR title'
 ---
 
-> **IMPORTANT:** You MUST read and follow the shared skill file at `tooling/skills/catalog/pr-creation/SKILL.md` for the full procedure.
+> **IMPORTANT:** You MUST read and follow the shared skill file at `.agents/skills/pr-creation/SKILL.md` for the full procedure.

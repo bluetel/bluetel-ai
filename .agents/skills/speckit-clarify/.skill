@@ -1,0 +1,7 @@
+name=speckit-clarify
+version=1.0.2
+installed_hash=2e68b988e4abe8dbd459fc3690537af4b9f315e2e1c74a1a20a76ec1bade61db
+source_repo=https://github.com/bluetel/bluetel-ai.git
+source_ref=main
+assets=speckit
+installed_at=2026-08-05T13:09:54Z

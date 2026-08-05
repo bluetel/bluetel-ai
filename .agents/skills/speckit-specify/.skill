@@ -1,0 +1,7 @@
+name=speckit-specify
+version=1.0.2
+installed_hash=09cd67ac969dde2c94d7fd8263f8a4984729f56b0b325399d5c61d6fcc0e86b8
+source_repo=https://github.com/bluetel/bluetel-ai.git
+source_ref=main
+assets=speckit
+installed_at=2026-08-05T13:09:55Z

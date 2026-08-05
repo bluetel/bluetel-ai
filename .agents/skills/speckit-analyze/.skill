@@ -1,0 +1,7 @@
+name=speckit-analyze
+version=1.0.2
+installed_hash=c99122294d8a26438ef94deba801c181de5a0203aff975c84de55058d60df739
+source_repo=https://github.com/bluetel/bluetel-ai.git
+source_ref=main
+assets=speckit
+installed_at=2026-08-05T13:09:53Z
