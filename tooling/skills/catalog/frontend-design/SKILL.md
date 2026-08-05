@@ -78,13 +78,16 @@ with extensive animation; minimalist designs need restraint, precision and caref
 
 ## 3. Gate the change on `design-lint`
 
-Any change to `DESIGN.md` — or to the Tailwind/CSS tokens derived from it — must pass the format's
+Any change to `DESIGN.md` — or to the CSS/Tailwind tokens derived from it — must pass the format's
 own linter before the work is done:
 
 ```bash
-pnpm exec nx run <app>:design-lint
-pnpm exec nx affected -t lint typecheck test design-lint --base=main
+design.md lint DESIGN.md
 ```
+
+Run that from the app's directory, or via whatever your package/build manager wraps it in (an
+npm/pnpm/yarn script, an Nx/Turborepo target, a Makefile rule) — so it runs alongside the app's
+other checks (lint, typecheck, test) instead of being a step someone has to remember separately.
 
 **Zero errors is the bar.** A residual warning is acceptable only if the document's own prose
 explains it — suppressing it silently is not.
@@ -97,7 +100,16 @@ explains it — suppressing it silently is not.
 | Missing-section warning                                                           | Add the section, or declare it in `omitted:` with a reason.                        |
 | Unknown extra `##` section                                                        | Preserved without error — fine to keep.                                            |
 
-If an app has no `design-lint` target, add one to `apps/<app>/project.json`:
+If an app has no `design-lint` task yet, add one the same way its other per-app tasks (lint,
+typecheck, test) are already defined. For a plain `package.json` script:
+
+```json
+"scripts": {
+  "design-lint": "design.md lint DESIGN.md"
+}
+```
+
+For a task runner with its own config (Nx shown as an example — adapt to whatever yours uses):
 
 ```json
 "design-lint": {
@@ -109,7 +121,7 @@ If an app has no `design-lint` target, add one to `apps/<app>/project.json`:
 ```
 
 `@google/design.md` must be a **pinned devDependency of that app** — never `npx`, which resolves
-outside the lockfile and is invisible to the affected graph.
+outside the lockfile and is invisible to your package/build manager's dependency-tracking graph.
 
 ---
 
