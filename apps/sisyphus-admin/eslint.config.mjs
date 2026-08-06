@@ -1,0 +1,12 @@
+import { base, withTypeChecking } from '@bluetel-ai/eslint-config-base'
+import { globalIgnores } from 'eslint/config'
+import nextVitals from 'eslint-config-next/core-web-vitals'
+
+const eslintConfig = [
+  ...base,
+  ...nextVitals,
+  ...withTypeChecking(import.meta.dirname),
+  globalIgnores(['.next/**', '.open-next/**', 'build/**', 'next-env.d.ts']),
+]
+
+export default eslintConfig

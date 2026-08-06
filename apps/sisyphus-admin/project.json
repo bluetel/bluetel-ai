@@ -1,0 +1,95 @@
+{
+  "name": "sisyphus-admin",
+  "projectType": "application",
+  "implicitDependencies": ["sisyphus-infra"],
+  "targets": {
+    "trigger-deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'sisyphus-admin is deployable'"
+      },
+      "cache": false
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'Refusing to deploy: pass --configuration=staging or --configuration=production' >&2 && exit 1",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "configurations": {
+        "production": { "command": "sst deploy --stage production" },
+        "staging": { "command": "sst deploy --stage staging" }
+      },
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "bootstrap": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'Refusing to bootstrap: pass --configuration=staging or --configuration=production' >&2 && exit 1",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "configurations": {
+        "production": { "command": "sst deploy --stage production-bootstrap" },
+        "staging": { "command": "sst deploy --stage staging-bootstrap" }
+      },
+      "cache": false
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "next build",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "dependsOn": ["^build"],
+      "inputs": ["default", "^default"],
+      "outputs": ["{projectRoot}/.next"],
+      "cache": true
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "next dev -p 3003",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "continuous": true,
+      "cache": false
+    },
+    "design-lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "design.md lint DESIGN.md",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "inputs": ["{projectRoot}/DESIGN.md"],
+      "cache": true
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint .",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "inputs": ["default", "^default", "{projectRoot}/eslint.config.mjs"],
+      "cache": true
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "inputs": ["default", "^default"],
+      "cache": true
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "inputs": ["default", "^default", "{projectRoot}/tsconfig.json"],
+      "cache": true
+    }
+  }
+}

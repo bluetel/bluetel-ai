@@ -1,0 +1,235 @@
+/*
+ * The panel's token layer (T073, FR-021).
+ *
+ * This file is the ONE place a literal colour, size, radius or duration is allowed to appear
+ * (SC-015). Everything downstream — the Tailwind theme in `src/styles/theme.ts`, and every
+ * primitive in `src/components/ui` — consumes these variables by name, so a component never
+ * restates a value and the precedence chain DESIGN.md -> theme tokens -> components holds.
+ *
+ * Values come from `DESIGN.md`'s front matter. Where DESIGN.md and the contract disagree the
+ * document wins: `amber` is `#99600A` (not `#B4700F`) and `signal-deep-dark` is `#4A78F4` (not
+ * `#3A64E8`), both raised to clear WCAG AA in the theme they are read in.
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Light (`sheet`) and dark (`ink`) are peer themes, not a default and an inversion. `light-dark()`
+ * is what lets each token be declared once with both of its values side by side, so neither theme
+ * is a patch applied on top of the other — the pair is the token. Theme selection is then a single
+ * `color-scheme` switch rather than a duplicated block of overrides that can drift.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Colours — DESIGN.md `colors`. */
+  --color-signal: light-dark(#1b4fe0, #5c86ff);
+  --color-signal-deep: light-dark(#14369c, #4a78f4);
+  --color-signal-wash: light-dark(rgba(27, 79, 224, 0.08), rgba(92, 134, 255, 0.13));
+  --color-ink: light-dark(#0b1015, #e7eae6);
+  --color-graphite: light-dark(#4e5a63, #8b99a2);
+  --color-sheet: light-dark(#f1f2ee, #0b1015);
+  --color-paper: light-dark(#ffffff, #141b21);
+  --color-paper-2: light-dark(#fafaf8, #101720);
+  --color-hairline: light-dark(rgba(11, 16, 21, 0.14), rgba(231, 234, 230, 0.14));
+  --color-hairline-hi: light-dark(rgba(11, 16, 21, 0.3), rgba(231, 234, 230, 0.32));
+  --color-amber: light-dark(#99600a, #e0a03c);
+  --color-verdigris: light-dark(#1f6e63, #4fb3a2);
+  --color-rust: light-dark(#a83a22, #e0715a);
+  --color-on-signal: light-dark(#ffffff, #06090c);
+  --color-keycap: light-dark(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.45));
+
+  /*
+   * Families — DESIGN.md `typography`, split by authorship. `--font-archivo` and
+   * `--font-plex-mono` are injected by `next/font` in the root layout.
+   */
+  --font-family-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-family-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Type scale. `display` is fluid; DESIGN.md pins the 54px ceiling. */
+  --type-display-size: clamp(33px, 5.4vw, 54px);
+  --type-display-height: 1;
+  --type-display-tracking: -0.038em;
+  --type-display-weight: 600;
+
+  --type-heading-size: 20px;
+  --type-heading-height: 1.25;
+  --type-heading-tracking: -0.025em;
+  --type-heading-weight: 600;
+
+  --type-body-size: 15px;
+  --type-body-height: 1.55;
+  --type-body-tracking: -0.005em;
+  --type-body-weight: 400;
+
+  --type-label-mono-size: 10.5px;
+  --type-label-mono-height: 1.2;
+  --type-label-mono-tracking: 0.11em;
+  --type-label-mono-weight: 500;
+
+  --type-data-mono-size: 11.5px;
+  --type-data-mono-height: 1.3;
+  --type-data-mono-tracking: 0em;
+  --type-data-mono-weight: 500;
+
+  --type-label-button-size: 14px;
+  --type-label-button-height: 1;
+  --type-label-button-tracking: -0.01em;
+  --type-label-button-weight: 600;
+
+  --type-code-size: 12.5px;
+  --type-code-height: 1.5;
+  --type-code-weight: 400;
+
+  /* Measure — DESIGN.md sets body prose to roughly a 52-character line. */
+  --measure-prose: 52ch;
+
+  /* Spacing — the eight named steps. Deliberately not a doubling scale. */
+  --space-hair: 2px;
+  --space-tight: 7px;
+  --space-close: 12px;
+  --space-default: 18px;
+  --space-section: 28px;
+  --space-band: 52px;
+  --space-gutter: 28px;
+  --space-max-width: 1120px;
+
+  /* Radii — three levels, plus the two the state chip declares. No `full`: nothing is a pill. */
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-chip: 2px;
+  --radius-led: 1px;
+
+  /* Borders are uniformly 1px; the variation is in the colour, never the width. */
+  --border-hairline-width: 1px;
+
+  /* Instrument dimensions declared against components in DESIGN.md. */
+  --size-led: 6px;
+  --size-meter-track: 4px;
+
+  /*
+   * The button's key travel. Not elevation — nothing floats — a 2px inset bottom shade that
+   * compresses to 1px and drops the key 1px on press.
+   */
+  --keycap-depth: 2px;
+  --keycap-depth-pressed: 1px;
+  --press-travel: 1px;
+
+  /* Focus. `focus-ring` is 2px solid signal at 2px offset on every focusable element. */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --field-focus-ring-width: 2px;
+
+  /* Motion. */
+  --motion-state: 160ms;
+  --motion-press: 60ms;
+  --ease-panel: cubic-bezier(0.2, 0.7, 0.2, 1);
+  /*
+   * The LED pulse period is derived from the state-change step rather than invented, so the system
+   * still has exactly the two durations DESIGN.md names. Ten steps reads as a slow breath; a value
+   * near `--motion-state` itself would read as a blink, which means "alarm", not "working".
+   */
+  --motion-pulse: calc(var(--motion-state) * 10);
+
+  /* The one elevation step, reserved for things that float and then go away. */
+  --shadow-raised: 0 1px 2px rgba(11, 16, 21, 0.06), 0 8px 24px -12px rgba(11, 16, 21, 0.18);
+}
+
+/*
+ * Explicit theme selection. Absent the attribute the console follows the operator's system
+ * preference, which is the peer-theme default: a wall display at midday and a laptop at 23:00 are
+ * the same product.
+ */
+:root[data-theme='sheet'] {
+  color-scheme: light;
+}
+
+:root[data-theme='ink'] {
+  color-scheme: dark;
+}
+
+@layer base {
+  body {
+    @apply bg-sheet text-body text-ink font-sans antialiased;
+  }
+
+  ::selection {
+    @apply bg-signal-wash;
+  }
+}
+
+@layer components {
+  /*
+   * One class per typography token, because family and scale are a pair: the Archivo/IBM Plex Mono
+   * split is a rule about authorship, so a size must not be reachable without the family that goes
+   * with it. Case belongs here too — DESIGN.md notes the token format has no case property and the
+   * consuming primitive sets it.
+   */
+  .type-display {
+    @apply text-display font-sans;
+  }
+
+  .type-heading {
+    @apply text-heading font-sans;
+  }
+
+  .type-body {
+    @apply text-body font-sans;
+  }
+
+  /* Uppercase and wide-tracked: labels, eyebrows, table headers and state readouts. */
+  .type-label-mono {
+    @apply text-label-mono font-mono uppercase;
+  }
+
+  /* Tabular figures, so a column of durations or counts aligns. */
+  .type-data-mono {
+    @apply text-data-mono font-mono tabular-nums;
+  }
+
+  /* Sentence case, sans — a button is a thing a person does, not a thing a machine reported. */
+  .type-label-button {
+    @apply text-label-button font-sans normal-case;
+  }
+
+  .type-code {
+    @apply text-code font-mono;
+  }
+
+  .measure-prose {
+    max-width: var(--measure-prose);
+  }
+
+  /*
+   * The focus ring treatment. Written in plain CSS rather than as utilities so the width and the
+   * offset stay bound to their tokens, and applied on `:focus-visible` only — a mouse press on a
+   * panel key should not leave a ring behind it.
+   */
+  .focus-ring {
+    outline: none;
+  }
+
+  .focus-ring:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-signal);
+    outline-offset: var(--focus-ring-offset);
+  }
+}
+
+/*
+ * The system's only looping animation is the LED pulse, and it means "working" and nothing else.
+ * The keyframes themselves are declared in the Tailwind theme, alongside the `animate-led-pulse`
+ * utility that plays them.
+ *
+ * Under a reduced-motion preference the pulse stops and the colour stays, so the state the LED is
+ * reporting survives the animation being removed (FR-032). This block sits after the utilities
+ * layer, so it wins at equal specificity.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .animate-led-pulse {
+    animation: none;
+    opacity: 1;
+  }
+}

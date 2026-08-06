@@ -1,0 +1,74 @@
+{
+  "name": "sisyphus-executor",
+  "projectType": "application",
+  "implicitDependencies": ["sisyphus-infra"],
+  "targets": {
+    "trigger-deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'sisyphus-executor is deployable'"
+      },
+      "cache": false
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'Refusing to deploy: pass --configuration=staging or --configuration=production' >&2 && exit 1",
+        "cwd": "apps/sisyphus-executor"
+      },
+      "configurations": {
+        "production": { "command": "sst deploy --stage production" },
+        "staging": { "command": "sst deploy --stage staging" }
+      },
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node build.mjs",
+        "cwd": "apps/sisyphus-executor"
+      },
+      "dependsOn": ["^build"],
+      "inputs": ["default", "^default", "{projectRoot}/build.mjs"],
+      "outputs": ["{projectRoot}/dist"],
+      "cache": true
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsx src/main.ts",
+        "cwd": "apps/sisyphus-executor"
+      },
+      "continuous": true,
+      "cache": false
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint .",
+        "cwd": "apps/sisyphus-executor"
+      },
+      "inputs": ["default", "^default", "{projectRoot}/eslint.config.mjs"],
+      "cache": true
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "apps/sisyphus-executor"
+      },
+      "inputs": ["default", "^default", "{projectRoot}/tsconfig.json"],
+      "cache": true
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run",
+        "cwd": "apps/sisyphus-executor"
+      },
+      "inputs": ["default", "^default"],
+      "cache": true
+    }
+  }
+}

@@ -30,6 +30,15 @@ overrides:
   react-native: 0.83.2
   react-native-web: 0.21.1
   tailwindcss: 3.4.18
+  # Zod is cross-cutting across every Sisyphus member (tRPC `.input()`, Drizzle
+  # schema validation, createSafeEnv). A mixed graph produces "two Zods"
+  # inference failures inside tRPC's `.input()` types that read as tRPC bugs, so
+  # every workspace request for Zod 3 collapses to one exact version. Scoped to
+  # `^3` so knip's transitive Zod 4 is left alone — it is a devtool with no
+  # type-level contact with our graph. `zod/v3` and `zod-validation-error/v3`
+  # (imported by @bluetel-ai/env-validation-errors) both resolve from 3.25.0
+  # onward, which is why the pin is 3.25.x and the peer range was tightened.
+  'zod@^3': 3.25.76
   vite: '>=7.3.2'
   lexical: 0.41.0
   '@lexical/headless': 0.41.0

@@ -1,0 +1,33 @@
+{
+  "name": "@bluetel-ai/sisyphus-control-plane",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@bluetel-ai/eslint-config-base": "workspace:*",
+    "@bluetel-ai/sisyphus-infra": "workspace:*",
+    "@types/node": "^22.0.0",
+    "sst": "^3.19.3",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.2",
+    "vitest": "^4.1.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ec2": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/client-scheduler": "^3.0.0",
+    "@aws-sdk/client-secrets-manager": "^3.0.0",
+    "@aws-sdk/client-ssm": "^3.0.0",
+    "@bluetel-ai/env-validation-errors": "workspace:*",
+    "@bluetel-ai/sisyphus-api": "workspace:*",
+    "@bluetel-ai/sisyphus-integration-jira": "workspace:*",
+    "@slack/web-api": "^8.0.0",
+    "@t3-oss/env-core": "^0.13.11",
+    "@trpc/server": "^11.18.0",
+    "drizzle-orm": "^0.45.2",
+    "jose": "^6.0.0",
+    "postgres": "^3.4.9",
+    "superjson": "^2.2.6",
+    "zod": "^3.25.0"
+  }
+}

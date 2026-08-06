@@ -1,0 +1,196 @@
+import { z } from 'zod'
+
+import {
+  ARTIFACT_KINDS,
+  BOOTSTRAP_PHASE_OUTCOMES,
+  BOOTSTRAP_PHASES,
+  ENTRY_RESULTS,
+  EXTERNAL_ACTION_KINDS,
+  EXTERNAL_ACTION_RESULTS,
+  REPORTABLE_CORRECTION_DELIVERY_OUTCOMES,
+  REPORTABLE_SUPERVISION_DELIVERY_OUTCOMES,
+  REVIEW_FINDING_SEVERITIES,
+  REVIEW_VERDICTS,
+  SKILL_NAMES,
+  SNAPSHOT_BOUNDARIES,
+  TERMINAL_OUTCOMES,
+  WORKFLOW_STATES,
+} from '../enums'
+
+import { moneyAmount, nonEmptyText, uuidInput } from './common'
+
+/**
+ * Inputs for the machine surface — everything the executor reports back.
+ *
+ * None of these carries a `workflowId`. The credential does: every write is scoped to
+ * `ctx.workflowId`, and a payload that named its own workflow would invite exactly the
+ * cross-workflow write FR-018 makes a recorded security event. Where a workflow must be named
+ * (a retry replaying an old envelope), the resolver compares it against the credential rather
+ * than trusting it.
+ *
+ * Every vocabulary these schemas validate against is imported from `src/enums/` and none is
+ * declared here. That directory is the single source: it holds plain tuples with no dependencies,
+ * so it is reachable from `./client`, and `src/db/schema/enums.ts` builds its `pgEnum`s from the
+ * same tuples. There is nothing left to drift, and so nothing left to pin.
+ *
+ * Two of the imports are the `REPORTABLE_` subsets rather than the full vocabulary, because
+ * `pending` is a row's state before anyone has answered and is therefore not something an executor
+ * can report about itself.
+ */
+
+/** Liveness plus consumption, so a lapsed heartbeat and an exhausted cap look different (FR-048). */
+export const heartbeatInput = z.object({
+  state: z.enum(WORKFLOW_STATES),
+  turnsUsed: z.number().int().nonnegative(),
+  spendUsed: moneyAmount,
+})
+
+/** Attributable bootstrap progress, so a timeout names the phase that hung (FR-145, FR-146). */
+export const reportBootstrapPhaseInput = z.object({
+  phase: z.enum(BOOTSTRAP_PHASES),
+  entryId: uuidInput.optional(),
+  outcome: z.enum(BOOTSTRAP_PHASE_OUTCOMES),
+  detail: z.string().optional(),
+})
+
+/**
+ * One chunk of run output (FR-046).
+ *
+ * Idempotent on `(workflowId, sequence)`, which is enforced by a unique index rather than by a
+ * check here: a retry after a network failure must not be able to duplicate a segment.
+ */
+export const appendLogSegmentInput = z.object({
+  sequence: z.number().int().nonnegative(),
+  s3Key: nonEmptyText,
+  byteSize: z.number().int().nonnegative(),
+  startedAt: z.date(),
+  endedAt: z.date(),
+})
+
+/**
+ * A resumable session snapshot (FR-050, FR-053).
+ *
+ * Both state flags are required, not optional: a snapshot missing either is not resumable, and
+ * discovering that at restore time rather than at registration time means the run is already
+ * lost.
+ */
+export const registerSnapshotInput = z.object({
+  sessionId: uuidInput,
+  s3Key: nonEmptyText,
+  sizeBytes: z.number().int().nonnegative(),
+  boundary: z.enum(SNAPSHOT_BOUNDARIES),
+  hasConversationState: z.boolean(),
+  hasWorktreeState: z.boolean(),
+  truncationRepaired: z.boolean().default(false),
+})
+
+export const acknowledgeCorrectionInput = z.object({
+  correctionId: uuidInput,
+  outcome: z.enum(REPORTABLE_CORRECTION_DELIVERY_OUTCOMES),
+  failureReason: z.string().optional(),
+})
+
+/** Acknowledging is what makes the panel's "paused" true rather than merely requested (SC-003). */
+export const acknowledgeCommandInput = z.object({
+  commandId: uuidInput,
+  outcome: z.enum(REPORTABLE_SUPERVISION_DELIVERY_OUTCOMES),
+  failureReason: z.string().optional(),
+})
+
+export const reportSkillReferenceInput = z.object({
+  skillName: z.enum(SKILL_NAMES),
+  entryId: uuidInput.optional(),
+  resolvedPath: z.string().optional(),
+  contentDigest: z.string().optional(),
+  phase: z.string().optional(),
+  unavailableReason: z.string().optional(),
+})
+
+export const registerArtifactInput = z.object({
+  entryId: uuidInput.optional(),
+  kind: z.enum(ARTIFACT_KINDS),
+  s3Key: nonEmptyText.optional(),
+  externalUrl: z.string().url().optional(),
+  byteSize: z.number().int().nonnegative().optional(),
+})
+
+/**
+ * Per-entry outcome — staleness and success are evaluated per repository (FR-114, FR-115).
+ *
+ * `stalenessNote` is the prose assessment of whether this entry's base branch advanced during the
+ * run (FR-079). It is optional and it is the *only* free-text field here, for two reasons:
+ *
+ * - **Optional**, because a base branch that could not be read produces `undetermined` rather than
+ *   silence, and a run that never assessed staleness must not be forced to invent a note. Absent
+ *   means "not assessed"; present means "assessed, and this is what was found".
+ * - **A note rather than a verdict**, because FR-079 leaves the decision about what to do with a
+ *   stale branch to the repository's own skills. A boolean `isStale` would invite a consumer to
+ *   act on it; prose recording what was observed is what the requirement actually asks for.
+ */
+export const reportEntryResultInput = z.object({
+  entryId: uuidInput,
+  resolvedCommit: nonEmptyText,
+  wasChanged: z.boolean(),
+  pullRequestUrl: z.string().url().optional(),
+  entryResult: z.enum(ENTRY_RESULTS),
+  stalenessNote: nonEmptyText.optional(),
+})
+
+/**
+ * An action taken outside the platform (FR-076, FR-077).
+ *
+ * `idempotencyKey` is required: a retried comment that posts twice is visible to the customer,
+ * so deduplication cannot be optional.
+ */
+export const reportExternalActionInput = z.object({
+  kind: z.enum(EXTERNAL_ACTION_KINDS),
+  targetReference: nonEmptyText,
+  idempotencyKey: nonEmptyText,
+  result: z.enum(EXTERNAL_ACTION_RESULTS),
+  attemptCount: z.number().int().positive(),
+})
+
+export const reviewFindingInput = z.object({
+  workflowEntryId: uuidInput.optional(),
+  filePath: z.string().optional(),
+  line: z.number().int().positive().optional(),
+  severity: z.enum(REVIEW_FINDING_SEVERITIES),
+  summary: nonEmptyText,
+})
+
+/** `ordinal` is bounded at three by a check constraint, not by a loop counter (FR-061). */
+export const reportIterationInput = z.object({
+  ordinal: z.number().int().min(1).max(3),
+  verdict: z.enum(REVIEW_VERDICTS),
+  findings: z.array(reviewFindingInput).default([]),
+})
+
+export const reportReviewerSummaryInput = z.object({ summary: nonEmptyText })
+
+/**
+ * The last thing an executor says (FR-056, FR-064).
+ *
+ * The executor MUST NOT reach a terminal state without calling this; the reconciler exists to
+ * catch the case where it dies before it can.
+ */
+export const reportTerminalInput = z.object({
+  outcome: z.enum(TERMINAL_OUTCOMES),
+  reason: nonEmptyText,
+  turnsUsed: z.number().int().nonnegative(),
+  spendUsed: moneyAmount,
+})
+
+export type HeartbeatInput = z.infer<typeof heartbeatInput>
+export type ReportBootstrapPhaseInput = z.infer<typeof reportBootstrapPhaseInput>
+export type AppendLogSegmentInput = z.infer<typeof appendLogSegmentInput>
+export type RegisterSnapshotInput = z.infer<typeof registerSnapshotInput>
+export type AcknowledgeCorrectionInput = z.infer<typeof acknowledgeCorrectionInput>
+export type AcknowledgeCommandInput = z.infer<typeof acknowledgeCommandInput>
+export type ReportSkillReferenceInput = z.infer<typeof reportSkillReferenceInput>
+export type RegisterArtifactInput = z.infer<typeof registerArtifactInput>
+export type ReportEntryResultInput = z.infer<typeof reportEntryResultInput>
+export type ReportExternalActionInput = z.infer<typeof reportExternalActionInput>
+export type ReviewFindingInput = z.infer<typeof reviewFindingInput>
+export type ReportIterationInput = z.infer<typeof reportIterationInput>
+export type ReportReviewerSummaryInput = z.infer<typeof reportReviewerSummaryInput>
+export type ReportTerminalInput = z.infer<typeof reportTerminalInput>

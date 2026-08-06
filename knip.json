@@ -29,6 +29,51 @@
       "project": ["src/**/*.{ts,tsx}"],
       "vite": true
     },
+    // Three SST apps. `sst.config.ts` is loaded by the SST CLI, never imported by any source
+    // file, so it is an entry point rather than dead code in all three.
+    "apps/sisyphus-admin": {
+      "entry": [
+        "src/app/**/{page,layout,loading,error,not-found,default,template,route}.{ts,tsx}",
+        "sst.config.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}"],
+      "next": true
+    },
+    "apps/sisyphus-executor": {
+      // `build.mjs` bundles `src/main.ts` with esbuild. `src/main.ts` is still the T007 scaffold —
+      // it wires the shutdown registry and nothing else — so bootstrap, agent, session, delivery,
+      // output, report, caps, skills, supervision and workflows are all built and tested but
+      // reachable from no entry point. The per-directory barrels are the app's real surface until
+      // `main()` is wired; without them knip reports the whole app as dead code. See the T143
+      // notes: this is an unfinished wiring task, not dead code to delete.
+      // `stub-agent-main.ts` is spawned as a child process by path, never imported.
+      "entry": ["src/main.ts", "src/*/index.ts", "src/agent/stub-agent-main.ts", "build.mjs"],
+      "project": ["src/**/*.ts"]
+    },
+    "apps/sisyphus-control-plane": {
+      // `sst.config.ts` declares the Lambda handler `src/main.handler`, but that module does not
+      // exist yet — the jobs are written and tested, nothing dispatches them in production. The
+      // four barrels are the app's real surface until the handler lands; keeping `src/main.ts`
+      // listed makes knip's "no matches" hint the standing reminder that it is missing.
+      "entry": ["src/main.ts", "src/*/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    // `packages/sisyphus-api` deliberately has no root `src/index.ts` and no root `.` export: the
+    // absence of one is what makes FR-005 (the executor cannot reach server code) a build-time
+    // fact rather than a convention. Its entries are exactly the five subpaths its `package.json`
+    // exposes — keep the two lists in step.
+    "packages/sisyphus-api": {
+      "entry": [
+        "src/server/index.ts",
+        "src/client/index.ts",
+        "src/contracts/index.ts",
+        "src/db/index.ts",
+        "src/db/migrations/index.ts",
+        "drizzle.config.{ts,js}"
+      ],
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignoreDependencies": ["drizzle-kit"]
+    },
     "packages/*": {
       "entry": ["src/index.ts"],
       "project": ["src/**/*.{ts,tsx}"]
