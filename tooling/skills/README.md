@@ -28,7 +28,7 @@ The installer runs entirely as **Claude driving `git` / `curl` / POSIX shell** â
 From the target project root, run the published one-liner:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/bluetel/bluetel-ai/main/tooling/skills/bootstrap/install.sh | sh
+TMP=$(mktemp -d) && git clone -q --depth 1 --filter=blob:none --sparse https://github.com/bluetel/bluetel-ai.git "$TMP" && git -C "$TMP" sparse-checkout set --no-cone /tooling/skills/bootstrap/install.sh && sh "$TMP/tooling/skills/bootstrap/install.sh"; rm -rf "$TMP"
 ```
 
 The bootstrap verifies prerequisites, shallow-sparse-clones only this `tooling/skills/` subtree
