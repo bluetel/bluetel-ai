@@ -3,7 +3,15 @@
 import { NotFoundCard } from '@sisyphus-admin/components/admin/not-found-card'
 import { isNotFoundError } from '@sisyphus-admin/components/admin/trpc-error'
 import type { FieldErrorContent } from '@sisyphus-admin/components/ui'
-import { Card, CardBody, CardHeader, FieldError, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  FieldError,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 import { api } from '@sisyphus-admin/trpc'
 import { useState } from 'react'
 
@@ -139,8 +147,10 @@ export const ProfileAccessPanel = ({ executionProfileId }: ProfileAccessPanelPro
             <FieldError {...describeGrantError(grants.error)} />
           ) : null}
 
-          {grants.isPending || items.length > 0 ? null : (
-            <p className="type-data-mono text-graphite">nobody has been granted this profile</p>
+          {grants.isPending ? <LoadingState>reading who holds this profile</LoadingState> : null}
+
+          {grants.isPending || grants.error !== null || items.length > 0 ? null : (
+            <EmptyState>nobody has been granted this profile</EmptyState>
           )}
 
           <ol className="gap-close flex flex-col">

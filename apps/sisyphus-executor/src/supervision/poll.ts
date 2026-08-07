@@ -3,8 +3,12 @@
  *
  * The panel writes a row into `supervision_commands`. Nothing else on this instance would ever
  * observe it — there is no ingress path to the executor and there is not meant to be (FR-035) — so
- * this loop is the entire mechanism by which a pause becomes something the agent experiences. Delete
- * it and `suspend()` is fully specified and never invoked.
+ * this loop is the entire mechanism by which a pause becomes something the agent experiences.
+ *
+ * `src/run/execute.ts` is the caller (T175). It runs this loop for the whole of a run and binds
+ * `onPause` and `onStop` to `session/suspend.ts`, which is the same routine `watchForInterruption`
+ * reaches on a reclamation notice — one suspension path, three causes, as FR-054 requires. Delete
+ * this loop and the pause button writes a row nothing reads.
  *
  * ## Three rules, and each one is a defect if it is dropped
  *
@@ -25,6 +29,17 @@
  * See `./budget.ts`. The interval is 2000 ms of a 10 000 ms ceiling, and the whole path — interval,
  * pull, quiesce, snapshot, acknowledge — is budgeted at 9000 ms with a second held back.
  *
+ * Two of those terms are this loop's to enforce and both now are (T185, FR-205). The pull is
+ * bounded at {@link PULL_ROUND_TRIP_MS} and the acknowledgement at {@link ACKNOWLEDGE_BUDGET_MS},
+ * through `./deadline.ts`. Exceeding either **abandons the cycle**: the error reaches
+ * {@link SupervisionPollerOptions.onCycleError} and the loop waits out its interval and tries
+ * again, which is the same thing it does for a pull that refuses. That is the right answer for
+ * both, and for the same reason — nothing was applied on a pull that never returned, and
+ * `acknowledgeCommand` is idempotent on `acknowledged_at is null`, so the row is collected again
+ * and closed out next pass. What a deadline must never do here is let the loop spend the pause
+ * budget waiting on a surface that has stopped answering, because the run is *already paused* by
+ * then and the person watching the panel is being told nothing.
+ *
  * ## What this file does not assume
  *
  * It never reasons about the agent's scheduling. Spike S1 proved the NDJSON transport against a stub
@@ -34,7 +49,8 @@
  * one is read. It applies, waits for the handler to say it is done, and moves on.
  */
 
-import { POLL_INTERVAL_MS } from './budget'
+import { ACKNOWLEDGE_BUDGET_MS, POLL_INTERVAL_MS, PULL_ROUND_TRIP_MS } from './budget'
+import { withDeadline } from './deadline'
 
 /** The three things a person can ask of a live run. */
 export type SupervisionCommandName = 'pause' | 'resume' | 'stop'
@@ -107,6 +123,21 @@ export interface SupervisionPollerOptions {
   readonly handlers: SupervisionHandlers
   /** Defaults to {@link POLL_INTERVAL_MS}; see `./budget.ts` before changing it. */
   readonly intervalMs?: number
+  /**
+   * The pull's share of SC-003. Defaults to {@link PULL_ROUND_TRIP_MS}; zero means unbounded.
+   *
+   * Exceeding it abandons the cycle. Nothing has been applied at that point, so there is nothing
+   * to unwind.
+   */
+  readonly pullTimeoutMs?: number
+  /**
+   * The acknowledgement's share of SC-003. Defaults to {@link ACKNOWLEDGE_BUDGET_MS}; zero means
+   * unbounded.
+   *
+   * Exceeding it abandons the cycle with the command applied and unacknowledged, which the
+   * surface's idempotency on `acknowledged_at is null` makes a delay rather than a defect.
+   */
+  readonly acknowledgeTimeoutMs?: number
   /** Injected so a test drives the clock rather than waiting on it. */
   readonly sleep?: (milliseconds: number) => Promise<void>
   /**
@@ -148,7 +179,22 @@ const describeFailure = (error: unknown): string =>
 export const createSupervisionPoller = (options: SupervisionPollerOptions): SupervisionPoller => {
   const { transport, handlers } = options
   const intervalMs = options.intervalMs ?? POLL_INTERVAL_MS
+  const pullTimeoutMs = options.pullTimeoutMs ?? PULL_ROUND_TRIP_MS
+  const acknowledgeTimeoutMs = options.acknowledgeTimeoutMs ?? ACKNOWLEDGE_BUDGET_MS
   const sleep = options.sleep ?? defaultSleep
+
+  /** The two machine-surface calls this loop makes, each inside the term `./budget.ts` gives it. */
+  const pull = async (): Promise<readonly CollectedCommand[]> =>
+    withDeadline(() => transport.pullPendingCommands(), {
+      operation: 'pulling supervision commands',
+      budgetMs: pullTimeoutMs,
+    })
+
+  const acknowledge = async (acknowledgement: CommandAcknowledgement): Promise<void> =>
+    withDeadline(() => transport.acknowledgeCommand(acknowledgement), {
+      operation: `acknowledging the ${acknowledgement.outcome} command`,
+      budgetMs: acknowledgeTimeoutMs,
+    })
 
   let running = false
   let stopRequested = false
@@ -170,7 +216,7 @@ export const createSupervisionPoller = (options: SupervisionPollerOptions): Supe
   }
 
   const cycle = async (): Promise<PollCycleResult> => {
-    const collected = inSequenceOrder(await transport.pullPendingCommands())
+    const collected = inSequenceOrder(await pull())
     const handled: AppliedCommand[] = []
 
     for (const command of collected) {
@@ -178,10 +224,10 @@ export const createSupervisionPoller = (options: SupervisionPollerOptions): Supe
       // "never applied" guarantee is a property of the control flow rather than of a handler
       // remembering to check.
       if (command.deliveryOutcome === 'superseded') {
-        await transport.acknowledgeCommand({
+        await acknowledge({
           commandId: command.id,
           outcome: 'superseded',
-          failureReason: command.failureReason ?? undefined,
+          ...(command.failureReason === null ? {} : { failureReason: command.failureReason }),
         })
         handled.push({
           commandId: command.id,
@@ -199,11 +245,7 @@ export const createSupervisionPoller = (options: SupervisionPollerOptions): Supe
       } catch (error) {
         const failureReason = describeFailure(error)
 
-        await transport.acknowledgeCommand({
-          commandId: command.id,
-          outcome: 'rejected',
-          failureReason,
-        })
+        await acknowledge({ commandId: command.id, outcome: 'rejected', failureReason })
         handled.push({
           commandId: command.id,
           command: command.command,
@@ -217,7 +259,7 @@ export const createSupervisionPoller = (options: SupervisionPollerOptions): Supe
         return { collected: collected.length, handled, haltedEarly: true }
       }
 
-      await transport.acknowledgeCommand({ commandId: command.id, outcome: 'acknowledged' })
+      await acknowledge({ commandId: command.id, outcome: 'acknowledged' })
       handled.push({
         commandId: command.id,
         command: command.command,

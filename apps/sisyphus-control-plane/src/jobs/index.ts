@@ -214,9 +214,9 @@ export {
   claimAndStart,
   closeRun,
   countStartedSince,
-  findCompetingClaim,
   findIntegration,
   findLastCompletedRun,
+  findTicketOwner,
   findOpenRun,
   listIntegrations,
   listMappings,
@@ -234,6 +234,8 @@ export type {
   ProfileLaunch,
   RecordedSkip,
   RunTotals,
+  TicketOwnership,
+  TicketOwnershipReason,
 } from './integration-store'
 
 export {

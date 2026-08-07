@@ -2,11 +2,19 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
     "noEmit": true,
     "lib": ["ES2023"],
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "bun": ["../../packages/sisyphus-infra/sst-platform-bun.d.ts"]
+    }
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*",
+    "sst.config.ts",
+    "sst-bootstrap.config.ts",
+    "sst-install.config.ts",
+    ".sst/**/*.ts"
+  ],
+  "exclude": ["node_modules", "**/node_modules", "dist"]
 }

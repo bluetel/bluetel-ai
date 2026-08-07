@@ -127,6 +127,12 @@ importers:
       '@bluetel-ai/sisyphus-api':
         specifier: workspace:*
         version: link:../../packages/sisyphus-api
+      '@bluetel-ai/sisyphus-notify':
+        specifier: workspace:*
+        version: link:../../packages/sisyphus-notify
+      '@slack/web-api':
+        specifier: ^8.0.0
+        version: 8.0.0
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@5.9.2)(zod@3.25.76)
@@ -209,6 +215,9 @@ importers:
       eslint-config-next:
         specifier: 16.2.6
         version: 16.2.6(eslint-plugin-import-x@4.16.2(eslint-import-resolver-node@0.3.9)(eslint@9.34.0(jiti@1.21.7)))(eslint@9.34.0(jiti@1.21.7))(typescript@5.9.2)
+      loose-ts-check:
+        specifier: ^2.0.0
+        version: 2.0.0
       postcss:
         specifier: ^8.5.25
         version: 8.5.25
@@ -251,6 +260,9 @@ importers:
       '@bluetel-ai/sisyphus-integration-jira':
         specifier: workspace:*
         version: link:../../packages/sisyphus-integration-jira
+      '@bluetel-ai/sisyphus-notify':
+        specifier: workspace:*
+        version: link:../../packages/sisyphus-notify
       '@slack/web-api':
         specifier: ^8.0.0
         version: 8.0.0
@@ -285,6 +297,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
+      loose-ts-check:
+        specifier: ^2.0.0
+        version: 2.0.0
       sst:
         specifier: ^3.19.3
         version: 3.19.3
@@ -334,6 +349,9 @@ importers:
       esbuild:
         specifier: ^0.25.12
         version: 0.25.12
+      loose-ts-check:
+        specifier: ^2.0.0
+        version: 2.0.0
       sst:
         specifier: ^3.19.3
         version: 3.19.3
@@ -410,6 +428,13 @@ importers:
         version: 4.1.7(@types/node@22.19.17)(vite@8.0.14(@types/node@22.19.17)(esbuild@0.27.2)(jiti@2.6.1)(less@4.5.1)(sass-embedded@1.98.0)(sass@1.98.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
 
   packages/sisyphus-infra:
+    dependencies:
+      '@aws-sdk/client-ssm':
+        specifier: ^3.0.0
+        version: 3.1098.0
+      '@aws-sdk/client-sts':
+        specifier: ^3.0.0
+        version: 3.1098.0
     devDependencies:
       '@bluetel-ai/eslint-config-base':
         specifier: workspace:*
@@ -417,6 +442,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
+      loose-ts-check:
+        specifier: ^2.0.0
+        version: 2.0.0
       sst:
         specifier: ^3.19.3
         version: 3.19.3
@@ -435,6 +463,31 @@ importers:
       zod:
         specifier: 3.25.76
         version: 3.25.76
+    devDependencies:
+      '@bluetel-ai/eslint-config-base':
+        specifier: workspace:*
+        version: link:../../tooling/eslint-config-base
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.2
+      vitest:
+        specifier: '>=4.1.0'
+        version: 4.1.7(@types/node@22.19.17)(vite@8.0.14(@types/node@22.19.17)(esbuild@0.27.2)(jiti@2.6.1)(less@4.5.1)(sass-embedded@1.98.0)(sass@1.98.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+
+  packages/sisyphus-notify:
+    dependencies:
+      '@bluetel-ai/sisyphus-api':
+        specifier: workspace:*
+        version: link:../sisyphus-api
+      '@slack/web-api':
+        specifier: ^8.0.0
+        version: 8.0.0
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(postgres@3.4.9)
     devDependencies:
       '@bluetel-ai/eslint-config-base':
         specifier: workspace:*
@@ -692,6 +745,10 @@ packages:
 
   '@aws-sdk/client-ssm@3.1098.0':
     resolution: {integrity: sha512-PS1R2Py6gn6vQFcDKxzRMDrExL4V8mfxPBQpsUgZRfC1WTveR5pnm+UEWWCMqus9RQpO7lHD+HMm6YTtOb20bQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-sts@3.1098.0':
+    resolution: {integrity: sha512-sUJG66pXP6TU7KVReLuoDTXsbpjq8nkF1S8ORg42I2/HGRQKm+r7eXXKA1M2DGBkM6/oaGYusGsR+1RrODkD/Q==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.976.0':
@@ -7270,6 +7327,10 @@ packages:
     resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
     hasBin: true
 
+  loose-ts-check@2.0.0:
+    resolution: {integrity: sha512-Xh3meZ15aBkSAU2A24lzGFLo2oQ39L3uKyMNtKMAByR9yOgTjqG3MC+rnWQ7I5H+B16T0qMHU92JSPa50Xu1ZA==}
+    hasBin: true
+
   lower-case@2.0.2:
     resolution: {integrity: sha512-7fm3l3NAF9WfN6W3JOmf5drwpVqX78JtoGJ3A6W0a6ZnldM41w2fV5D490psKFTpMds8TJse/eHLFFsNHHjHgg==}
 
@@ -9275,6 +9336,10 @@ packages:
   ts-interface-checker@0.1.13:
     resolution: {integrity: sha512-Y/arvbn+rrz3JCKl9C4kVNfTfSm2/mEp5FSz5EsZSANGPSlQrpRI5M4PKF+mJnE52jOO90PnPSc3Ur3bTQw0gA==}
 
+  ts-invariant@0.10.3:
+    resolution: {integrity: sha512-uivwYcQaxAucv1CzRp2n/QdYPo4ILf9VXgH19zEIjFx2EJufV16P0JtJVpYHy89DItG6Kwj2oIUjrcK5au+4tQ==}
+    engines: {node: '>=8'}
+
   ts-loader@9.5.4:
     resolution: {integrity: sha512-nCz0rEwunlTZiy6rXFByQU1kVVpCIgUpc/psFiKVrUwrizdnIbRFu8w7bxhUF0X613DYwT4XzrZHpVyMe758hQ==}
     engines: {node: '>=12.0.0'}
@@ -10189,6 +10254,18 @@ snapshots:
     dependencies:
       '@aws-sdk/core': 3.977.3
       '@aws-sdk/credential-provider-node': 3.972.75
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.31.1
+      '@smithy/fetch-http-handler': 5.6.13
+      '@smithy/node-http-handler': 4.9.13
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/client-sts@3.1098.0':
+    dependencies:
+      '@aws-sdk/core': 3.977.3
+      '@aws-sdk/credential-provider-node': 3.972.75
+      '@aws-sdk/signature-v4-multi-region': 3.996.43
       '@aws-sdk/types': 3.974.2
       '@smithy/core': 3.31.1
       '@smithy/fetch-http-handler': 5.6.13
@@ -17549,6 +17626,13 @@ snapshots:
     dependencies:
       js-tokens: 4.0.0
 
+  loose-ts-check@2.0.0:
+    dependencies:
+      chalk: 4.1.2
+      minimatch: 10.2.4
+      ts-invariant: 0.10.3
+      yargs: 17.7.2
+
   lower-case@2.0.2:
     dependencies:
       tslib: 2.8.1
@@ -19869,6 +19953,10 @@ snapshots:
       typescript: 5.9.2
 
   ts-interface-checker@0.1.13: {}
+
+  ts-invariant@0.10.3:
+    dependencies:
+      tslib: 2.8.1
 
   ts-loader@9.5.4(typescript@5.9.2)(webpack@5.105.4(@swc/core@1.15.21(@swc/helpers@0.5.15))(esbuild@0.27.2)):
     dependencies:

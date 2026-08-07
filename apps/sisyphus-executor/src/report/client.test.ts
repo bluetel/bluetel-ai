@@ -62,6 +62,34 @@ const fakeTransport = (): FakeTransport => {
       appendLogSegment: async (input) => record('appendLogSegment', input),
       reportTerminal: async (input) => record('reportTerminal', input),
       registerArtifact: async (input) => record('registerArtifact', input),
+      registerSnapshot: async (input) => record('registerSnapshot', input),
+      reportSnapshotPark: async (input) => record('reportSnapshotPark', input),
+      acknowledgeCommand: async (input) => record('acknowledgeCommand', input),
+      reportSkillReference: async (input) => record('reportSkillReference', input),
+      reportExternalAction: async (input) => {
+        await record('reportExternalAction', input)
+
+        return {
+          action: {
+            id: '4a1c0f6e-1d2b-4c3a-8e9f-0a1b2c3d4e5f',
+            workflowId: '2b6c7d8e-9f01-4234-8567-89abcdef0123',
+            kind: input.kind,
+            targetReference: input.targetReference,
+            idempotencyKey: input.idempotencyKey,
+            result: input.result,
+            attemptCount: input.attemptCount,
+            error: null,
+            createdAt: new Date(0),
+          },
+          claimed: true,
+          alreadyPerformed: false,
+        }
+      },
+      pullPendingCommands: async () => {
+        await record('pullPendingCommands', undefined)
+
+        return []
+      },
       renewCredential: async () => {
         await record('renewCredential', undefined)
 
@@ -189,6 +217,37 @@ describe('createMachineSurfaceClient', () => {
     ])
   })
 
+  it('reports a park directly — a replayed one announces a park that has cleared (FR-082)', async () => {
+    const fake = fakeTransport()
+    const client = createMachineSurfaceClient({
+      workflowId: WORKFLOW_ID,
+      transport: fake.transport,
+      sleep: noSleep,
+      backoff: instantBackoff,
+    })
+
+    fake.failNext = 1
+
+    const park = {
+      boundary: 'pause',
+      attempt: 1,
+      maxAttempts: 8,
+      nextDelayMs: 1000,
+      detail: 'connect ETIMEDOUT' as SanitisedText,
+    } as const
+
+    await expect(client.reportSnapshotPark(park)).rejects.toThrow('machine surface unreachable')
+    // Nothing was queued: a park report is a claim about now, and there is nothing left holding a
+    // copy of it to replay four minutes later.
+    expect(client.pendingReports).toBe(0)
+
+    await client.reportSnapshotPark({ ...park, attempt: 2, nextDelayMs: 2000 })
+
+    expect(fake.calls).toEqual([
+      { procedure: 'reportSnapshotPark', input: { ...park, attempt: 2, nextDelayMs: 2000 } },
+    ])
+  })
+
   it('renews the credential directly, because a buffered renewal renews nothing', async () => {
     const fake = fakeTransport()
     const client = createMachineSurfaceClient({
@@ -202,6 +261,75 @@ describe('createMachineSurfaceClient', () => {
 
     await expect(client.renewCredential()).rejects.toThrow('machine surface unreachable')
     expect(client.pendingReports).toBe(0)
+  })
+
+  it('buffers a skill reference and retries it — a lost digest is a lost fact (FR-059)', async () => {
+    const fake = fakeTransport()
+    const client = createMachineSurfaceClient({
+      workflowId: WORKFLOW_ID,
+      transport: fake.transport,
+      sleep: noSleep,
+      backoff: instantBackoff,
+    })
+
+    fake.failNext = 1
+
+    await client.reportSkillReference({
+      skillName: 'sisyphus-dev',
+      resolvedPath: '.claude/skills/sisyphus-dev/SKILL.md',
+      contentDigest: 'a'.repeat(64),
+      phase: 'develop',
+    })
+
+    expect(fake.calls).toEqual([
+      {
+        procedure: 'reportSkillReference',
+        input: {
+          skillName: 'sisyphus-dev',
+          resolvedPath: '.claude/skills/sisyphus-dev/SKILL.md',
+          contentDigest: 'a'.repeat(64),
+          phase: 'develop',
+        },
+      },
+    ])
+  })
+
+  it('claims an external action directly, because a buffered claim is not a claim (FR-076)', async () => {
+    const fake = fakeTransport()
+    const client = createMachineSurfaceClient({
+      workflowId: WORKFLOW_ID,
+      transport: fake.transport,
+      sleep: noSleep,
+      backoff: instantBackoff,
+    })
+
+    fake.failNext = 1
+
+    // Buffering would resolve here with nothing decided, and the caller would go on to post a
+    // comment it had never been granted the right to post.
+    await expect(
+      client.reportExternalAction({
+        kind: 'comment_posted',
+        targetReference: 'PROJ-1',
+        idempotencyKey: 'comment-posted:PROJ-1:review-complete',
+        result: 'pending',
+        attemptCount: 1,
+      }),
+    ).rejects.toThrow('machine surface unreachable')
+    expect(client.pendingReports).toBe(0)
+
+    const claim = await client.reportExternalAction({
+      kind: 'comment_posted',
+      targetReference: 'PROJ-1',
+      idempotencyKey: 'comment-posted:PROJ-1:review-complete',
+      result: 'pending',
+      attemptCount: 2,
+    })
+
+    // The response is the point: it is what a re-provisioned instance reads instead of its own
+    // empty ledger.
+    expect(claim.claimed).toBe(true)
+    expect(claim.alreadyPerformed).toBe(false)
   })
 
   it('buffers the terminal report, which must land even if the surface is briefly down', async () => {

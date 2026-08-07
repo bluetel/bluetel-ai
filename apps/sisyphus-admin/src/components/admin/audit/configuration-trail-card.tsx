@@ -1,6 +1,14 @@
 import { DataReadout } from '@sisyphus-admin/components/admin/data-readout'
 import type { FieldErrorContent } from '@sisyphus-admin/components/ui'
-import { Card, CardBody, CardHeader, FieldError, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  FieldError,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 
 import type { ConfigurationTrailReadouts } from './configuration-trail'
 
@@ -48,9 +56,12 @@ export const ConfigurationTrailCard = ({
       {error === undefined ? null : <FieldError {...error} />}
 
       {rows.length === 0 ? (
-        <p className="type-data-mono text-graphite">
-          {loading ? 'reading' : 'no configuration changes recorded'}
-        </p>
+        <>
+          {loading ? <LoadingState>reading the configuration trail</LoadingState> : null}
+          {loading || error !== undefined ? null : (
+            <EmptyState>no configuration changes recorded</EmptyState>
+          )}
+        </>
       ) : (
         <ol className="gap-default flex flex-col">
           {rows.map((row) => (

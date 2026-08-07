@@ -1,33 +1,46 @@
 // @bluetel-ai/sisyphus-infra
-// Shared, app-agnostic SST/Pulumi infrastructure primitives. Consumed only by
-// the deployables' `sst.config.ts` files — never imported at runtime.
+// Shared, app-agnostic infrastructure constructs. Consumed only by the
+// deployables' deployment config files — never imported at runtime.
 //
 // ---------------------------------------------------------------------------
-// Why nothing here imports SST
+// The shape of a construct, and why the tests are where they are
 // ---------------------------------------------------------------------------
-// SST v3's `sst.aws.*` globals are only typed inside a project that has a
-// generated `.sst/platform/config.d.ts`. This package has no such file and must
-// not need one: it has to typecheck and unit-test on its own, in CI, with no
-// cloud credentials and no `sst install` step ahead of it. A primitive that
-// reached for `sst.aws.Bucket` directly would drag SST's type generation into
-// `nx affected -t typecheck`, and would only be testable by deploying.
+// A construct here is a plain function, `createX(config)`, that instantiates
+// `sst.aws.*` / `aws.*` resources **directly** and returns what it created. It
+// takes no provider, no constructor and no factory: providers are configured
+// once in the deployable's `app()` and inherited implicitly, and composition
+// happens by passing already-created resource handles between constructs
+// (FR-066). There is nothing standing between the function and the resource.
 //
-// So every primitive is a **factory taking the provider surface it needs as a
-// narrow, locally-declared structural interface**, returning the resource
-// specification alongside whatever the provider gave back. `sst.config.ts`
-// passes in constructors closing over the real `sst`/`aws` globals (T137); a
-// test passes in a recording fake.
+// Those constructs carry no unit tests, on purpose. A test that asserts a fake
+// constructor was called with the arguments just handed to it restates the
+// implementation, breaks on rename, and catches no defect a deploy would not.
+// Verifying a construct is the deployment's job.
 //
-// The pure part — names, retention schedules, IAM policy documents, the exact
-// GitHub OIDC `sub` claim — is separated into `build*` functions taking no
-// provider at all, because those are the parts where a mistake is a security or
-// data-retention defect rather than a deploy failure, and they deserve to be
-// asserted directly.
+// What is worth asserting is separated out and tested directly, because a
+// mistake in it is a security or retention defect that deploys perfectly well
+// and reports nothing (FR-200):
+//
+//   lib.ts                          resource naming, the stage scope, the
+//                                   parameter path, and the policy-document shape
+//   get-plain-stage.ts              the stage-suffix derivation everything routes through
+//   sst-app.ts                      the deploy-stage set and the teardown decision
+//   retention.ts                    days, transitions and lifecycle rules per object class
+//   policies.ts                     every IAM document, and the exact trusted OIDC subject
+//   schedule-name.ts                schedule naming, including the collision refusal
+//   missing-oidc-provider-message.ts the diagnostic FR-068 requires when the provider is absent
+//
+// A construct reads its values from those modules and never restates one.
 
 export {
   POLICY_VERSION,
+  SISYPHUS_PROJECT,
+  getBucketName,
+  getBucketNames,
+  getConnectionUrlParameterName,
   getEnvSecret,
   getResourceIdentifier,
+  getStackScope,
   readEnvRecord,
   type GetEnvSecretOptions,
   type PolicyConditionOperator,
@@ -45,93 +58,85 @@ export {
   isBootstrapStage,
 } from './get-plain-stage'
 
-export { SISYPHUS_PROJECT, getStackScope } from './stack-scope'
-
 export {
   DEFAULT_AWS_REGION,
   DEPLOY_STAGES,
-  buildSstApp,
+  PRODUCTION_STAGE,
+  getStageRemoval,
   isDeployStage,
+  isProductionStage,
   type DeployStage,
-  type SstAppConfig,
-  type SstAppInput,
-  type SstAppOptions,
-  type SstConfigDefinition,
   type SstRemovalPolicy,
+  type StageRemoval,
 } from './sst-app'
 
 export {
+  ABORT_INCOMPLETE_MULTIPART_UPLOAD_DAYS,
   DEFAULT_INFREQUENT_ACCESS_DAYS,
   DEFAULT_RETENTION_DAYS,
-  buildBucketSpecifications,
-  createBuckets,
+  OBJECT_CLASSES,
+  VERSIONED_OBJECT_CLASSES,
+  WORKFLOW_PARTITION_PREFIX,
+  buildLifecycleRule,
+  getLifecycleTransitions,
   getObjectExpiresAt,
   getRetentionDays,
   getWorkflowObjectPrefix,
   hasObjectExpired,
-  type BucketLifecycleRule,
-  type BucketLifecycleTransition,
-  type BucketObjectClass,
-  type BucketProvider,
-  type BucketSpecification,
-  type BucketSpecifications,
-  type BucketStorageClass,
-  type BucketsConfig,
-  type CreatedBucket,
-  type CreatedBuckets,
-} from './buckets'
-
-export {
-  buildDatabaseSpecification,
-  createDatabase,
-  getConnectionUrlParameterName,
-  type CreatedDatabase,
-  type DatabaseConfig,
-  type DatabaseProvider,
-  type DatabaseSpecification,
-  type ParameterSpecification,
-} from './database'
+  isVersionedObjectClass,
+  type LifecycleRule,
+  type LifecycleTransition,
+  type ObjectClass,
+  type RetentionConfig,
+  type StorageClass,
+} from './retention'
 
 export {
   GITHUB_OIDC_AUDIENCE,
+  GITHUB_OIDC_CLAIM_PREFIX,
   GITHUB_OIDC_ISSUER_URL,
   GITHUB_OIDC_THUMBPRINTS,
   buildDeployRoleTrustPolicy,
-  buildOidcProviderSpecification,
-  getDeployBranchRef,
-  getMissingOidcProviderMessage,
-  getTrustedSubject,
-  resolveOidcProviderArn,
-  type DeployRoleTrustPolicyConfig,
-  type OidcProviderConfig,
-  type OidcProviderSpecification,
-  type OidcProviderSurface,
-} from './oidc-provider'
-
-export {
   buildRunnerPolicy,
-  buildRunnerRoleSpecification,
   buildRunnerTrustPolicy,
-  createRunnerRole,
-  type CreatedRunnerRole,
-  type RunnerRoleConfig,
-  type RunnerRoleProvider,
-  type RunnerRoleSpecification,
-} from './runner-role'
+  getDeployBranchRef,
+  getTrustedSubject,
+  type DeployRoleTrustPolicyConfig,
+  type RunnerPolicyConfig,
+} from './policies'
+
+export { getMissingOidcProviderMessage } from './missing-oidc-provider-message'
 
 export {
-  buildControlPlaneTickSpecification,
-  buildIntegrationScheduleName,
-  buildIntegrationScheduleSpecification,
-  buildSchedulerGroupSpecification,
-  createScheduler,
+  getControlPlaneTickName,
+  getIntegrationScheduleName,
+  getSchedulerGroupName,
   toScheduleName,
-  type ControlPlaneTickConfig,
-  type CreatedScheduler,
-  type IntegrationScheduleConfig,
-  type ScheduleSpecification,
-  type ScheduleTarget,
+} from './schedule-name'
+
+export {
+  BUCKET_SERVER_SIDE_ENCRYPTION,
+  createBuckets,
+  type Buckets,
+  type BucketsConfig,
+} from './buckets'
+
+export { createDatabase, type Database, type DatabaseConfig } from './database'
+
+export { createOidcProvider, type OidcProviderConfig } from './oidc-provider'
+
+export { createRunnerRole, type RunnerRole, type RunnerRoleConfig } from './runner-role'
+
+export {
+  CONTROL_PLANE_TICK_JOB,
+  createScheduler,
   type ScheduleTargetConfig,
-  type SchedulerGroupSpecification,
-  type SchedulerProvider,
+  type Scheduler,
+  type SchedulerConfig,
 } from './scheduler'
+
+export {
+  NEXTJS_WEBSITE_NAME,
+  createNextjsWebsite,
+  type NextjsWebsiteConfig,
+} from './nextjs-website'

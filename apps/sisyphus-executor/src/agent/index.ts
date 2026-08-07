@@ -21,6 +21,29 @@ export type {
 export { createCliStreamAdapter, logUnknownFrame } from './cli-stream'
 export type { CliStreamAdapterOptions } from './cli-stream'
 
+export {
+  developTurnBody,
+  renderFeedback,
+  renderFinding,
+  renderReportInstruction,
+} from './develop-turn'
+export type { DevelopTurnOptions } from './develop-turn'
+
+export {
+  AgentProposalError,
+  createAgentDeveloperPort,
+  DEFAULT_PROPOSAL_DEADLINE_MS,
+  DEFAULT_SETTLE_MS,
+  DEFAULT_TURN_TIMEOUT_MS,
+} from './developer-port'
+export type { AgentDeveloperPortOptions, AgentProposalFailure } from './developer-port'
+
+export { PROPOSAL_KEYS, readDevelopmentProposal, SUMMARY_LISTS } from './development-proposal'
+export type { ProposalReading } from './development-proposal'
+
+export { createFrameTap, observeAgentFrames } from './frame-tap'
+export type { FrameObserver, FrameTap } from './frame-tap'
+
 export { createFrameStream } from './frame-stream'
 export type {
   FramePredicate,
@@ -41,6 +64,9 @@ export type { FrameDecoder, ModelledFrameType } from './frames'
 
 export { buildClaudeArgs, buildClaudeEnv, claudeProcessSpec, CLAUDE_COMMAND } from './invocation'
 export type { AgentProcessSpec, AgentProcessSpecFactory } from './invocation'
+
+export { extractProposal, PROPOSAL_TAG, proposalMarkers, stripCodeFence } from './proposal-block'
+export type { ProposalExtraction, ProposalMarkers } from './proposal-block'
 
 export { resolveTsxBinary, runStdinInjectionSpike, stubAgentEntry } from './spike-stdin'
 export type {

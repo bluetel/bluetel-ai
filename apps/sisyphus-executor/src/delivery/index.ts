@@ -13,6 +13,10 @@
  * - **Nothing here transitions a ticket.** The {@link Forge} port has no method
  *   that could, which is how FR-060 keeps delivery ownership with the
  *   initiating engineer.
+ * - **Nothing here reaches the network except one module.**
+ *   {@link createHttpForge} is the only implementation of {@link Forge} and the
+ *   only place a socket is opened; its transport and its credential are both
+ *   injected, so every other test in this directory runs against a fake.
  * - **Nothing here invents a convention.** Branch, base, remote and title come
  *   from `sisyphus-dev` through {@link requireDeliveryConventions}, which halts
  *   naming the skill and the step rather than guessing (FR-058).
@@ -25,22 +29,68 @@ export {
   createExternalActionLedger,
   EXTERNAL_ACTION_KEY_SEPARATOR,
   externalActionKey,
+  ExternalActionNotEntitledError,
+  externalActionTargetReference,
   pendingExternalActions,
   performExternalAction,
   PULL_REQUEST_ACTION,
   pullRequestIdentity,
 } from './external-action'
 export type {
+  DurableExternalActionKind,
+  DurableExternalActionResult,
   ExternalAction,
   ExternalActionDisposition,
+  ExternalActionEntitlement,
   ExternalActionEntry,
   ExternalActionIdentity,
   ExternalActionLedger,
+  ExternalActionLedgerOptions,
   ExternalActionOutcome,
+  ExternalActionRecorder,
+  ExternalActionRefusal,
 } from './external-action'
 
 export { pullRequestIdempotencyKey } from './forge'
 export type { CreatePullRequestInput, Forge, PullRequestRef } from './forge'
+
+export {
+  forgeDetail,
+  ForgeError,
+  forgeErrorKindForStatus,
+  httpForgeError,
+  isNotFoundForgeError,
+  isRetryableForgeError,
+  MAX_FORGE_DETAIL_LENGTH,
+  RETRYABLE_FORGE_ERROR_KINDS,
+  retryAfterMsFrom,
+  transportForgeError,
+} from './forge-error'
+export type { ForgeErrorKind, ForgeErrorOptions, HttpForgeFailure } from './forge-error'
+
+export {
+  createHttpForge,
+  CREDENTIAL_SECRET_NAME,
+  FORGE_ACCEPT,
+  FORGE_API_VERSION,
+  FORGE_API_VERSION_HEADER,
+  FORGE_USER_AGENT,
+  IDEMPOTENCY_KEY_HEADER,
+  shaFromRefPayload,
+} from './forge-http'
+export type { HttpForgeOptions } from './forge-http'
+
+export {
+  parseRepositoryLocation,
+  parseRepositorySlug,
+  repositoryLocationError,
+  repositorySlugError,
+  withoutUserInfo,
+} from './forge-repository'
+export type { RepositoryLocation, RepositorySlug } from './forge-repository'
+
+export { DEFAULT_FORGE_RETRY_POLICY, forgeRetryDelayMs, withForgeRetry } from './forge-retry'
+export type { ForgeRetryPolicy } from './forge-retry'
 
 export {
   createGitReader,

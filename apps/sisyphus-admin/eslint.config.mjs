@@ -6,7 +6,12 @@ const eslintConfig = [
   ...base,
   ...nextVitals,
   ...withTypeChecking(import.meta.dirname),
-  globalIgnores(['.next/**', '.open-next/**', 'build/**', 'next-env.d.ts']),
+  // `.sst/` is the deployment tool's generated type tree. It has to be
+  // *compiled* — the ambient `sst.*` / `aws.*` globals the config files use are
+  // declared nowhere else — but it is not ours to style. Compiled, loosely
+  // type-checked, never linted: all three, or the gate either breaks or
+  // silently stops checking (FR-198).
+  globalIgnores(['.next/**', '.open-next/**', '.sst/**', 'build/**', 'next-env.d.ts']),
 ]
 
 export default eslintConfig

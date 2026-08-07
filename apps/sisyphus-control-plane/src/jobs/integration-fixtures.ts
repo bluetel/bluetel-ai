@@ -36,6 +36,19 @@ import { readTestDatabaseUrl, withDatabaseName } from './workflow-fixtures'
 
 export { readTestDatabaseUrl } from './workflow-fixtures'
 
+/**
+ * The caps on the fixture's execution profile version (FR-101).
+ *
+ * Set rather than left null, and exported rather than restated in a test, because they are the two
+ * *nullable* launch values `claimAndStart` copies: with them null, an assertion that the workflow
+ * row matches the profile compares two nulls and passes just as happily when the column was never
+ * written. See the FR-101 test in `integration-store.test.ts`.
+ */
+export const FIXTURE_TURN_CAP = 33
+
+/** Four decimal places, because `spend_cap` is `numeric(12, 4)` and reads back scaled. */
+export const FIXTURE_SPEND_CAP = '17.5000'
+
 /** Lower-case and alphanumeric, so never quoted. */
 export const integrationScratchDatabaseName = (suffix: string): string =>
   `sisyphus_integration_${suffix.replace(/[^a-z0-9]/g, '')}`
@@ -204,6 +217,8 @@ export const createIntegrationFixtures = (connectionString: string): Integration
           model: 'claude-sonnet-5',
           instanceType: 'fixture.small',
           purchaseMode: 'spot',
+          turnCap: FIXTURE_TURN_CAP,
+          spendCap: FIXTURE_SPEND_CAP,
           defaultWorkflowType: 'delegated',
           promptPreamble: 'The contract lives in packages/contracts.',
           createdByUserId: ownerUserId,

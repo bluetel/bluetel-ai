@@ -85,8 +85,17 @@ describe('machineSurfaceRouter', () => {
       'reportBootstrapPhase',
       'reportEntryCheckout',
       'reportEntryResult',
+      // The durable half of FR-076. Called *before* the action, so its response is what decides
+      // whether the caller may act — see `./external-actions.ts`.
+      'reportExternalAction',
       'reportIteration',
       'reportReviewerSummary',
+      // The write half of `workflow.skillReferences`, which read an unwritten table until T179.
+      'reportSkillReference',
+      // `registerSnapshot`'s counterpart: the boundary that could **not** be written, which the
+      // run is holding at and retrying. A live run waiting on storage, never the
+      // `parked_resumable` outcome — see `./snapshot-park.ts` (T184, FR-082).
+      'reportSnapshotPark',
       'reportTerminal',
     ])
   })
@@ -121,6 +130,31 @@ describe('machineSurfaceRouter', () => {
         boundary: 'completion',
         hasConversationState: true,
         hasWorktreeState: true,
+      }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    await expect(
+      caller.reportSnapshotPark({
+        boundary: 'pause',
+        attempt: 1,
+        maxAttempts: 8,
+        nextDelayMs: 1000,
+      }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+  })
+
+  it('refuses the skill and external-action reporters without a credential, before any query', async () => {
+    const caller = callerWith({ credential: null })
+
+    await expect(
+      caller.reportSkillReference({ skillName: 'sisyphus-dev', contentDigest: 'a'.repeat(64) }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    await expect(
+      caller.reportExternalAction({
+        kind: 'comment_posted',
+        targetReference: 'PROJ-1',
+        idempotencyKey: 'comment-posted:PROJ-1:review-complete',
+        result: 'pending',
+        attemptCount: 1,
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
   })

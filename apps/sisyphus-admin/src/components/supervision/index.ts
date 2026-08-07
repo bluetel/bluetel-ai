@@ -17,6 +17,29 @@ export type { CorrectionReadout } from './correction-list'
 export { SupervisionControls } from './controls'
 export type { SupervisionPendingAction } from './controls'
 
+/**
+ * The wiring, and the rule that keeps it honest.
+ *
+ * `./pending-command.ts` is on the barrel because {@link isCommandAcknowledged} is the second half
+ * of `./supervision-status.ts`'s rule rather than an implementation detail of the container: the
+ * status module says a request is not a pause, and this says when a request stops being one.
+ */
+export {
+  alreadyFinishedExplanation,
+  isCommandAcknowledged,
+  nextPendingCommand,
+  supersededNotice,
+  toCorrectionReadouts,
+} from './pending-command'
+export type { CorrectionRecords, SupervisionCommandResult } from './pending-command'
+
+export {
+  CORRECTIONS_POLL_MS,
+  describeSupervisionError,
+  SUPERVISION_REFUSED,
+  WorkflowSupervision,
+} from './workflow-supervision'
+
 export {
   acceptsCorrections,
   availableSupervisionActions,

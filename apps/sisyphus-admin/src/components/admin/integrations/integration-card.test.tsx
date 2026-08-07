@@ -35,6 +35,11 @@ const render = (props: Partial<Parameters<typeof IntegrationCard>[0]> = {}) =>
       onSetEnabled={noop}
       onValidate={noop}
       onRunNow={noop}
+      onRequestDelete={noop}
+      onCancelDelete={noop}
+      onConfirmDelete={noop}
+      onShowHistory={noop}
+      onHideHistory={noop}
       {...props}
     />,
   )
@@ -125,5 +130,85 @@ describe('IntegrationCard (T121, FR-097, FR-105, FR-106, FR-155)', () => {
     expect(
       render({ error: { code: 'CONFLICT', action: 'Enable it before running it.' } }),
     ).toContain('Enable it before running it.')
+  })
+})
+
+describe('IntegrationCard — delete (FR-097)', () => {
+  it('offers delete, because FR-097 names it among the six admin actions', () => {
+    expect(render()).toContain('Delete')
+  })
+
+  it('offers it even for a board that will refuse, so the refusal can name its reason', () => {
+    // The count that decides whether it may go (FR-131) lives on the server and is what the admin
+    // is asking about. A hidden button answers "you cannot" without ever saying why.
+    expect(render({ integration: { ...integration, startedWorkflowCount: '3' } })).toContain(
+      'Delete',
+    )
+  })
+
+  it('asks before it deletes, and says what deleting costs', () => {
+    const markup = render({ confirmingDelete: true })
+
+    expect(markup).toContain('Delete Payments board?')
+    expect(markup).toContain('Its schedule stops')
+    expect(markup).toContain('Keep it')
+  })
+
+  it('does not show the confirmation until it is asked for', () => {
+    expect(render()).not.toContain('Delete Payments board?')
+  })
+})
+
+describe('IntegrationCard — tick history (FR-105)', () => {
+  const rows = [
+    {
+      id: 'run-1',
+      trigger: 'scheduled',
+      startedAt: '2026-08-05 09:00:00',
+      duration: '12s',
+      counts: 'examined 7, matched 4, started 2, skipped 2',
+      error: undefined,
+      failed: false,
+    },
+    {
+      id: 'run-2',
+      trigger: 'manual',
+      startedAt: '2026-08-04 09:00:00',
+      duration: '3s',
+      counts: 'examined 0, matched 0, started 0, skipped 0',
+      error: 'the credential was rejected',
+      failed: true,
+    },
+  ]
+
+  it('offers the history rather than loading it with the list', () => {
+    expect(render()).toContain('Tick history')
+  })
+
+  it('renders each tick as what it did, with its trigger and counts', () => {
+    const markup = render({ history: rows })
+
+    expect(markup).toContain('examined 7, matched 4, started 2, skipped 2')
+    expect(markup).toContain('scheduled')
+    expect(markup).toContain('manual')
+  })
+
+  it('carries the failure reason, which is how an unreachable board reads (FR-108)', () => {
+    expect(render({ history: rows })).toContain('failed: the credential was rejected')
+  })
+
+  it('says a board has never ticked rather than rendering an empty list', () => {
+    expect(render({ history: [] })).toContain('has not ticked yet')
+  })
+
+  it('names the silent stall FR-106 does not catch (FR-105)', () => {
+    const markup = render({ history: rows, stalled: true })
+
+    expect(markup).toContain('matched tickets and started nothing')
+    expect(markup).toContain('consecutive-failure count has not moved')
+  })
+
+  it('says nothing about stalling for a healthy board', () => {
+    expect(render({ history: rows })).not.toContain('started nothing')
   })
 })

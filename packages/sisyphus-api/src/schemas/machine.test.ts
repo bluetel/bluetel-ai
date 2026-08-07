@@ -9,6 +9,7 @@ import {
   reportBootstrapPhaseInput,
   reportExternalActionInput,
   reportIterationInput,
+  reportSnapshotParkInput,
   reportTerminalInput,
 } from './machine'
 
@@ -22,9 +23,35 @@ describe('the machine inputs', () => {
       registerSnapshotInput,
       reportTerminalInput,
       reportBootstrapPhaseInput,
+      reportSnapshotParkInput,
     ]) {
       expect(Object.keys(schema.shape)).not.toContain('workflowId')
     }
+  })
+})
+
+describe('reportSnapshotParkInput', () => {
+  const base = { boundary: 'pause', attempt: 1, maxAttempts: 8, nextDelayMs: 1000 }
+
+  it('carries the boundary and the attempt count, so a park is attributable (FR-082)', () => {
+    expect(reportSnapshotParkInput.parse(base)).toStrictEqual(base)
+  })
+
+  it('accepts a sanitised explanation, and does not demand one', () => {
+    expect(reportSnapshotParkInput.parse({ ...base, detail: 'connect ETIMEDOUT' }).detail).toBe(
+      'connect ETIMEDOUT',
+    )
+    expect(reportSnapshotParkInput.parse(base).detail).toBeUndefined()
+  })
+
+  it('rejects a zeroth attempt — the report is of an attempt that failed, and they are 1-based', () => {
+    expect(reportSnapshotParkInput.safeParse({ ...base, attempt: 0 }).success).toBe(false)
+  })
+
+  it('rejects a boundary outside the snapshot vocabulary', () => {
+    expect(reportSnapshotParkInput.safeParse({ ...base, boundary: 'checkpoint' }).success).toBe(
+      false,
+    )
   })
 })
 

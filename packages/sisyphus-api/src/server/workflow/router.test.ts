@@ -71,6 +71,10 @@ describe('workflowRouter', () => {
       // US11's four: `watch`/`unwatch` are scoped so neither can confirm an out-of-scope run
       // exists; the two preference procedures name no workflow, so they are `authedProcedure`.
       'notificationPreferences',
+      // FR-140's half of the settings screen: the caller's own Slack identity, returned alongside
+      // their preferences because the screen shows both. `admin.users.list` is the only other read
+      // carrying `slack_user_id` and it is admin-only. No input, so it cannot name anybody else.
+      'notificationSettings',
       'pause',
       'reassignOwner',
       'resume',

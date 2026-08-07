@@ -180,6 +180,9 @@ components:
     textColor: '{colors.rust}'
     typography: '{typography.data-mono}'
     borderColor: '{colors.rust}'
+  panel-note:
+    textColor: '{colors.graphite}'
+    typography: '{typography.data-mono}'
   card:
     backgroundColor: '{colors.paper}'
     textColor: '{colors.ink}'
@@ -438,6 +441,22 @@ wanted.
 in for a label, and never floating. `field-control` focuses to a `signal` border plus a 2px
 `signal-wash` ring. `field-error` puts a `rust` border on the control and help text that carries
 a **machine code and a next action**, because "invalid input" is not a next action.
+
+### Loading, empty and error
+
+Every screen defines four states, not one. `panel-note` is the single line a card shows where its
+rows would be — `data-mono` in `graphite` — and it has exactly two meanings, marked by `data-note`:
+**loading** (`reading the user list`) and **empty** (`no users match that search`). They are the
+same element in the same place at the same leading, so the moment a read settles nothing on the page
+moves; the reading one carries `role="status"` because it appears without the operator acting.
+
+There is no spinner, for the reason there is none in a button: an indeterminate ring says something
+is happening, which the reader already knew. A card header's chip reads `reading` and the body says
+what is being read.
+
+The **error** state is `field-error` — a code and a next action — and it suppresses the empty note
+rather than sitting above it. "No changes recorded" printed beside a refusal is the panel asserting
+that nothing happened to somebody who came to find out whether something did.
 
 ### Why some of these carry lint warnings
 

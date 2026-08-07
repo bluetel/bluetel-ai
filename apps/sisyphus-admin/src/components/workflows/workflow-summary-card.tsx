@@ -51,6 +51,23 @@ export const WorkflowSummaryCard = ({ detail }: WorkflowSummaryCardProps) => (
     </CardHeader>
 
     <CardBody className="gap-default flex flex-col">
+      {/*
+        First in the body, above every readout, because it is the one thing on this card that
+        changes what an operator should do next: a run that appears to be `running` and producing
+        nothing is a run somebody stops, and stopping it is what loses the work parking is holding
+        (FR-082). Not a state chip — the run's state really is `running` while it parks, and the
+        chip must go on agreeing with the heartbeat.
+      */}
+      {detail.storagePark === undefined ? null : (
+        <div className="gap-hair flex flex-col" data-storage-park={detail.storagePark.waiting}>
+          <span className="type-label-mono text-graphite">{detail.storagePark.headline}</span>
+          <p className="type-body text-ink measure-prose">{detail.storagePark.explanation}</p>
+          {detail.storagePark.cause === null ? null : (
+            <p className="type-data-mono text-graphite measure-prose">{detail.storagePark.cause}</p>
+          )}
+        </div>
+      )}
+
       {detail.needsReassignment ? (
         <p className="type-body text-ink measure-prose">
           This run&rsquo;s owner has been deactivated. Somebody must take it over before it can be

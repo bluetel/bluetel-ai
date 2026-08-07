@@ -1,5 +1,5 @@
 import { DataReadout } from '@sisyphus-admin/components/admin'
-import { StateChip } from '@sisyphus-admin/components/ui'
+import { EmptyState, StateChip } from '@sisyphus-admin/components/ui'
 
 /**
  * The corrections written on a run, **including the ones that did not land** (FR-049, SC-004).
@@ -35,7 +35,7 @@ interface CorrectionListProps {
 
 export const CorrectionList = ({ corrections }: CorrectionListProps) => {
   if (corrections.length === 0) {
-    return <p className="type-data-mono text-graphite">no corrections written on this run</p>
+    return <EmptyState>no corrections written on this run</EmptyState>
   }
 
   return (

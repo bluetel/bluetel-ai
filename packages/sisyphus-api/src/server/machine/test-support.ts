@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import { scopedCredentials } from '../../db'
 import type { AuthorisationDenial, MachineCredential, SisyphusDependencies } from '../context'
+import type { WorkflowEventEmitter } from '../notify'
 import type { TwoProfileFixture } from '../workflow/test-support'
 import { createTwoProfileFixture, readTestDatabaseUrl, refusalOf } from '../workflow/test-support'
 
@@ -48,8 +49,18 @@ export interface MachineFixture extends TwoProfileFixture {
    * the constraint, not a limitation of the fixture.
    */
   readonly seedCredential: (workflowId: string) => Promise<MachineCredential>
-  /** Build a resolver context pinned to one credential, recording every denial it produces. */
-  readonly contextFor: (credential: MachineCredential) => RecordingMachineContext
+  /**
+   * Build a resolver context pinned to one credential, recording every denial it produces.
+   *
+   * @param credential - From {@link MachineFixture.seedCredential}.
+   * @param notifier - The FR-136 seam, wired or not. Omitted by default, so every suite that does
+   *   not care about notifications exercises the deployment shape in which none is configured —
+   *   which is also the shape in which an emission must be a silent no-op rather than an error.
+   */
+  readonly contextFor: (
+    credential: MachineCredential,
+    notifier?: WorkflowEventEmitter,
+  ) => RecordingMachineContext
 }
 
 /** How long a seeded credential is valid for. Comfortably past any test's runtime. */
@@ -85,12 +96,13 @@ export const createMachineFixture = (connectionString: string): MachineFixture =
       return { credentialId, workflowId, jti, expiresAt }
     },
 
-    contextFor: (credential) => {
+    contextFor: (credential, notifier) => {
       const denials: AuthorisationDenial[] = []
       const db = base.db()
 
       const dependencies: SisyphusDependencies = {
         db,
+        ...(notifier === undefined ? {} : { notifier }),
         // The machine surface refuses a request carrying a human session, so this always answers
         // `null` — a fixture that returned one would be testing `surface_confusion`, not scoping.
         resolveSession: () => Promise.resolve(null),

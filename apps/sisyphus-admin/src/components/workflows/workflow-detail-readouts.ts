@@ -2,6 +2,8 @@ import type { WorkflowState } from '@bluetel-ai/sisyphus-api/client'
 import { formatElapsed, formatTimestamp } from '@sisyphus-admin/components/admin'
 import type { RouterOutputs } from '@sisyphus-admin/trpc'
 
+import type { StorageParkReadout } from './storage-park'
+import { toStorageParkReadout } from './storage-park'
 import { ABSENT, abbreviateRunId, elapsedMs, isLiveWorkflow } from './workflow-listing'
 
 /**
@@ -63,6 +65,14 @@ export interface WorkflowDetailReadouts {
   readonly needsReassignment: boolean
   /** FR-163 — oldest-first comment truncation happened while assembling the prompt. */
   readonly promptTruncated: boolean
+  /**
+   * FR-082 — the run could not write a snapshot and is holding at the boundary, retrying.
+   *
+   * `undefined` when the run has never parked. Deliberately **not** folded into `stateReadout`:
+   * the run's state during a park is genuinely `running`, and overwriting the chip would be the
+   * panel disagreeing with the heartbeat. See `./storage-park.ts`.
+   */
+  readonly storagePark: StorageParkReadout | undefined
 }
 
 /** One repository of a multi-repo run, as the detail view reads it (FR-114, FR-118). */
@@ -139,6 +149,7 @@ export const toWorkflowDetailReadouts = (
     reviewerSummary: workflow.reviewerSummary,
     needsReassignment: workflow.needsReassignment,
     promptTruncated: workflow.promptTruncated,
+    storagePark: toStorageParkReadout(detail.storagePark),
   }
 }
 

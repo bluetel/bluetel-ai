@@ -35,6 +35,14 @@ describe('the workflows barrel', () => {
     expect(barrel.NOW_TICK_MS).toBeGreaterThan(0)
   })
 
+  it('exports the watch control and the refusal mapping that keeps it honest (T160, FR-190)', () => {
+    expect(typeof barrel.WatchToggle).toBe('function')
+    expect(typeof barrel.describeWatchError).toBe('function')
+    expect(barrel.describeWatchError({ data: { code: 'FORBIDDEN' } })).toStrictEqual(
+      barrel.describeWatchError({ data: { code: 'NOT_FOUND' } }),
+    )
+  })
+
   it('exports the shaping functions each card is fed from', () => {
     for (const name of [
       'toWorkflowRowReadouts',

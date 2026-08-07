@@ -4,8 +4,9 @@
  * Nothing here is a primitive — the panel has exactly one primitive set, in `src/components/ui`,
  * and everything below composes it. What lives here is the workflow surface: how a run reads as a
  * row, how the list's filters travel between a URL, a form and a procedure's input, and what the
- * detail view shows around the two slots it leaves for the log viewer (T077) and the supervision
- * controls (Phase 7).
+ * detail view shows around its two named slots — which since T207 and T208 hold the log viewer
+ * (`components/log-viewer`) and the supervision controls (`components/supervision`) rather than a
+ * statement of their absence.
  *
  * Consumers import this barrel, never a module inside it.
  */
@@ -47,6 +48,24 @@ export { SupervisionSlot } from './supervision-slot'
  * hook is written in rather than in a number of its own.
  */
 export { NOW_TICK_MS, useNow } from './use-now'
+
+/**
+ * Watching a run you do not own (T160, FR-138, FR-190).
+ *
+ * The refusal mapping is published alongside the control because it is the security property, not a
+ * detail of it: `describeWatchError` answers identically for `NOT_FOUND` and `FORBIDDEN`, so the
+ * panel cannot be used to tell an out-of-scope run from one that does not exist.
+ */
+export {
+  describeWatchError,
+  describeWatchOutcome,
+  WATCH_REFUSED,
+  WatchToggle,
+} from './watch-toggle'
+export type { WatchNotice, WatchResult } from './watch-toggle'
+
+export { formatRetryDelay, toStorageParkReadout } from './storage-park'
+export type { StorageParkReadout, StorageParkResult } from './storage-park'
 
 export { WorkflowArtifactsCard } from './workflow-artifacts-card'
 export { WorkflowDetailPanel } from './workflow-detail-panel'

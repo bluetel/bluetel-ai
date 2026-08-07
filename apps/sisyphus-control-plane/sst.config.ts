@@ -1,5 +1,5 @@
 /**
- * SST deployment for the control plane.
+ * The control plane's application stack.
  *
  * The control plane has no inbound network surface (FR-035): nothing calls it
  * over HTTP, and EventBridge Scheduler invokes it directly. So what deploys here
@@ -10,106 +10,34 @@
  * What this config deliberately does not create
  * ---------------------------------------------------------------------------
  * No bucket and no database. The panel's stack owns both; this config derives
- * their names from the same `sisyphus-infra` builders, so the two stacks cannot
- * disagree about what a bucket is called or how long it retains an object. Nor
- * does it create the per-integration schedules: those are created and removed by
- * the control plane itself whenever an integration changes (FR-100), which is
- * why `createScheduler` provisions only the group and the tick.
+ * bucket names from the same `sisyphus-infra` helper, so the two stacks cannot
+ * disagree about what a bucket is called or how long it retains an object, and
+ * it reads the database's connection URL straight from the SSM parameter the
+ * panel's stack publishes, so there is exactly one place that value comes from.
+ * Nor does it create the per-integration schedules: those are created and
+ * removed by the control plane itself whenever an integration changes
+ * (FR-100), which is why `createScheduler` provisions only the group and the
+ * tick.
+ *
+ * ---------------------------------------------------------------------------
+ * Three files, and why this one only builds the application stack
+ * ---------------------------------------------------------------------------
+ * `sst-bootstrap.config.ts` creates the configuration entry this file reads, and
+ * `sst-install.config.ts` generates types with no credentials. One file
+ * branching on a stage suffix made every invocation evaluate the other two's
+ * preconditions, and let a mistyped stage string reach the wrong stack. The
+ * config file now selects the stack; the stage selects only the environment
+ * (FR-199).
+ *
+ * Configuration is resolved inside `app()` / `run()` and every import is a
+ * dynamic `await import()`: the ambient globals do not exist at
+ * module-evaluation time, and `createSafeEnv` snapshots `SKIP_ENV_VALIDATION`
+ * when its module is first evaluated (FR-202). The one static import below is
+ * `import type`, which TypeScript erases entirely — no module is evaluated, so
+ * the rule it protects is not engaged.
  */
 
-import {
-  DEFAULT_AWS_REGION,
-  POLICY_VERSION,
-  buildBucketSpecifications,
-  buildSstApp,
-  createScheduler,
-  getConnectionUrlParameterName,
-  getEnvSecret,
-  getResourceIdentifier,
-  getStackScope,
-  readEnvRecord,
-  type PolicyDocument,
-  type ScheduleSpecification,
-  type SchedulerGroupSpecification,
-  type SstAppInput,
-  type SstConfigDefinition,
-  // The package barrel — never a module inside it.
-} from '@bluetel-ai/sisyphus-infra'
-
-/**
- * The slice of SST's generated globals this config uses, declared at module
- * scope. `.sst/platform/config.d.ts` only exists after `sst install` and is
- * git-ignored, so declaring them here is what keeps the file checkable in CI.
- */
-interface PulumiOutput<TValue> {
-  readonly apply: <TResult>(transform: (value: TValue) => TResult) => PulumiOutput<TResult>
-}
-
-type DeployValue = PulumiOutput<string> | string
-
-declare const $config: <TOutputs>(
-  definition: SstConfigDefinition<TOutputs>,
-) => SstConfigDefinition<TOutputs>
-
-declare const $app: { readonly name: string; readonly stage: string }
-
-declare const $util: { readonly secret: (value: DeployValue) => PulumiOutput<string> }
-
-declare const aws: {
-  readonly getCallerIdentity: () => Promise<{ readonly accountId: string }>
-  readonly iam: {
-    readonly Role: new (
-      name: string,
-      args: { readonly name: string; readonly assumeRolePolicy: string },
-    ) => { readonly name: PulumiOutput<string>; readonly arn: PulumiOutput<string> }
-    readonly RolePolicy: new (
-      name: string,
-      args: {
-        readonly name: string
-        readonly role: PulumiOutput<string>
-        readonly policy: string
-      },
-    ) => object
-  }
-  readonly scheduler: {
-    readonly ScheduleGroup: new (
-      name: string,
-      args: { readonly name: string },
-    ) => { readonly name: PulumiOutput<string> }
-    readonly Schedule: new (
-      name: string,
-      args: {
-        readonly name: string
-        readonly groupName: string
-        readonly scheduleExpression: string
-        readonly scheduleExpressionTimezone: string
-        readonly flexibleTimeWindow: { readonly mode: 'OFF' }
-        readonly state: 'DISABLED' | 'ENABLED'
-        readonly target: {
-          readonly arn: string
-          readonly roleArn: string
-          readonly input: string
-        }
-      },
-    ) => { readonly name: PulumiOutput<string> }
-  }
-}
-
-declare const sst: {
-  readonly aws: {
-    readonly Function: new (
-      name: string,
-      args: {
-        readonly name: string
-        readonly handler: string
-        readonly runtime: string
-        readonly timeout: string
-        readonly memory: string
-        readonly environment: Readonly<Record<string, DeployValue>>
-      },
-    ) => { readonly arn: PulumiOutput<string> }
-  }
-}
+import type { PolicyDocument } from '@bluetel-ai/sisyphus-infra'
 
 /**
  * The control plane's Lambda entry point, owned by the app rather than by this
@@ -119,46 +47,78 @@ const CONTROL_PLANE_HANDLER = 'src/main.handler'
 
 const CONTROL_PLANE_RUNTIME = 'nodejs22.x'
 
-/** A tick drains a queue and reconciles a fleet; a minute is generous but finite. */
+/** A tick drains a queue and reconciles a fleet; five minutes is generous but finite. */
 const CONTROL_PLANE_TIMEOUT = '5 minutes'
 
 const CONTROL_PLANE_MEMORY = '1024 MB'
 
-const region = process.env.AWS_REGION ?? DEFAULT_AWS_REGION
-
 /**
- * EventBridge Scheduler assumes this role in order to invoke the control plane.
- * It can invoke exactly one function and do nothing else.
+ * Loads the stage's deploy-time configuration into `process.env`.
+ *
+ * The entry is created by this app's bootstrap stack and populated by an
+ * operator; it is read here rather than committed, so a credential never lands
+ * in the repository (FR-202). Values already present in the environment win, so
+ * a workflow's `AWS_REGION` still overrides the stored one.
  */
-const buildSchedulerTrustPolicy = (): PolicyDocument => ({
-  Version: POLICY_VERSION,
-  Statement: [
-    {
-      Sid: 'EventBridgeSchedulerAssumption',
-      Effect: 'Allow',
-      Principal: { Service: ['scheduler.amazonaws.com'] },
-      Action: ['sts:AssumeRole'],
-    },
-  ],
-})
+const loadStageConfiguration = async (sstStage: string): Promise<string> => {
+  const { DEFAULT_AWS_REGION } = await import('@bluetel-ai/sisyphus-infra')
+  const { fetchSsmParamToProcessEnv, getEnvParameterName } =
+    await import('@bluetel-ai/sisyphus-infra/scripts')
 
-const buildSchedulerInvokePolicy = (functionArn: string): PolicyDocument => ({
-  Version: POLICY_VERSION,
-  Statement: [
-    {
-      Sid: 'InvokeControlPlane',
-      Effect: 'Allow',
-      Action: ['lambda:InvokeFunction'],
-      Resource: [functionArn],
-    },
-  ],
-})
+  const region = process.env.AWS_REGION ?? DEFAULT_AWS_REGION
+
+  await fetchSsmParamToProcessEnv({
+    parameterName: getEnvParameterName('control-plane', sstStage),
+    region,
+  })
+
+  return region
+}
 
 export default $config({
-  app: (input: SstAppInput) =>
-    buildSstApp({ appName: 'sisyphus-control-plane', sstStage: input.stage, region }),
+  app: async (input) => {
+    const { getStageRemoval, isBootstrapStage } = await import('@bluetel-ai/sisyphus-infra')
+
+    // The config file selects the stack; the stage selects only the environment.
+    // This is the other half of that: a stage belonging to the sibling config is
+    // refused outright, so neither half of the pair can be reached by getting a
+    // stage string wrong (FR-199).
+    if (isBootstrapStage(input.stage)) {
+      throw new Error(
+        `Stage "${input.stage}" belongs to sst-bootstrap.config.ts. This config builds the ` +
+          `application stack; deploy it against the plain stage.`,
+      )
+    }
+
+    const region = await loadStageConfiguration(input.stage)
+
+    return {
+      name: 'sisyphus-control-plane',
+      home: 'aws',
+      ...getStageRemoval(input.stage),
+      // Pinned, and pinned identically in `sst-bootstrap.config.ts` and
+      // `sst-install.config.ts`. The install config generates the types this
+      // file is compiled against; a drift here compiles against one API and
+      // deploys against another.
+      providers: { aws: { version: '6.66.2', region: region as aws.Region } },
+    }
+  },
 
   run: async () => {
+    const {
+      POLICY_VERSION,
+      createScheduler,
+      getBucketNames,
+      getConnectionUrlParameterName,
+      getEnvSecret,
+      getResourceIdentifier,
+      getStackScope,
+      readEnvRecord,
+      // The package barrel — never a module inside it.
+    } = await import('@bluetel-ai/sisyphus-infra')
+
+    const region = await loadStageConfiguration($app.stage)
+
     const scope = getStackScope($app.stage)
     const stage = scope.stack
     const environment = readEnvRecord(process.env)
@@ -173,10 +133,55 @@ export default $config({
       return value
     }
 
+    /**
+     * `$util.secret` is overloaded, and passing it as a bare function reference
+     * selects the overload that infers `undefined`. Naming the argument and the
+     * return type picks the one that wraps a string.
+     */
+    const wrapSecret = (value: string): $util.Output<string> => $util.secret(value)
+
+    // Read the panel's own published parameter rather than a copy of the value
+    // living in this deployable's env blob. The env blob is operator-populated
+    // and has no mechanism to notice a password rotation or a recreated
+    // instance; reading the parameter the panel's stack writes to means there
+    // is exactly one place the connection URL can come from.
+    const { value: databaseConnectionUrl } = await aws.ssm.getParameter({
+      name: getConnectionUrlParameterName(stage),
+      withDecryption: true,
+    })
+
+    /**
+     * EventBridge Scheduler assumes this role in order to invoke the control
+     * plane. It can invoke exactly one function and do nothing else.
+     */
+    const buildSchedulerTrustPolicy = (): PolicyDocument => ({
+      Version: POLICY_VERSION,
+      Statement: [
+        {
+          Sid: 'EventBridgeSchedulerAssumption',
+          Effect: 'Allow',
+          Principal: { Service: ['scheduler.amazonaws.com'] },
+          Action: ['sts:AssumeRole'],
+        },
+      ],
+    })
+
+    const buildSchedulerInvokePolicy = (functionArn: string): PolicyDocument => ({
+      Version: POLICY_VERSION,
+      Statement: [
+        {
+          Sid: 'InvokeControlPlane',
+          Effect: 'Allow',
+          Action: ['lambda:InvokeFunction'],
+          Resource: [functionArn],
+        },
+      ],
+    })
+
     // Names, not resources: the panel's stack creates these buckets. Deriving
-    // the names from the same builder is what makes "the same bucket" a fact
+    // the names from the same helper is what makes "the same bucket" a fact
     // rather than a convention.
-    const buckets = buildBucketSpecifications({ scope })
+    const bucketNames = getBucketNames(scope)
     const functionName = getResourceIdentifier(scope, 'control-plane')
 
     // The function's own ARN, composed rather than read back from the resource:
@@ -198,27 +203,10 @@ export default $config({
       policy: JSON.stringify(buildSchedulerInvokePolicy(functionArn)),
     })
 
-    const scheduler = createScheduler(
-      {
-        createScheduleGroup: (name: string, specification: SchedulerGroupSpecification) =>
-          new aws.scheduler.ScheduleGroup(name, { name: specification.name }),
-        createSchedule: (name: string, specification: ScheduleSpecification) =>
-          new aws.scheduler.Schedule(name, {
-            name: specification.name,
-            groupName: specification.groupName,
-            scheduleExpression: specification.scheduleExpression,
-            scheduleExpressionTimezone: specification.scheduleExpressionTimezone,
-            flexibleTimeWindow: { mode: specification.flexibleTimeWindowMode },
-            state: specification.state,
-            target: {
-              arn: specification.target.arn,
-              roleArn: specification.target.roleArn,
-              input: specification.target.input,
-            },
-          }),
-      },
-      { scope, target: { functionArn, roleArn: schedulerRoleArn } },
-    )
+    const scheduler = createScheduler({
+      scope,
+      target: { functionArn, roleArn: schedulerRoleArn },
+    })
 
     new sst.aws.Function('SisyphusControlPlane', {
       name: functionName,
@@ -229,25 +217,21 @@ export default $config({
       environment: {
         AWS_REGION: region,
         SISYPHUS_STAGE: stage,
-        DATABASE_URL: getEnvSecret($util.secret, environment, 'DATABASE_URL'),
+        DATABASE_URL: wrapSecret(databaseConnectionUrl),
         SISYPHUS_MACHINE_SURFACE_URL: requireClearValue('SISYPHUS_MACHINE_SURFACE_URL'),
         SISYPHUS_MACHINE_CREDENTIAL_SECRET: getEnvSecret(
-          $util.secret,
+          wrapSecret,
           environment,
           'SISYPHUS_MACHINE_CREDENTIAL_SECRET',
         ),
-        SISYPHUS_SLACK_BOT_TOKEN: getEnvSecret(
-          $util.secret,
-          environment,
-          'SISYPHUS_SLACK_BOT_TOKEN',
-        ),
+        SISYPHUS_SLACK_BOT_TOKEN: getEnvSecret(wrapSecret, environment, 'SISYPHUS_SLACK_BOT_TOKEN'),
         SISYPHUS_BOOTSTRAP_ADMIN_EMAILS: requireClearValue('SISYPHUS_BOOTSTRAP_ADMIN_EMAILS'),
         SISYPHUS_PANEL_URL: requireClearValue('SISYPHUS_PANEL_URL'),
-        SISYPHUS_LOGS_BUCKET: buckets.logs.name,
-        SISYPHUS_SNAPSHOTS_BUCKET: buckets.snapshots.name,
-        SISYPHUS_BUNDLES_BUCKET: buckets.bundles.name,
-        SISYPHUS_ARTIFACTS_BUCKET: buckets.artifacts.name,
-        SISYPHUS_SCHEDULE_GROUP_NAME: scheduler.groupSpecification.name,
+        SISYPHUS_LOGS_BUCKET: bucketNames.logs,
+        SISYPHUS_SNAPSHOTS_BUCKET: bucketNames.snapshots,
+        SISYPHUS_BUNDLES_BUCKET: bucketNames.bundles,
+        SISYPHUS_ARTIFACTS_BUCKET: bucketNames.artifacts,
+        SISYPHUS_SCHEDULE_GROUP_NAME: scheduler.groupName,
         SISYPHUS_SCHEDULER_TARGET_ARN: functionArn,
         SISYPHUS_SCHEDULER_ROLE_ARN: schedulerRoleArn,
         SISYPHUS_EXECUTOR_AMI_ID: requireClearValue('SISYPHUS_EXECUTOR_AMI_ID'),
@@ -263,7 +247,7 @@ export default $config({
 
     return {
       controlPlaneArn: functionArn,
-      scheduleGroup: scheduler.groupSpecification.name,
+      scheduleGroup: scheduler.groupName,
       databaseParameter: getConnectionUrlParameterName(stage),
     }
   },

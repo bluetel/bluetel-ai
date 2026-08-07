@@ -110,9 +110,12 @@ suspend(reason: 'pause' | 'interruption' | 'stop'):
 **Step 2 can fail, and it must not be allowed to lose work.** If durable storage is unreachable at a snapshot
 boundary, the run **parks and retries** with backoff rather than continuing unsnapshotted or terminating
 (FR-082). Parking holds the agent at the turn boundary reached in step 1 — the process stays alive and no
-further turns are consumed, so the cost of parking is storage retries, not inference. The workflow reports a
-distinct parked reason so the panel can say "waiting on storage" rather than showing a stalled pause, and the
-reconciler treats a parked run as live while its heartbeat continues (FR-048). Only if the retry budget is
+further turns are consumed, so the cost of parking is storage retries, not inference. Every failed attempt is
+reported through `reportSnapshotPark(boundary, attempt, maxAttempts, nextDelayMs)` — the counterpart to step 3,
+and **not** the `parked_resumable` outcome: the run stays live, the instance stays held, and
+`workflows.state` is untouched. That is what lets the panel say "waiting on storage" rather than show a stalled
+pause. The heartbeat continues throughout, so the reconciler treats a parked run as live (FR-048). Only if the
+retry budget is
 exhausted does the run fail — and it fails **naming the snapshot boundary it could not persist**, because that
 is the difference between "your work is gone" and "your work is on an instance we are about to destroy".
 

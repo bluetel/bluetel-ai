@@ -5,6 +5,7 @@ import type { Iteration, ReviewFinding } from '../../db'
 import { iterations, reviewFindings } from '../../db'
 import type { ReportIterationInput, ReviewFindingInput } from '../../schemas'
 import { reportIterationInput } from '../../schemas'
+import { emitWorkflowEvent, notificationEventForVerdict } from '../notify'
 import { machineProcedure } from '../procedures'
 
 import type { MachineContext } from './guard'
@@ -165,15 +166,10 @@ const resolveAnchors = async (
 }
 
 /**
- * Record one iteration of the autonomous loop against the credential's workflow.
- *
- * @param ctx - The machine resolver context.
- * @param input - The validated `reportIteration` payload.
- * @returns The iteration, its findings, and whether this call was the one that wrote them.
- * @throws {TRPCError} `BAD_REQUEST` when a fourth pass is attempted; `FORBIDDEN` when a finding
- *   anchors to another workflow's entry.
+ * Write the pass and its findings. Split from {@link reportIteration} so the transaction has a
+ * name and an end, and so it is visually impossible to add a notification inside it.
  */
-export const reportIteration = async (
+const recordIteration = async (
   ctx: MachineContext,
   input: ReportIterationInput,
 ): Promise<IterationReport> => {
@@ -248,6 +244,43 @@ export const reportIteration = async (
 
     throw cause
   }
+}
+
+/**
+ * Record one iteration of the autonomous loop, and announce a failed one (FR-061, FR-062, FR-136).
+ *
+ * `review_iteration_failed` is on FR-136's list and is set nowhere else in the platform, so without
+ * the emission below it never fires. The same three rules the terminal report follows apply here,
+ * and for the same reasons — see the module comment in `./reporting.ts`:
+ *
+ * - **after the commit**, never inside it: a notifier enlisted in the transaction would roll a
+ *   recorded verdict back on a Slack outage, which is the FR-141 failure;
+ * - **only when `recorded`**: FR-047 has the executor retrying this call, and the first verdict
+ *   wins, so announcing a retry would be a second message about one pass;
+ * - **only on `fail`**: a passing iteration is not news, and a message per pass of a three-pass
+ *   loop is the burst FR-139 exists to prevent. `notificationEventForVerdict` states which is
+ *   which, as a total map, so a third verdict could not slip through as silence.
+ *
+ * @param ctx - The machine resolver context.
+ * @param input - The validated `reportIteration` payload.
+ * @returns The iteration, its findings, and whether this call was the one that wrote them.
+ * @throws {TRPCError} `BAD_REQUEST` when a fourth pass is attempted; `FORBIDDEN` when a finding
+ *   anchors to another workflow's entry.
+ */
+export const reportIteration = async (
+  ctx: MachineContext,
+  input: ReportIterationInput,
+): Promise<IterationReport> => {
+  const report = await recordIteration(ctx, input)
+  const event = notificationEventForVerdict(input.verdict)
+
+  if (report.recorded && event !== undefined) {
+    // Result deliberately unread: the verdict is committed and FR-141 forbids a delivery failure
+    // changing it.
+    await emitWorkflowEvent(ctx.dependencies.notifier, { workflowId: ctx.workflowId, event })
+  }
+
+  return report
 }
 
 /**

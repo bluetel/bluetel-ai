@@ -43,6 +43,29 @@ export type {
 export { escapeSearchTerm, toWorkflowPage, workflowListConditions } from './filters'
 export type { WorkflowPage } from './filters'
 
+/**
+ * Reading a completed run back as it was launched (SC-021).
+ *
+ * `reconstructLaunchConfiguration` is exported beside the two readers because the rule it encodes —
+ * which field comes from the pinned version and which from the mutable current row — is the whole
+ * requirement, and it is assertable without a database.
+ */
+export {
+  loadLaunchConfiguration,
+  readLaunchConfiguration,
+  reconstructLaunchConfiguration,
+} from './launch-configuration'
+export type {
+  LaunchConfiguration,
+  LaunchConfigurationReader,
+  LaunchConfigurationRows,
+  LiveDisplayNames,
+  LiveProfileRow,
+  PinnedLaunchValues,
+  PinnedProfileVersionRow,
+  PinnedWorkspaceVersionRow,
+} from './launch-configuration'
+
 export { lockedFieldError, OVERRIDABLE_FIELDS, resolveLaunchPlan } from './launch-plan'
 export type { AppliedOverride, LaunchPlan, OverridableField } from './launch-plan'
 
@@ -62,6 +85,9 @@ export type {
   WorkflowDetail,
   WorkflowListing,
 } from './queries'
+
+export { isWaitingOnStorage, readStoragePark } from './storage-park'
+export type { StoragePark } from './storage-park'
 
 /**
  * Attributed spend (FR-156, SC-051).
@@ -152,6 +178,16 @@ export {
   readProfileOverridesInScope,
 } from './overrides'
 export type { OverridableFieldDescription, OverrideReader, RecordedOverride } from './overrides'
+
+/**
+ * The settings screen's read (FR-138, FR-140).
+ *
+ * Exported beside the preference readers because "can a notification reach this person at all?" is
+ * asked of stored rows as often as it is asked over tRPC — and because the FR-140 unnotifiable rule
+ * is worth being able to assert without mounting a router.
+ */
+export { readNotificationSettings } from './notification-settings'
+export type { NotificationSettings, NotificationSettingsReader } from './notification-settings'
 
 export {
   applyPreferenceDefaults,

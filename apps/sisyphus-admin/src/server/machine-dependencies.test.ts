@@ -10,7 +10,11 @@ const getAuthDatabase = vi.fn(() => ({ handle: 'database' }))
 
 vi.mock('@sisyphus-admin/lib/auth', () => ({ auth: vi.fn(), getAuthDatabase }))
 vi.mock('@sisyphus-admin/env', () => ({
-  env: { SISYPHUS_MACHINE_CREDENTIAL_SECRET: 'machine-secret' },
+  env: {
+    SISYPHUS_MACHINE_CREDENTIAL_SECRET: 'machine-secret',
+    SISYPHUS_SLACK_BOT_TOKEN: 'slack-bot-token-fixture',
+    SISYPHUS_PANEL_URL: 'https://sisyphus.example.com',
+  },
 }))
 
 const { createMachineDependencies, resolveNoSession } = await import('./machine-dependencies')
@@ -22,13 +26,28 @@ beforeEach(() => {
 })
 
 describe('createMachineDependencies', () => {
-  it('supplies all four dependencies the context reads', () => {
+  it('supplies the four dependencies the context reads, plus the notifier', () => {
     expect(Object.keys(createMachineDependencies()).sort()).toStrictEqual([
       'db',
+      'notifier',
       'recordDenial',
       'resolveMachineCredential',
       'resolveSession',
     ])
+  })
+
+  /**
+   * The machine surface is where `reportTerminal` and `recordIteration` land, so it is the mount
+   * whose absent notifier would be a platform that finishes runs and tells nobody (FR-136).
+   * `sisyphus-api` treats `notifier: undefined` as a silent no-op by design, which is exactly why
+   * a missing wiring here is invisible at run time and has to be asserted.
+   */
+  it('wires a notifier, because an unwired one is a silent no-op (FR-136)', () => {
+    expect(typeof createMachineDependencies().notifier?.workflowEvent).toBe('function')
+  })
+
+  it('leaves the interactive mount without one — no human request reports a terminal outcome', () => {
+    expect(createSisyphusDependencies().notifier).toBeUndefined()
   })
 
   it('resolves no session, so a panel cookie signs nobody in on the machine surface (FR-005)', async () => {

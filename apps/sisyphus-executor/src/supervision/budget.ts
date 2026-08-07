@@ -43,6 +43,28 @@
  * "waiting on storage" rather than showing a stalled pause. SC-003 asks for ten seconds in 99% of
  * attempts, and the remaining 1% is this — visibly parked, never silently late, and never allowed
  * to advance without a snapshot.
+ *
+ * ## Each term is now a real timeout, and one of them had to be split to become one (T185, T189)
+ *
+ * Every term below is passed to {@link import('./deadline').withDeadline} at the operation it
+ * names — the poll loop bounds the pull and the acknowledgement, and `session/suspend.ts` bounds
+ * the quiesce, the capture and the registration. Wiring them up is what turned the table from a
+ * claim into a constraint, and doing so exposed an arithmetic error the summing tests could never
+ * have caught:
+ *
+ * **`snapshot` was one term naming two sequential operations** — "Capture *and*
+ * `registerSnapshot`". Bounding each of them at 1500 ms would have made the measured worst case
+ * 10 500 ms, over SC-003's ceiling, while `pauseLatencyBudget().totalMs` went on reporting 9000. So
+ * the term is split into {@link SNAPSHOT_CAPTURE_BUDGET_MS} and
+ * {@link SNAPSHOT_REGISTER_BUDGET_MS}, which sum to it. The declared table is unchanged and the
+ * composed operation now actually fits inside it — `budget.test.ts` measures the path rather than
+ * adding the constants up, which is the whole of FR-205.
+ *
+ * {@link SNAPSHOT_RETRY_BUDGET_MS} is deliberately **not** a term of the sum. Once the first
+ * capture attempt has blown its share, SC-003's deadline is already missed and cannot be recovered;
+ * the only requirement still in force is the other half of the criterion — *in no case loses work
+ * already produced* — so the retries `park.ts` makes are given room to finish rather than being
+ * timed out eight more times into a run that fails holding an unwritten working tree.
  */
 
 /** SC-003's ceiling. Every budget below is a share of this. */
@@ -66,6 +88,32 @@ export const QUIESCE_BUDGET_MS = 4_000
 
 /** Capturing the workspace archive and registering it against the workflow (FR-050). */
 export const SNAPSHOT_BUDGET_MS = 1_500
+
+/**
+ * The capture half of {@link SNAPSHOT_BUDGET_MS} — writing the archive to durable storage.
+ *
+ * The larger half, because it moves bytes while registration moves a row.
+ */
+export const SNAPSHOT_CAPTURE_BUDGET_MS = 1_000
+
+/**
+ * The registration half of {@link SNAPSHOT_BUDGET_MS} — `registerSnapshot` on the machine surface.
+ *
+ * The same size as {@link ACKNOWLEDGE_BUDGET_MS} because it is the same kind of thing: one small
+ * write over the machine surface. FR-049 puts it before the acknowledgement, so it is inside
+ * SC-003 and has to be paid for out of the ten seconds like everything else.
+ */
+export const SNAPSHOT_REGISTER_BUDGET_MS = 500
+
+/**
+ * What a **retried** capture is allowed, once the first attempt has already blown its share.
+ *
+ * Not a term of the sum; see the module comment. By the time a retry is running, SC-003's ten
+ * seconds are gone and the only requirement left is that no work is lost — so a large working tree
+ * or a slow store gets a minute per attempt rather than being cut off at a deadline that is already
+ * missed. The park budget still bounds the whole thing (`session/park.ts`).
+ */
+export const SNAPSHOT_RETRY_BUDGET_MS = 60_000
 
 /** `acknowledgeCommand` — after which, and only after which, the panel may say "paused". */
 export const ACKNOWLEDGE_BUDGET_MS = 500

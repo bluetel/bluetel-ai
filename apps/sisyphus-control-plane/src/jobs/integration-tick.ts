@@ -5,6 +5,7 @@ import type {
   WriteBackSkipReason,
 } from '@bluetel-ai/sisyphus-api/contracts'
 import type { Integration, IntegrationRun, SisyphusDatabase } from '@bluetel-ai/sisyphus-api/db'
+import type { TickStart, WorkflowNotifier } from '@bluetel-ai/sisyphus-notify'
 
 import { assembleIntegrationPrompt, hasNoTask } from './assemble-prompt'
 import type { ConnectorRegistry } from './connector-registry'
@@ -15,9 +16,9 @@ import {
   claimAndStart,
   closeRun,
   countStartedSince,
-  findCompetingClaim,
   findIntegration,
   findOpenRun,
+  findTicketOwner,
   listMappings,
   openRun,
   readProfileLaunch,
@@ -43,7 +44,17 @@ import { runJob, toError } from './run-job'
  *    f. writeBack('picked_up')                                              FR-142
  * 5. Record the run: examined / matched / started / skipped + reasons       FR-105
  * 6. On failure: increment consecutive failures; auto-disable past threshold FR-106, FR-108
+ * 7. Tell each owner what this tick started — one message, not one per run  FR-139
  * ```
+ *
+ * ## Why step 7 is not in the contract's sketch, and is here anyway
+ *
+ * `@bluetel-ai/sisyphus-notify` was built for FR-136 to FR-141 and, until T177, had no production
+ * caller at all: the delivery path existed and nothing had ever sent a message through it. The tick
+ * is one of the two places in this app that a person needs to hear from — a board that quietly
+ * started six runs against somebody's name is exactly the surprise FR-139's summary exists to
+ * prevent — so the tick announces, through a {@link WorkflowNotifier} port that cannot fail it
+ * (FR-141).
  *
  * ## The one place the algorithm departs from the sketch, and why
  *
@@ -53,12 +64,14 @@ import { runJob, toError } from './run-job'
  * first costs nothing when the claim is then refused: no run was started, and no comment is posted,
  * which is exactly what the sketch's (d) requires of a lost claim.
  *
- * ## Why a lost claim posts no comment
+ * ## Why a ticket somebody else owns posts no comment
  *
  * A ticket that loses the claim was already claimed, which means the first claim already commented
  * on it (FR-142/FR-143). Commenting again would put a second identical comment from an automated
  * system on a customer's ticket every time two ticks overlapped — which is the failure `writeBack`'s
- * idempotency exists to prevent, arrived at from the other direction.
+ * idempotency exists to prevent, arrived at from the other direction. A ticket deferred to the
+ * board's owning integration under FR-104 is the same case one step earlier: the comment belongs to
+ * whoever starts the run, and this tick is not going to.
  *
  * ## What a failing write-back does not do
  *
@@ -86,6 +99,13 @@ export interface IntegrationTickDependencies {
    * takes one rather than implementing one.
    */
   readonly redactor: PromptRedactor
+  /**
+   * Tells each owner what this tick started — **one message however many runs** (T177, FR-139).
+   *
+   * A port rather than a Slack client, so this suite makes no Slack call and so a tick cannot be
+   * failed by a delivery failure (FR-141). Optional: a tick with no notifier still ticks.
+   */
+  readonly notifier?: WorkflowNotifier
   /** Injectable so a test states the clock rather than racing it. */
   readonly now?: () => Date
 }
@@ -114,6 +134,14 @@ export interface TickCompleted {
   readonly started: number
   readonly startedWorkflowIds: readonly string[]
   readonly skips: readonly RecordedSkip[]
+  /**
+   * The tick started runs and the summary could not be handed off (FR-141).
+   *
+   * Reported rather than raised, and deliberately not a failed run: the workflows are committed and
+   * the board has been commented on, so failing the tick would have FR-106 count a Slack outage as
+   * a broken connector and eventually auto-disable a board that is working perfectly.
+   */
+  readonly notificationError: Error | undefined
 }
 
 /** Discovery threw, or the tick could not be assembled. Recorded, then retried (FR-105, FR-108). */
@@ -125,6 +153,8 @@ export interface TickFailed {
   /** True when this failure crossed the auto-disable threshold (FR-106). */
   readonly autoDisabled: boolean
   readonly consecutiveFailures: number
+  /** See {@link TickCompleted.notificationError}. A tick can fail after starting runs. */
+  readonly notificationError: Error | undefined
 }
 
 export type TickOutcome = TickCompleted | TickFailed | TickNotRun
@@ -148,7 +178,14 @@ export const connectorConfigFor = (integration: Integration): Record<string, unk
 interface TickLedger {
   matched: number
   started: number
-  readonly startedWorkflowIds: string[]
+  /**
+   * Each run started, with **who owns it** (FR-132).
+   *
+   * The owner is carried here rather than read back afterwards because FR-139's summary is grouped
+   * per recipient, and re-reading the owners would be a second query answering a question this loop
+   * has already resolved.
+   */
+  readonly starts: TickStart[]
   readonly skips: RecordedSkip[]
 }
 
@@ -306,19 +343,26 @@ const considerItem = async (options: {
     return
   }
 
-  // FR-104: another integration on the same board already holds this ticket.
-  const competing = await findCompetingClaim(dependencies.db, {
+  // FR-104: another integration on the same board owns this ticket. Decided by the configuration
+  // rather than by which of them ticked first — see `findTicketOwner`.
+  const owner = await findTicketOwner(dependencies.db, {
     integrationId: integration.id,
     externalId: item.externalId,
     baseUrl: integration.baseUrl,
     projectPrefix: integration.projectPrefix,
   })
 
-  if (competing !== undefined) {
+  if (owner !== undefined) {
+    // No comment either way. Where a run exists, the owner commented when it claimed; where one
+    // does not, the owner will comment when it does. A comment from the deferring integration would
+    // put a second automated message on a customer's ticket for a decision it did not make.
     ledger.skips.push({
       externalId: item.externalId,
       reason: 'claimed_by_another_integration',
-      detail: `integration ${competing.integrationId} already holds this ticket`,
+      detail:
+        owner.reason === 'already_started'
+          ? `integration ${owner.integrationId} already holds this ticket`
+          : `integration ${owner.integrationId} is the lowest-id enabled integration on this board, so this ticket is its to start`,
     })
     return
   }
@@ -354,7 +398,7 @@ const considerItem = async (options: {
   }
 
   ledger.started += 1
-  ledger.startedWorkflowIds.push(claimed.workflowId)
+  ledger.starts.push({ workflowId: claimed.workflowId, ownerUserId })
 
   // (f) Say so on the ticket (FR-142).
   await sayOnItem(
@@ -368,6 +412,36 @@ const considerItem = async (options: {
     },
     ledger,
   )
+}
+
+/**
+ * Tell each owner what the tick started — **one message however many runs** (T177, FR-139).
+ *
+ * Called after the run record is closed, and its failure is returned rather than thrown. FR-141's
+ * rule generalises: a tick that started six runs and could not announce them started six runs. The
+ * alternative would have FR-106 count a Slack outage towards the consecutive-failure threshold and
+ * auto-disable a board whose connector never faltered.
+ *
+ * @returns The failure, if the notifier had one. `undefined` when it worked or was never wired.
+ */
+const announceStarts = async (input: {
+  readonly notifier: WorkflowNotifier | undefined
+  readonly integrationName: string
+  readonly starts: readonly TickStart[]
+}): Promise<Error | undefined> => {
+  if (input.notifier === undefined || input.starts.length === 0) {
+    return undefined
+  }
+
+  try {
+    await input.notifier.integrationTick({
+      integrationName: input.integrationName,
+      starts: input.starts,
+    })
+    return undefined
+  } catch (thrown) {
+    return toError(thrown)
+  }
 }
 
 /**
@@ -406,7 +480,7 @@ export const integrationTick = async (options: IntegrationTickOptions): Promise<
   }
 
   const run = await openRun(db, { integrationId, trigger })
-  const ledger: TickLedger = { matched: 0, started: 0, startedWorkflowIds: [], skips: [] }
+  const ledger: TickLedger = { matched: 0, started: 0, starts: [], skips: [] }
 
   try {
     const credential = await options.readCredential(integration.credentialSecretArn)
@@ -455,6 +529,14 @@ export const integrationTick = async (options: IntegrationTickOptions): Promise<
 
     await recordRunOutcome(db, { integrationId, succeeded: true })
 
+    // 7. Tell the owners, once the run is recorded and nothing is left that a delivery could undo
+    //    (FR-139).
+    const notificationError = await announceStarts({
+      notifier: options.notifier,
+      integrationName: integration.name,
+      starts: ledger.starts,
+    })
+
     return {
       outcome: 'completed',
       integrationId,
@@ -462,8 +544,9 @@ export const integrationTick = async (options: IntegrationTickOptions): Promise<
       examined: items.length,
       matched: ledger.matched,
       started: ledger.started,
-      startedWorkflowIds: ledger.startedWorkflowIds,
+      startedWorkflowIds: ledger.starts.map((start) => start.workflowId),
       skips: ledger.skips,
+      notificationError,
     }
   } catch (thrown) {
     // 6. A failed run is recorded and counted, never swallowed and never thrown (FR-106, FR-108).
@@ -490,6 +573,13 @@ export const integrationTick = async (options: IntegrationTickOptions): Promise<
       error: error.message,
       autoDisabled: health.autoDisabled,
       consecutiveFailures: health.consecutiveFailures,
+      // A tick that died after starting three runs still started three runs, and their owners are
+      // entitled to hear about them. `announceStarts` returns early when there are none.
+      notificationError: await announceStarts({
+        notifier: options.notifier,
+        integrationName: integration.name,
+        starts: ledger.starts,
+      }),
     }
   }
 }

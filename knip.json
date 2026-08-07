@@ -29,54 +29,191 @@
       "project": ["src/**/*.{ts,tsx}"],
       "vite": true
     },
-    // Three SST apps. `sst.config.ts` is loaded by the SST CLI, never imported by any source
-    // file, so it is an entry point rather than dead code in all three.
+    // ---------------------------------------------------------------------------
+    // The `!` suffix, and why every Sisyphus pattern below carries one
+    // ---------------------------------------------------------------------------
+    // A trailing `!` marks a pattern as a *production* pattern. `knip` in its default
+    // mode strips the suffix and behaves exactly as it did without it; `knip
+    // --production` keeps only the suffixed patterns and negates everything else. The
+    // suffix is therefore what makes the orphan gate (`pnpm knip:orphans`, SC-063)
+    // able to see anything at all: without it `--production` resolves an empty entry
+    // set, analyses zero files, and reports zero problems while looking green.
+    //
+    // The rule for deciding whether a pattern earns a `!`: it does when the thing it
+    // matches is reached by something *running in production* — a Lambda handler, a
+    // Next.js route, a published package subpath, a config the deployment tool loads.
+    // It does not when the only thing that reaches it is a test, a build script or a
+    // barrel that exists to describe a surface nobody calls yet. Adding a `!` to the
+    // second kind is how the assembly gap SC-063 exists to catch gets hidden again.
+    //
+    // Three SST apps. `sst.config.ts` is loaded by the SST CLI, never imported by any
+    // source file, so it is an entry point rather than dead code in all three — and
+    // since the T171 rewrite each deployable has three of them: the application stack,
+    // the once-per-stage bootstrap, and the credential-free install config that
+    // generates types. All three are production entries, and all three have to sit in
+    // `project` as well, or the `sisyphus-infra` exports they are the sole callers of
+    // are reported as orphans.
     "apps/sisyphus-admin": {
+      // `tailwind.config.ts` is the sole production caller of `src/styles/theme.ts` — the theme is
+      // the token source the whole panel is built from, and it is imported by the Tailwind config
+      // rather than by any component. It has to be listed in `project` as well as `entry`, or the
+      // theme is reported as a module nobody calls.
       "entry": [
-        "src/app/**/{page,layout,loading,error,not-found,default,template,route}.{ts,tsx}",
-        "sst.config.ts"
+        "src/app/**/{page,layout,loading,error,not-found,default,template,route}.{ts,tsx}!",
+        "sst.config.ts!",
+        "sst-bootstrap.config.ts!",
+        "sst-install.config.ts!",
+        "tailwind.config.ts!"
       ],
-      "project": ["src/**/*.{ts,tsx}"],
-      "next": true
+      "project": [
+        "src/**/*.{ts,tsx}!",
+        "sst*.config.ts!",
+        "tailwind.config.ts!",
+        // ---- production-only exclusions -------------------------------------------------
+        // A pattern that both starts and ends with `!` is dropped from the default run and kept
+        // as a negation in the production run. That is how a module can stay fully analysed by
+        // `pnpm knip` while being excluded from the orphan gate, which is the honest shape for
+        // something that genuinely has no production caller *by design*.
+        //
+        // `src/app/api/*/index.ts`: the repo requires a barrel per directory, but Next.js reaches
+        // a route by its path — `[workflowId]/route.ts` imports `../log-segment-poll` directly and
+        // never the barrel beside it. The barrel is the directory's documented surface and its own
+        // `index.test.ts` asserts that surface; no production importer is possible here.
+        "!src/app/api/*/index.ts!",
+        // The S3 live-log measurement harness. `src/app/api/stream/index.ts` states the split in
+        // its own header: these three are evidence that keeps `SPIKE-FINDINGS.md` reproducible,
+        // and nothing in the production path imports them. Deleting them would delete the record
+        // of why `log-segment-poll` is the transport.
+        "!src/app/api/stream/latency-stats.ts!",
+        "!src/app/api/stream/spike-fixture.ts!",
+        "!src/app/api/stream/spike-log-stream.ts!",
+        // Test support that has to live in `src` so sibling suites can import it. `lib/bundles/
+        // index.ts` deliberately does not re-export the fake, and says so.
+        "!src/lib/bundles/fake-object-store.ts!",
+        // `findDesignLiterals` is the design-audit assertion itself (FR-021): it is called from
+        // component tests, and a production caller would mean the panel audits itself at runtime.
+        "!src/styles/literal-audit.ts!"
+      ],
+      "next": true,
+      // Knip's Tailwind plugin registers `tailwind.config.ts` as a plugin entry, and production
+      // mode negates every plugin entry that is not declared production — so the plugin's claim
+      // silently cancels the `tailwind.config.ts!` line above, and `src/styles/theme.ts`, the
+      // panel's entire token source, is reported as a module nobody calls. Disabling the plugin
+      // here hands the file back to the `entry` list, where it is declared as the production
+      // entry it actually is. Nothing is lost: `tailwindcss` is imported by the config for its
+      // `Config` type, so the dependency is still seen.
+      "tailwind": false
     },
     "apps/sisyphus-executor": {
       // `build.mjs` bundles `src/main.ts` with esbuild. `src/main.ts` is still the T007 scaffold —
       // it wires the shutdown registry and nothing else — so bootstrap, agent, session, delivery,
       // output, report, caps, skills, supervision and workflows are all built and tested but
-      // reachable from no entry point. The per-directory barrels are the app's real surface until
-      // `main()` is wired; without them knip reports the whole app as dead code. See the T143
-      // notes: this is an unfinished wiring task, not dead code to delete.
-      // `stub-agent-main.ts` is spawned as a child process by path, never imported.
-      "entry": ["src/main.ts", "src/*/index.ts", "src/agent/stub-agent-main.ts", "build.mjs"],
-      "project": ["src/**/*.ts"]
+      // reachable from no entry point.
+      //
+      // The per-directory barrels stay listed as entries so the *default* `knip` run does not
+      // report the whole app as dead code while the wiring task is open. They deliberately carry
+      // no `!`: under `--production` they are not entries, `main.ts` is the only way in, and
+      // everything `main()` does not reach is reported. That report is the point (SC-063) — it is
+      // the unfinished wiring, stated as a build failure instead of a comment.
+      //
+      // `stub-agent-main.ts` is spawned as a child process by path, never imported, and it really
+      // does run in production, so it is a production entry. `build.mjs` runs at build time only.
+      "entry": [
+        "src/main.ts!",
+        "src/agent/stub-agent-main.ts!",
+        "sst.config.ts!",
+        "sst-bootstrap.config.ts!",
+        "sst-install.config.ts!",
+        "src/*/index.ts",
+        "build.mjs"
+      ],
+      "project": [
+        "src/**/*.ts!",
+        "sst*.config.ts!",
+        // A fake `Repository` the delivery suites drive instead of a real clone. It is the
+        // counterpart to `git-repository.ts`, not a second implementation anything ships.
+        "!src/delivery/test-repository.ts!"
+      ]
     },
     "apps/sisyphus-control-plane": {
-      // `sst.config.ts` declares the Lambda handler `src/main.handler`, but that module does not
-      // exist yet — the jobs are written and tested, nothing dispatches them in production. The
-      // four barrels are the app's real surface until the handler lands; keeping `src/main.ts`
-      // listed makes knip's "no matches" hint the standing reminder that it is missing.
-      "entry": ["src/main.ts", "src/*/index.ts"],
-      "project": ["src/**/*.ts"]
+      // `src/main.ts` is the Lambda handler `sst.config.ts` declares as `src/main.handler` (T172):
+      // it parses the event, assembles the context and dispatches to a job. The barrels stay listed
+      // beside it — without a `!`, for the reason given under the executor — because each
+      // directory's public surface is a contract of its own and the default run should not report
+      // it as dead. Under `--production` the handler is the only entry, which is what makes a job
+      // the tick never dispatches to visible.
+      "entry": [
+        "src/main.ts!",
+        "sst.config.ts!",
+        "sst-bootstrap.config.ts!",
+        "sst-install.config.ts!",
+        "src/*/index.ts"
+      ],
+      "project": [
+        "src/**/*.ts!",
+        "sst*.config.ts!",
+        // Seeded worlds and an in-memory connector, used by the job suites to stand a tick up
+        // against a real database without an external system. No tick dispatches to them.
+        "!src/jobs/connector-fake.ts!",
+        "!src/jobs/integration-fixtures.ts!",
+        "!src/jobs/workflow-fixtures.ts!"
+      ]
     },
     // `packages/sisyphus-api` deliberately has no root `src/index.ts` and no root `.` export: the
     // absence of one is what makes FR-005 (the executor cannot reach server code) a build-time
     // fact rather than a convention. Its entries are exactly the five subpaths its `package.json`
-    // exposes — keep the two lists in step.
+    // exposes — keep the two lists in step. All five are real published surfaces, so all five are
+    // production entries; `drizzle.config.ts` is a migration-tooling config and is not.
     "packages/sisyphus-api": {
       "entry": [
-        "src/server/index.ts",
-        "src/client/index.ts",
-        "src/contracts/index.ts",
-        "src/db/index.ts",
-        "src/db/migrations/index.ts",
+        "src/server/index.ts!",
+        "src/client/index.ts!",
+        "src/contracts/index.ts!",
+        "src/db/index.ts!",
+        "src/db/migrations/index.ts!",
+        // `nx run sisyphus-api:migrate` runs `tsx src/db/migrations/cli.ts`, and CI runs that same
+        // command against the CI database before any suite. It is reached by path, not by import,
+        // so it is a production entry even though no `exports` subpath names it.
+        "src/db/migrations/cli.ts!",
         "drizzle.config.{ts,js}"
       ],
-      "project": ["src/**/*.{ts,tsx}"],
+      "project": [
+        "src/**/*.{ts,tsx}!",
+        // ---- production-only exclusions -------------------------------------------------
+        // Cross-package test support. These live in `src` because the panel's, the control
+        // plane's and the executor's suites all import them across the workspace boundary; a
+        // `__tests__` directory or a `.test.ts` name would make them unreachable to those
+        // callers. Each seeds or fakes something a production caller would never construct.
+        "!src/server/admin/test-database.ts!",
+        "!src/server/admin/integration-connectors-fake.ts!",
+        "!src/server/admin/reachability-fake.ts!",
+        "!src/server/machine/test-support.ts!",
+        "!src/server/notify/test-support.ts!",
+        "!src/server/workflow/test-support.ts!",
+        "!src/server/workflow/supervision-fixtures.ts!"
+      ],
       "ignoreDependencies": ["drizzle-kit"]
     },
+    // `packages/sisyphus-notify` needs its own block only to carry one production-only exclusion.
+    "packages/sisyphus-notify": {
+      "entry": ["src/index.ts!"],
+      "project": [
+        "src/**/*.ts!",
+        // Seeds a user with notification preferences for the delivery suites. `src/index.ts`
+        // does not re-export it; nothing in production seeds a user.
+        "!src/notify-fixtures.ts!"
+      ]
+    },
+    // `packages/sisyphus-infra` needs its own block rather than the `packages/*` catch-all: it has
+    // a second published subpath (`./scripts`) and an install config of its own, and the catch-all
+    // would leave both out of the production graph.
+    "packages/sisyphus-infra": {
+      "entry": ["src/index.ts!", "src/scripts/index.ts!", "sst-install.config.ts!"],
+      "project": ["src/**/*.ts!", "sst-install.config.ts!"]
+    },
     "packages/*": {
-      "entry": ["src/index.ts"],
-      "project": ["src/**/*.{ts,tsx}"]
+      "entry": ["src/index.ts!"],
+      "project": ["src/**/*.{ts,tsx}!"]
     },
     "packages/shared-frontend": {
       "entry": ["src/index.ts"],

@@ -1,5 +1,12 @@
 import { DataReadout } from '@sisyphus-admin/components/admin'
-import { Card, CardBody, CardHeader, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 
 import type { WorkflowEntryReadouts } from './workflow-detail-readouts'
 
@@ -27,8 +34,10 @@ export const WorkflowEntriesCard = ({ entries, loading = false }: WorkflowEntrie
       <StateChip>{loading ? 'reading' : `entries ${String(entries.length)}`}</StateChip>
     </CardHeader>
     <CardBody className="gap-default flex flex-col">
+      {loading ? <LoadingState>reading this run’s repositories</LoadingState> : null}
+
       {loading || entries.length > 0 ? null : (
-        <p className="type-data-mono text-graphite">no workspace entries recorded</p>
+        <EmptyState>no workspace entries recorded</EmptyState>
       )}
 
       {entries.map((entry) => (

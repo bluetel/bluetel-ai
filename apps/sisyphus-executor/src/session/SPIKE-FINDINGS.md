@@ -1,3 +1,5 @@
+<!-- cspell:ignore bsdtar -->
+
 # Spike S2 — cross-instance snapshot restore
 
 **Task**: T012 | **Gates**: US3 (resume) | **Research**: R2, S2 | **Date**: 2026-08-05

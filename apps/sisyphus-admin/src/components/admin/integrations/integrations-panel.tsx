@@ -6,7 +6,9 @@ import {
   Card,
   CardBody,
   CardHeader,
+  EmptyState,
   FieldError,
+  LoadingState,
   StateChip,
 } from '@sisyphus-admin/components/ui'
 import { useCallback, useEffect, useState } from 'react'
@@ -29,6 +31,8 @@ import type {
   ValidationView,
 } from './integrations-client'
 import { PromptPreview } from './prompt-preview'
+import type { RunHistoryRow } from './run-history'
+import { looksSilentlyStalled, toRunHistory } from './run-history'
 
 interface IntegrationsPanelProps {
   /** How the screen reaches the server. See `integrations-client.ts` for why this is injected. */
@@ -42,6 +46,12 @@ interface IntegrationsPanelProps {
 /** Which integration, if any, is being edited. */
 type EditorTarget = { readonly kind: 'new' } | { readonly kind: 'edit'; readonly id: string }
 
+/** One card's loaded tick history, and what it says about the board (FR-105). */
+interface RunHistorySlice {
+  readonly rows: readonly RunHistoryRow[]
+  readonly stalled: boolean
+}
+
 const describeFailure = (failure: unknown): FieldErrorContent => ({
   code: 'E_INTEGRATION_ACTION_FAILED',
   action: failure instanceof Error ? failure.message : 'The action could not be completed.',
@@ -53,15 +63,16 @@ const describeFailure = (failure: unknown): FieldErrorContent => ({
  *
  * Wiring only. Everything that can be *wrong* lives in a module beside this one with its own test:
  * how a schedule reads and when it next fires (`cron-schedule`, `schedule-presets`), how a draft
- * becomes a request (`integration-form-values`), how a row reads (`integration-listing`), and what
- * each control renders (`integration-card`, `integration-editor`, `credential-field`,
- * `schedule-field`, `prompt-preview`).
+ * becomes a request (`integration-form-values`), how a row reads (`integration-listing`), how the
+ * tick history reads and when it signals a silent stall (`run-history`), and what each control
+ * renders (`integration-card`, `integration-editor`, `credential-field`, `schedule-field`,
+ * `prompt-preview`).
  *
  * ## Why it takes a client rather than calling tRPC
  *
- * `admin.integrations` is built but not yet mounted on `adminRouter`; see `integrations-client.ts`.
- * The port is the right shape regardless — it is what lets this screen be rendered and asserted on
- * without a provider, a query client or a network.
+ * `admin.integrations` is mounted, and `api-integrations-client.ts` is the adapter over it that
+ * `integrations-screen.tsx` supplies. The port is kept because it is what lets this screen and its
+ * parts be rendered and asserted on without a provider, a query client or a network.
  *
  * ## The credential never round-trips
  *
@@ -86,6 +97,13 @@ export const IntegrationsPanel = ({ client, profiles, owners, now }: Integration
   const [previewFor, setPreviewFor] = useState<string>('')
   const [preview, setPreview] = useState<PromptPreviewView | undefined>(undefined)
 
+  // Which integration is being deleted, and which has its history open. One at a time each: a
+  // confirmation showing on two cards is a confirmation an admin can answer for the wrong one.
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | undefined>(undefined)
+  // A `Map` rather than a record: indexing a record types as present, which would make the "this
+  // card has not opened its history" case invisible to the compiler at every use site.
+  const [histories, setHistories] = useState<ReadonlyMap<string, RunHistorySlice>>(new Map())
+
   const refresh = useCallback(async () => {
     try {
       setIntegrations(await client.list())
@@ -105,6 +123,7 @@ export const IntegrationsPanel = ({ client, profiles, owners, now }: Integration
     setStartedAt(undefined)
     setBusyId(undefined)
     setError(undefined)
+    setConfirmingDeleteId(undefined)
     await refresh()
   }
 
@@ -182,8 +201,10 @@ export const IntegrationsPanel = ({ client, profiles, owners, now }: Integration
 
           {listError === undefined ? null : <FieldError {...listError} />}
 
-          {!loaded || integrations.length > 0 ? null : (
-            <p className="type-data-mono text-graphite">no integrations have been created</p>
+          {loaded ? null : <LoadingState>reading the integrations</LoadingState>}
+
+          {!loaded || listError !== undefined || integrations.length > 0 ? null : (
+            <EmptyState>no integrations have been created</EmptyState>
           )}
 
           {target === undefined ? (
@@ -227,42 +248,86 @@ export const IntegrationsPanel = ({ client, profiles, owners, now }: Integration
         />
       )}
 
-      {integrations.map((integration) => (
-        <IntegrationCard
-          key={integration.id}
-          integration={toIntegrationReadouts(integration, now)}
-          validation={validations[integration.id]}
-          startedAt={busyId === integration.id ? startedAt : undefined}
-          error={busyId === integration.id ? error : undefined}
-          onEdit={() => {
-            setDraft(draftFromIntegration(integration))
-            setDraftErrors({})
-            setError(undefined)
-            setTarget({ kind: 'edit', id: integration.id })
-          }}
-          onSetEnabled={(enabled) => {
-            act(integration.id, client.setEnabled({ integrationId: integration.id, enabled }))
-          }}
-          onRunNow={() => {
-            act(integration.id, client.runNow({ integrationId: integration.id }))
-          }}
-          onValidate={() => {
-            setBusyId(integration.id)
-            setStartedAt(Date.now())
-            client.validate({ integrationId: integration.id }).then(
-              (result) => {
-                setValidations((current) => ({ ...current, [integration.id]: result }))
-                setStartedAt(undefined)
-                setBusyId(undefined)
-                setError(undefined)
-              },
-              (failure: unknown) => {
-                refuse(failure)
-              },
-            )
-          }}
-        />
-      ))}
+      {integrations.map((integration) => {
+        const history = histories.get(integration.id)
+
+        return (
+          <IntegrationCard
+            key={integration.id}
+            integration={toIntegrationReadouts(integration, now)}
+            validation={validations[integration.id]}
+            startedAt={busyId === integration.id ? startedAt : undefined}
+            error={busyId === integration.id ? error : undefined}
+            onEdit={() => {
+              setDraft(draftFromIntegration(integration))
+              setDraftErrors({})
+              setError(undefined)
+              setTarget({ kind: 'edit', id: integration.id })
+            }}
+            onSetEnabled={(enabled) => {
+              act(integration.id, client.setEnabled({ integrationId: integration.id, enabled }))
+            }}
+            onRunNow={() => {
+              act(integration.id, client.runNow({ integrationId: integration.id }))
+            }}
+            confirmingDelete={confirmingDeleteId === integration.id}
+            onRequestDelete={() => {
+              setError(undefined)
+              setConfirmingDeleteId(integration.id)
+            }}
+            onCancelDelete={() => {
+              setConfirmingDeleteId(undefined)
+            }}
+            onConfirmDelete={() => {
+              act(integration.id, client.remove({ integrationId: integration.id }))
+            }}
+            history={history?.rows}
+            stalled={history?.stalled ?? false}
+            onShowHistory={() => {
+              setBusyId(integration.id)
+              setStartedAt(Date.now())
+              client.runs({ integrationId: integration.id }).then(
+                (runs) => {
+                  setHistories((current) =>
+                    new Map(current).set(integration.id, {
+                      rows: toRunHistory(runs),
+                      stalled: looksSilentlyStalled(runs),
+                    }),
+                  )
+                  setStartedAt(undefined)
+                  setBusyId(undefined)
+                  setError(undefined)
+                },
+                (failure: unknown) => {
+                  refuse(failure)
+                },
+              )
+            }}
+            onHideHistory={() => {
+              setHistories((current) => {
+                const next = new Map(current)
+                next.delete(integration.id)
+                return next
+              })
+            }}
+            onValidate={() => {
+              setBusyId(integration.id)
+              setStartedAt(Date.now())
+              client.validate({ integrationId: integration.id }).then(
+                (result) => {
+                  setValidations((current) => ({ ...current, [integration.id]: result }))
+                  setStartedAt(undefined)
+                  setBusyId(undefined)
+                  setError(undefined)
+                },
+                (failure: unknown) => {
+                  refuse(failure)
+                },
+              )
+            }}
+          />
+        )
+      })}
 
       {target?.kind === 'edit' ? (
         <PromptPreview

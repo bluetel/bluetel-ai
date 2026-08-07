@@ -28,17 +28,38 @@
  * not require it of *everything*, and applying it uniformly would be wrong:
  *
  * - **Buffered** — `reportBootstrapPhase`, `appendLogSegment`,
- *   `registerArtifact`, `reportTerminal`. Each is a durable record of
- *   something that happened, each is idempotent on the surface, and each is
- *   still true whenever it eventually lands. Losing one loses a fact.
- * - **Direct** — `heartbeat` and `renewCredential`. A heartbeat asserts
+ *   `registerArtifact`, `reportTerminal`, `reportSkillReference`. Each is a
+ *   durable record of something that happened, each is idempotent on the
+ *   surface, and each is still true whenever it eventually lands. Losing one
+ *   loses a fact.
+ * - **Direct** — `heartbeat`, `renewCredential`, `registerSnapshot`,
+ *   `reportSnapshotPark`, `pullPendingCommands`, `acknowledgeCommand` and
+ *   `reportExternalAction`. `reportSnapshotPark` joins the heartbeat's side of
+ *   the line rather than the record-keeping side: it says the run is waiting on
+ *   storage *right now*, and a replayed one is a false statement about a park
+ *   that has since cleared (FR-082).
+ *   The last of those is direct for a reason none of the others share: it is
+ *   the only call on this surface whose **response** is acted on rather than
+ *   recorded, because it claims the right to post a comment before the comment
+ *   is posted (FR-076). Buffering it would hand back a claim that had not been
+ *   decided, which is the same as not asking. A heartbeat asserts
  *   liveness *now*; replaying a buffered one from four minutes ago is not
  *   resilience, it is a false statement about a process that may be dead, and
  *   the reconciler acts on it (FR-039, FR-048). The next heartbeat is along
  *   shortly and carries the same information, better. A credential renewal is
  *   the same shape of mistake plus a useless one: its whole value is the
  *   response, and a renewal that lands after the credential expired renews
- *   nothing. Both fail loudly to their caller instead.
+ *   nothing.
+ *
+ *   The three supervision-side calls are direct for a stricter reason than
+ *   staleness: `suspend()`'s call order *is* FR-049. The working tree must be
+ *   captured **and registered** before the user is told the run is paused, so a
+ *   `registerSnapshot` that returned as soon as it was queued would make
+ *   "paused" mean "we have asked the agent to stop and we hope the snapshot
+ *   works out". `acknowledgeCommand` is the same fact from the other end — it
+ *   is what makes the panel's "paused" true rather than merely requested
+ *   (SC-003) — and `pullPendingCommands` is a read, which there is nothing to
+ *   buffer about. All of them fail loudly to their caller instead.
  *
  * The bound on the buffer, and what happens when it fills, is
  * {@link createOutbox}'s decision and is documented there.
@@ -70,7 +91,21 @@ export type BootstrapPhaseInput = MachineRouterInputs['reportBootstrapPhase']
 export type AppendLogSegmentInput = MachineRouterInputs['appendLogSegment']
 export type RegisterArtifactInput = MachineRouterInputs['registerArtifact']
 export type TerminalInput = MachineRouterInputs['reportTerminal']
+export type RegisterSnapshotInput = MachineRouterInputs['registerSnapshot']
+export type AcknowledgeCommandInput = MachineRouterInputs['acknowledgeCommand']
+export type SkillReferenceInput = MachineRouterInputs['reportSkillReference']
+export type SnapshotParkInput = MachineRouterInputs['reportSnapshotPark']
+export type ExternalActionInput = MachineRouterInputs['reportExternalAction']
+export type PendingCommands = MachineRouterOutputs['pullPendingCommands']
 export type RenewedCredential = MachineRouterOutputs['renewCredential']
+/**
+ * The claim, and the two booleans a delivery step acts on.
+ *
+ * Inferred rather than restated for the usual reason, but the stakes are higher here than
+ * elsewhere: this is the only response on this surface a caller **branches** on, and a hand-written
+ * copy that drifted would not fail to compile — it would post a second comment.
+ */
+export type ExternalActionClaim = MachineRouterOutputs['reportExternalAction']
 
 /**
  * Free text that reaches the wire is `SanitisedText`, never `string`.
@@ -91,11 +126,23 @@ export type TerminalReport = Omit<TerminalInput, 'reason'> & {
 }
 
 /**
+ * One parked snapshot attempt (FR-082).
+ *
+ * `detail` is the storage client's own error message, which is the third place on this surface a
+ * run's environment writes free text — and object-storage failures quote the request they failed,
+ * presigned query string included. So it takes the branded type like the other two.
+ */
+export type SnapshotParkReport = Omit<SnapshotParkInput, 'detail'> & {
+  readonly detail?: SanitisedText
+}
+
+/**
  * The transport seam.
  *
- * Six methods, one per procedure on the machine router. Everything above this
- * line is buffering policy and everything below it is HTTP, which is what lets
- * every test in this directory run against a fake and never open a socket.
+ * One method per procedure on the machine router this executor calls.
+ * Everything above this line is buffering policy and everything below it is
+ * HTTP, which is what lets every test in this directory run against a fake and
+ * never open a socket.
  */
 export interface MachineSurfaceTransport {
   readonly heartbeat: (input: HeartbeatInput) => Promise<void>
@@ -104,6 +151,12 @@ export interface MachineSurfaceTransport {
   readonly reportTerminal: (input: TerminalInput) => Promise<void>
   readonly renewCredential: () => Promise<RenewedCredential>
   readonly registerArtifact: (input: RegisterArtifactInput) => Promise<void>
+  readonly registerSnapshot: (input: RegisterSnapshotInput) => Promise<void>
+  readonly reportSnapshotPark: (input: SnapshotParkInput) => Promise<void>
+  readonly pullPendingCommands: () => Promise<PendingCommands>
+  readonly acknowledgeCommand: (input: AcknowledgeCommandInput) => Promise<void>
+  readonly reportSkillReference: (input: SkillReferenceInput) => Promise<void>
+  readonly reportExternalAction: (input: ExternalActionInput) => Promise<ExternalActionClaim>
 }
 
 export interface HttpMachineTransportOptions {
@@ -157,6 +210,20 @@ export const createHttpMachineTransport = (
     registerArtifact: async (input) => {
       await client.registerArtifact.mutate(input)
     },
+    registerSnapshot: async (input) => {
+      await client.registerSnapshot.mutate(input)
+    },
+    reportSnapshotPark: async (input) => {
+      await client.reportSnapshotPark.mutate(input)
+    },
+    pullPendingCommands: async () => client.pullPendingCommands.mutate(),
+    acknowledgeCommand: async (input) => {
+      await client.acknowledgeCommand.mutate(input)
+    },
+    reportSkillReference: async (input) => {
+      await client.reportSkillReference.mutate(input)
+    },
+    reportExternalAction: async (input) => client.reportExternalAction.mutate(input),
   }
 }
 
@@ -183,9 +250,53 @@ export interface MachineSurfaceClientOptions {
 export interface MachineSurfaceClient extends SegmentReporter {
   readonly heartbeat: (input: HeartbeatInput) => Promise<void>
   readonly renewCredential: () => Promise<RenewedCredential>
+  /** Direct, because FR-049 requires it to have landed before a pause is acknowledged. */
+  readonly registerSnapshot: (input: RegisterSnapshotInput) => Promise<void>
+  /**
+   * The other end of a snapshot boundary: the write did not go through, and the run is holding at
+   * the boundary and retrying rather than advancing unsnapshotted (FR-082).
+   *
+   * **Direct, and for the heartbeat's reason rather than the snapshot's.** This is a claim about
+   * *now* — the panel says "waiting on storage" on the strength of it — so a buffered report
+   * replayed three minutes later would announce a park that had already cleared, and would be
+   * timestamped by the surface at the moment it landed rather than the moment it happened. It is
+   * also the one report a run makes while a *different* piece of infrastructure is failing, so
+   * putting it at the back of a FIFO queue behind whatever is already stuck is exactly wrong.
+   *
+   * Failing loudly to its caller is safe here because the caller is `park.ts`'s `onParked` hook,
+   * which cannot act on it: losing a park report costs a line on the timeline, and the next
+   * attempt reports again a second or two later.
+   */
+  readonly reportSnapshotPark: (report: SnapshotParkReport) => Promise<void>
+  /** The supervision queue. Nothing is pushed to this instance (FR-035). */
+  readonly pullPendingCommands: () => Promise<PendingCommands>
+  readonly acknowledgeCommand: (input: AcknowledgeCommandInput) => Promise<void>
   readonly reportBootstrapPhase: (report: BootstrapPhaseReport) => Promise<void>
   readonly registerArtifact: (input: RegisterArtifactInput) => Promise<void>
   readonly reportTerminal: (report: TerminalReport) => Promise<void>
+  /**
+   * Which skill this run read, and the digest that pins its version (FR-058, FR-059).
+   *
+   * Assignable to `SkillReferenceReporter` in `../skills`, which is the point: `resolveSkill`
+   * already calls a callback of that shape on every resolution and every halt, and until this
+   * existed the callback was bound to a function that discarded them — so `workflow.skillReferences`
+   * read a table nothing had ever written to.
+   *
+   * Buffered, like the other durable records. A digest is still true whenever it lands, and losing
+   * one loses the only answer to which version of a convention the run followed.
+   */
+  readonly reportSkillReference: (input: SkillReferenceInput) => Promise<void>
+  /**
+   * Claim an action before taking it outside the platform (FR-076, FR-077).
+   *
+   * **Direct, and it is the one call here where that is not a judgement about staleness.** Its
+   * whole value is the response: `claimed` says whether this process is the one entitled to post
+   * the comment, and `alreadyPerformed` says another process already did — which is what a
+   * re-provisioned instance with an empty `../delivery/external-action.ts` ledger has no other way
+   * to find out. Buffering it would return before the claim was decided, which is the same as not
+   * asking.
+   */
+  readonly reportExternalAction: (input: ExternalActionInput) => Promise<ExternalActionClaim>
   /** Deliver everything buffered. Part of the FR-047 pre-termination path. */
   readonly flush: () => Promise<void>
   readonly pendingReports: number
@@ -210,9 +321,15 @@ export const createMachineSurfaceClient = (
   })
 
   return {
-    // Direct: liveness and credential renewal are worthless when replayed.
+    // Direct: liveness and credential renewal are worthless when replayed, and
+    // the three supervision-side calls have to have landed before the caller
+    // acts on them (FR-049, SC-003).
     heartbeat: async (input) => options.transport.heartbeat(input),
     renewCredential: async () => options.transport.renewCredential(),
+    registerSnapshot: async (input) => options.transport.registerSnapshot(input),
+    reportSnapshotPark: async (report) => options.transport.reportSnapshotPark(report),
+    pullPendingCommands: async () => options.transport.pullPendingCommands(),
+    acknowledgeCommand: async (input) => options.transport.acknowledgeCommand(input),
 
     reportBootstrapPhase: async (report) =>
       outbox.enqueue({
@@ -253,6 +370,15 @@ export const createMachineSurfaceClient = (
         procedure: 'reportTerminal',
         send: async () => options.transport.reportTerminal(report),
       }),
+
+    reportSkillReference: async (input) =>
+      outbox.enqueue({
+        procedure: 'reportSkillReference',
+        send: async () => options.transport.reportSkillReference(input),
+      }),
+
+    // Direct: see the note on the interface. A buffered claim is not a claim.
+    reportExternalAction: async (input) => options.transport.reportExternalAction(input),
 
     flush: async () => outbox.drain(),
 

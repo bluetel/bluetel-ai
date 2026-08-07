@@ -1,24 +1,24 @@
 import type { IntegrationType } from '@bluetel-ai/sisyphus-api/client'
 
 /**
- * What the integrations screen needs from the server, as a port (T121).
+ * What the integrations screen needs from the server, as a port (T121, T199).
  *
  * ## Why a port rather than `api.admin.integrations` directly
  *
- * `admin.integrations` is built (`packages/sisyphus-api/src/server/admin/integrations.ts`) and is
- * **not yet mounted on `adminRouter`** — mounting it is a one-line change to a barrel this work was
- * asked to leave alone. Until it is, `api.admin.integrations` does not exist on `AppRouter`, so a
- * screen written directly against it would not compile.
+ * `admin.integrations` is mounted on `adminRouter`, and {@link IntegrationsClient} is implemented
+ * over it by `api-integrations-client.ts` — so the indirection is now a choice rather than a
+ * workaround, and it is kept for the reason it was worth having in the first place: the screen can
+ * be rendered in a test with no tRPC provider, no query client and no network, which is what lets
+ * every assertion on its parts run under `renderToStaticMarkup`.
  *
- * A port is the right answer regardless of that, and would have been worth having anyway: the
- * screen can then be rendered in a test with no tRPC provider, no query client and no network,
- * which is what lets every assertion below run under `renderToStaticMarkup`. Wiring it up is one
- * adapter — see {@link IntegrationsClient} — and the shapes are stated here rather than inferred
- * only because `RouterOutputs` cannot reach an unmounted router.
+ * ## Why these shapes are written out rather than `RouterOutputs[…]`
  *
- * **When the router is mounted**, replace {@link createUnavailableIntegrationsClient} in
- * `page.tsx` with an adapter over `api.admin.integrations`, and these interfaces can be narrowed to
- * `RouterOutputs['admin']['integrations'][…]`.
+ * The repo's rule is to type API-derived values from `RouterOutputs`, and this file is the
+ * exception on purpose. {@link IntegrationView} is the screen's **statement** that no credential
+ * reaches it — an alias to the router's row would make that statement whatever the router happened
+ * to return this week. The two are held together instead by `integration-view.ts`, where the
+ * mapping from one to the other is written once and the credential's absence is asserted at
+ * compile time.
  */
 
 /** One mapping, as the panel shows and edits it. */
@@ -133,33 +133,35 @@ export interface IntegrationsClient {
   }) => Promise<void>
   readonly validate: (input: { readonly integrationId: string }) => Promise<ValidationView>
   readonly runNow: (input: { readonly integrationId: string }) => Promise<void>
+  /**
+   * Remove a board that has never started anything (FR-097).
+   *
+   * The server decides whether it may go: an integration a workflow points at cannot be deleted
+   * without making that run unexplainable (FR-131), and it refuses with the counts. The screen does
+   * not pre-judge that — see the note on the panel's delete flow.
+   */
+  readonly remove: (input: { readonly integrationId: string }) => Promise<void>
+  /**
+   * The tick history, beyond the last one (FR-105).
+   *
+   * Read on demand rather than with the list: FR-105 asks for the history to be *visible*, and
+   * fifty correlated run queries on page load is a different thing from that.
+   */
+  readonly runs: (input: {
+    readonly integrationId: string
+  }) => Promise<readonly IntegrationRunView[]>
   readonly previewPrompt: (input: {
     readonly integrationId: string
     readonly externalId: string
   }) => Promise<PromptPreviewView>
 }
 
-export const INTEGRATIONS_UNAVAILABLE =
-  'The integrations API is not mounted in this deployment, so this screen has nothing to read.'
-
 /**
- * The client used before `admin.integrations` is mounted.
+ * There was a `createUnavailableIntegrationsClient` here, and it is deliberately gone (T199).
  *
- * It reports the absence rather than rendering an empty screen. An admin looking at a list of zero
- * integrations would conclude none are configured, which is a different — and worse — statement
- * than "this deployment cannot answer".
+ * It refused every call with "the integrations API is not mounted in this deployment", which was
+ * true while the router was unmounted and became a lie the moment it was not. A fallback that
+ * reports an unavailability the deployment does not have is worse than no fallback: it tells an
+ * admin the platform cannot answer when what actually happened was a request that failed. Real
+ * failures now surface as themselves, through `describeFailure` in `integrations-panel.tsx`.
  */
-export const createUnavailableIntegrationsClient = (): IntegrationsClient => {
-  const refuse = <TResult>(): Promise<TResult> =>
-    Promise.reject(new Error(INTEGRATIONS_UNAVAILABLE))
-
-  return {
-    list: refuse,
-    create: refuse,
-    update: refuse,
-    setEnabled: refuse,
-    validate: refuse,
-    runNow: refuse,
-    previewPrompt: refuse,
-  }
-}

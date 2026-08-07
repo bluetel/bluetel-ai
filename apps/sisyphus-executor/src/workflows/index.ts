@@ -1,5 +1,6 @@
 /**
- * The workflow types — autonomous (US4) and review (US5) (T123–T126, T128–T131).
+ * The workflow types — delegated (US1), autonomous (US4) and review (US5) (T123–T126, T128–T131,
+ * T174).
  *
  * Consumers import this barrel, never a module underneath it. Three things it is holding in place,
  * each structural rather than a matter of care:
@@ -23,6 +24,9 @@ export type {
   AutonomousResult,
   AutonomousWorkflowInput,
 } from './autonomous'
+
+export { DELEGATED_PASS, runDelegatedWorkflow } from './delegated'
+export type { DelegatedOutcome, DelegatedResult, DelegatedWorkflowInput } from './delegated'
 
 export { DEV_SKILL, DEVELOP_STEP, runDevelopStep } from './develop-step'
 export type {

@@ -7,9 +7,11 @@
  * completed change reports itself, and what the panel renders when the server said `NOT_FOUND`.
  *
  * The two screens themselves are in `./users` and `./grants`, each with its own barrel.
+ *
+ * `AdminShell` used to be published here. It was never admin-only — half the workflow screens
+ * mounted it — and it is no longer a shell: `src/app/(app)/layout.tsx` owns the framing, so what is
+ * left is a per-screen heading block, published as `PageHeader` from `@sisyphus-admin/components/shell`.
  */
-
-export { AdminShell } from './admin-shell'
 
 export { ChangeNotice } from './change-notice'
 

@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { bootstrapPhases, computeLeases, workflowEvents, workflows } from '../../db'
 import type { MachineCredential } from '../context'
+import type { WorkflowEventNotification } from '../notify'
+import { createFailingEmitter, createRecordingEmitter } from '../notify/test-support'
 
 import { heartbeat, reportBootstrapPhase, reportTerminal } from './reporting'
 import type { MachineFixture } from './test-support'
@@ -269,6 +271,176 @@ describe.skipIf(connectionString === undefined)('the executor’s progress repor
         .where(eq(workflowEvents.workflowId, fixture.ids().a.workflowId))
 
       expect(events.map((event) => event.event)).toContain('parked')
+    })
+  })
+
+  /**
+   * **The four events nothing else in the platform emits (FR-136, FR-139, FR-141).**
+   *
+   * `apps/sisyphus-control-plane`'s reconciler covers `workflow_failed` and
+   * `workflow_parked_resumable` for runs it sweeps. `workflow_succeeded`, `workflow_capped`,
+   * `workflow_cancelled` and `workflow_needs_attention` are reachable only through
+   * `reportTerminal`, so these assertions are the whole of FR-136 for four of its six workflow
+   * events.
+   *
+   * Two of them are about FR-141 rather than FR-136, and they are the ones that matter most: a
+   * notification must not be able to change the outcome it announces. That is asserted against a
+   * **real transaction** here rather than against the wrapper — `../notify/emitter.test.ts` proves
+   * the wrapper does not rethrow, and this proves the committed row survives the failure anyway.
+   */
+  describe('announcing the outcome (FR-136, FR-141)', () => {
+    /**
+     * Return a run to `running` so this describe is not hostage to the order of the ones above,
+     * both of which finish their workflow. Written against the workflow row directly and not
+     * through a resolver: nothing on the machine surface un-terminates a run, deliberately
+     * (FR-064), so there is no procedure to borrow.
+     */
+    const reopen = async (workflowId: string): Promise<void> => {
+      await fixture
+        .db()
+        .update(workflows)
+        .set({ state: 'running', terminalOutcome: null, outcomeReason: null })
+        .where(eq(workflows.id, workflowId))
+    }
+
+    it('emits workflow_succeeded, which no control-plane job ever will', async () => {
+      await reopen(fixture.ids().a.workflowId)
+      const emitter = createRecordingEmitter()
+      const { ctx } = fixture.contextFor(credentialA, emitter)
+
+      await reportTerminal(ctx, {
+        outcome: 'succeeded',
+        reason: 'Done.',
+        turnsUsed: 1,
+        spendUsed: '1.0000',
+      })
+
+      expect(emitter.calls).toStrictEqual([
+        { workflowId: fixture.ids().a.workflowId, event: 'workflow_succeeded' },
+      ])
+    })
+
+    it('names the event the outcome calls for, for each of the other three', async () => {
+      for (const [outcome, event] of [
+        ['capped', 'workflow_capped'],
+        ['cancelled', 'workflow_cancelled'],
+        ['needs_attention', 'workflow_needs_attention'],
+      ] as const) {
+        await reopen(fixture.ids().a.workflowId)
+        const emitter = createRecordingEmitter()
+        const { ctx } = fixture.contextFor(credentialA, emitter)
+
+        await reportTerminal(ctx, { outcome, reason: outcome, turnsUsed: 1, spendUsed: '1.0000' })
+
+        expect(emitter.calls.map((call) => call.event)).toStrictEqual([event])
+      }
+    })
+
+    it('emits only after the outcome is committed and readable outside the transaction', async () => {
+      await reopen(fixture.ids().a.workflowId)
+      let stateAtEmission: string | undefined
+
+      const emitter = createRecordingEmitter(async () => {
+        // Read through the pool, which cannot see an uncommitted write. If the emission had been
+        // made inside `ctx.db.transaction`, this would still say `running` — or deadlock on the
+        // row lock the transaction is holding.
+        stateAtEmission = (await readWorkflow(fixture.ids().a.workflowId))?.state
+      })
+      const { ctx } = fixture.contextFor(credentialA, emitter)
+
+      await reportTerminal(ctx, {
+        outcome: 'succeeded',
+        reason: 'Done.',
+        turnsUsed: 1,
+        spendUsed: '1.0000',
+      })
+
+      expect(stateAtEmission).toBe('succeeded')
+    })
+
+    it('keeps the outcome when the notifier fails (FR-141)', async () => {
+      await reopen(fixture.ids().a.workflowId)
+      const attempts: WorkflowEventNotification[] = []
+      const { ctx } = fixture.contextFor(credentialA, createFailingEmitter(attempts))
+
+      // The requirement in one line: a run that succeeded and could not be announced is a
+      // successful run with a failed notification, not a failed run.
+      const report = await reportTerminal(ctx, {
+        outcome: 'succeeded',
+        reason: 'Done despite Slack.',
+        turnsUsed: 2,
+        spendUsed: '2.0000',
+      })
+
+      expect(report.recorded).toBe(true)
+      expect(report.workflow.terminalOutcome).toBe('succeeded')
+      expect(attempts).toHaveLength(1)
+    })
+
+    it('leaves the committed row and its timeline entry intact after a failed notification', async () => {
+      await reopen(fixture.ids().a.workflowId)
+      const { ctx } = fixture.contextFor(credentialA, createFailingEmitter())
+
+      await reportTerminal(ctx, {
+        outcome: 'capped',
+        reason: 'Cap reached.',
+        turnsUsed: 3,
+        spendUsed: '3.0000',
+      })
+
+      // Re-read from the pool rather than trusting the return value: what FR-141 forbids is the
+      // delivery failure altering the *stored* outcome, and only a fresh read can say it did not.
+      const workflow = await readWorkflow(fixture.ids().a.workflowId)
+      expect(workflow?.state).toBe('capped')
+      expect(workflow?.terminalOutcome).toBe('capped')
+
+      const events = await fixture
+        .db()
+        .select()
+        .from(workflowEvents)
+        .where(eq(workflowEvents.workflowId, fixture.ids().a.workflowId))
+      expect(events.map((event) => event.event)).toContain('capped')
+    })
+
+    it('announces the outcome once, not once per retry of the report (FR-047, FR-139)', async () => {
+      await reopen(fixture.ids().a.workflowId)
+      const emitter = createRecordingEmitter()
+      const { ctx } = fixture.contextFor(credentialA, emitter)
+
+      await reportTerminal(ctx, {
+        outcome: 'succeeded',
+        reason: 'Done.',
+        turnsUsed: 1,
+        spendUsed: '1.0000',
+      })
+      const retry = await reportTerminal(ctx, {
+        outcome: 'succeeded',
+        reason: 'Done.',
+        turnsUsed: 1,
+        spendUsed: '1.0000',
+      })
+
+      // The retry kept the first outcome and wrote nothing; a second Slack message about one run
+      // finishing once is the burst FR-139 exists to prevent, arriving by the route coalescing
+      // cannot see.
+      expect(retry.recorded).toBe(false)
+      expect(emitter.calls).toHaveLength(1)
+    })
+
+    it('finishes the run when the deployment has wired no notifier at all', async () => {
+      await reopen(fixture.ids().a.workflowId)
+      const { ctx } = fixture.contextFor(credentialA)
+
+      // Absent is a silent no-op, not a refusal: a platform whose Slack app is not installed yet
+      // must still be able to finish a workflow.
+      await expect(
+        reportTerminal(ctx, {
+          outcome: 'succeeded',
+          reason: 'Done.',
+          turnsUsed: 1,
+          spendUsed: '1.0000',
+        }),
+      ).resolves.toMatchObject({ recorded: true })
     })
   })
 })

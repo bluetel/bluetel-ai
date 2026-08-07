@@ -23,6 +23,7 @@ import type { EntryCheckoutReport } from './entries'
 import { reportEntryCheckout, reportEntryCheckoutInput } from './entries'
 import type { EntryResultReport } from './entry-results'
 import { reportEntryResult } from './entry-results'
+import { reportExternalActionProcedure } from './external-actions'
 import type { MachineContext } from './guard'
 import { reportIterationProcedure } from './iterations'
 import type { AppendedLogSegment } from './log-segments'
@@ -31,8 +32,10 @@ import type { HeartbeatAcknowledgement, TerminalReport } from './reporting'
 import { heartbeat, reportBootstrapPhase, reportTerminal } from './reporting'
 import type { ReviewerSummaryReport } from './reviewer-summary'
 import { reportReviewerSummary } from './reviewer-summary'
+import { reportSkillReferenceProcedure } from './skill-references'
 import type { RegisteredSnapshot } from './snapshot'
 import { registerSnapshot } from './snapshot'
+import { reportSnapshotParkProcedure } from './snapshot-park'
 
 /**
  * The machine surface — everything an executor instance reports back (FR-018, FR-037, FR-046,
@@ -166,6 +169,17 @@ export const machineSurfaceRouter = createTRPCRouter({
     ),
 
   /**
+   * The other half of a snapshot boundary: the one that could not be written (FR-082).
+   *
+   * `registerSnapshot` above says the capture landed. This says it did not, and that the run is
+   * holding at the boundary and retrying rather than advancing unsnapshotted — which is a live
+   * run waiting on storage, **not** the `parked_resumable` outcome, and the two must never be
+   * rendered as the same thing. It writes a timeline entry and moves no state; see
+   * `./snapshot-park.ts` for why it is also the one procedure here that is not made idempotent.
+   */
+  reportSnapshotPark: reportSnapshotParkProcedure,
+
+  /**
    * One pass of the autonomous develop→review loop (FR-061, FR-062).
    *
    * The `ordinal ≤ 3` bound is a check constraint on the table, not a count taken here, so a
@@ -184,6 +198,29 @@ export const machineSurfaceRouter = createTRPCRouter({
   acknowledgeCommand: acknowledgeCommandProcedure,
   pullPendingCorrections: pullPendingCorrectionsProcedure,
   acknowledgeCorrection: acknowledgeCorrectionProcedure,
+
+  /**
+   * Which convention the run was given, and which version of it (FR-058, FR-059, SC-016).
+   *
+   * The write half of `workflow.skillReferences`, which had been reading an empty table: the
+   * executor computed the digests and reported them into a callback bound to nothing. A skill is a
+   * repository file with no version but its content, so this row is the only thing that can ever
+   * answer "which version did this run read" once the file has moved on. Identical reports are
+   * de-duplicated and a differing one is a new fact — see `./skill-references.ts`.
+   */
+  reportSkillReference: reportSkillReferenceProcedure,
+
+  /**
+   * Claim, then settle, one action taken outside the platform (FR-076, FR-077).
+   *
+   * The only procedure on this surface whose **response** is load-bearing rather than its record.
+   * It is called before the action, not after: the insert races every other attempt for the same
+   * derived key through `external_actions_idempotency_key`, exactly one caller is told
+   * `claimed: true`, and that is what makes a duplicate comment or a second pull request
+   * unwritable across a re-provision — the executor's in-process ledger cannot, because it is a
+   * map that dies with the instance. See `./external-actions.ts`.
+   */
+  reportExternalAction: reportExternalActionProcedure,
 
   /** What the reviewer of the resulting change needs to know (FR-153). */
   reportReviewerSummary: machineProcedure

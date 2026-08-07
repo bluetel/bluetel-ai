@@ -25,7 +25,10 @@ bootstrap step, that is the cause.
 
 ```bash
 pnpm nx run sisyphus-admin:bootstrap --configuration=staging   # once per account
-pnpm nx run sisyphus-api:migrate --configuration=local
+
+# `migrate` takes no configuration: it reads exactly one variable, so pointing it at the wrong
+# database is a deliberate act rather than a mistyped flag (FR-010).
+SISYPHUS_DATABASE_URL='postgres://…' pnpm nx run sisyphus-api:migrate
 ```
 
 **The first admin.** Set `SISYPHUS_BOOTSTRAP_ADMIN_EMAILS` to your own address before the first deploy. Without
@@ -35,8 +38,33 @@ performed at all — scenario 1 cannot start (FR-174). Verify a `role_changes` r
 **Local loop**
 
 ```bash
-pnpm nx run-many -t dev -p sisyphus-admin sisyphus-control-plane
+pnpm nx run sisyphus-admin:dev          # http://localhost:3003
 ```
+
+The panel is the only thing with a local dev server, and deliberately so. The control plane has **no inbound
+network surface** (FR-035): it is a single handler that EventBridge Scheduler invokes directly, so there is
+nothing for a `dev` target to serve. Exercise it through its tests — `pnpm nx run sisyphus-control-plane:test`
+— or by deploying it to your own stage.
+
+**A local Postgres, for the database-backed suites.** About a third of the assertions in this feature are
+properties of the database rather than of application code — the exactly-once unique index, the branch-lock
+advisory lock, the iteration `CHECK`, profile-scoped spend, the skill-digest readback — and they only execute
+when `SISYPHUS_TEST_DATABASE_URL` is set. Without it they skip, which is correct on a laptop and a lie in CI, so
+CI sets it and the harness **fails** rather than skips when `CI` is set and the variable is not (FR-204,
+SC-064). Match CI's engine major, which matches the deployed instance's:
+
+```bash
+docker run -d --name sisyphus-pg -p 5432:5432 \
+  -e POSTGRES_USER=sisyphus -e POSTGRES_PASSWORD=sisyphus -e POSTGRES_DB=sisyphus \
+  postgres:17
+
+export SISYPHUS_TEST_DATABASE_URL='postgres://sisyphus:sisyphus@localhost:5432/sisyphus'
+SISYPHUS_DATABASE_URL="$SISYPHUS_TEST_DATABASE_URL" pnpm nx run sisyphus-api:migrate
+```
+
+Most suites create and drop a private scratch database of their own, so the URL must point at a server the role
+may `create database` on. The migrate step is still needed: the panel's sign-in and log-stream suites assert SQL
+against the configured database directly.
 
 **Test scratch repositories** — two, both writable by the platform's repository-host credential:
 
@@ -47,14 +75,23 @@ pnpm nx run-many -t dev -p sisyphus-admin sisyphus-control-plane
 
 ---
 
-## Gate 0 — the two spikes
+## Gate 0 — the spikes
 
-Neither is a test of Sisyphus; both gate code that cannot be written until they close (research.md S1, S2).
+None of the three is a test of Sisyphus; each gated code that could not be written until it closed (research.md
+S1, S2, S3). All three are **closed**, and each left behind a harness that is a colocated vitest suite plus a
+`SPIKE-FINDINGS.md` next to it — not a one-off script that has since rotted. Re-run them the way any other suite
+is re-run, by passing the path to the project's `test` target:
+
+| Spike | Harness                                                      | Findings                                                   |
+| ----- | ------------------------------------------------------------ | ---------------------------------------------------------- |
+| S1    | `apps/sisyphus-executor/src/agent/spike-stdin.ts`            | `apps/sisyphus-executor/src/agent/SPIKE-FINDINGS.md`       |
+| S2    | `apps/sisyphus-executor/src/session/spike-restore.ts`        | `apps/sisyphus-executor/src/session/SPIKE-FINDINGS.md`     |
+| S3    | `apps/sisyphus-admin/src/app/api/stream/spike-log-stream.ts` | `apps/sisyphus-admin/src/app/api/stream/SPIKE-FINDINGS.md` |
 
 ### S1 — NDJSON turn injection
 
 ```bash
-pnpm nx run sisyphus-executor:spike-stdin
+pnpm nx run sisyphus-executor:test src/agent/spike-stdin
 ```
 
 **Passes when:** a candidate user-turn frame written to stdin mid-request changes agent behaviour **before** the
@@ -67,7 +104,12 @@ a rewrite — which is the whole reason the boundary exists.
 ### S3 — live-log transport under pooling
 
 ```bash
-pnpm nx run sisyphus-admin:spike-log-stream
+# The pure transport assertions run anywhere. The live scenarios need a real Postgres, and the
+# pooled ones a PgBouncer in `pool_mode = transaction` in front of it; each half skips cleanly when
+# its URL is absent, so the bare command is green on a machine with neither.
+SPIKE_S3_DIRECT_URL='postgres://…' \
+SPIKE_S3_POOLED_URL='postgres://…:6432/…' \
+  pnpm nx run sisyphus-admin:test src/app/api/stream/spike-log-stream
 ```
 
 **Passes when:** ≥95% of segments from a ~10/second emitter are visible within 5 seconds, no notifications are
@@ -75,17 +117,21 @@ dropped over a 10-minute stream, and a runtime recycle mid-stream reconnects and
 without a gap (research.md S3, SC-002).
 
 **If it fails:** take one of R6's two fallbacks. The SSE contract and sequence reconciliation are unchanged either
-way.
+way. This is what happened: `LISTEN` delivers nothing through a transaction-mode pooler, so the first fallback —
+in-handler polling of `log_segments` — is what shipped.
 
 ### S2 — cross-instance restore
 
 ```bash
-pnpm nx run sisyphus-executor:spike-restore
+pnpm nx run sisyphus-executor:test src/session/spike-restore
 ```
 
 **Passes when:** a snapshot from instance A restores on instance B, `--resume` finds the session, the agent can
 answer "what did you change and why", uncommitted work is present, and a deliberately truncated final log line is
 discarded with `truncationRepaired` set.
+
+Instance identity is simulated by directory and the pinned root is destroyed in between, so this needs no cloud
+resource of any kind — see the findings file for exactly what was and was not simulated.
 
 ---
 
@@ -181,13 +227,16 @@ Deactivate a user who owns a running workflow.
 
 **Proves:** SC-001, SC-002, SC-007, SC-009, SC-037, SC-040.
 
-```bash
-pnpm nx run sisyphus-control-plane:e2e -- --scenario=delegated --repo=sisyphus-scratch-a
-```
+**Run it by hand, from the panel on your own stage.** There is no `e2e` target and deliberately none: this
+scenario provisions a real instance, pushes a real branch and opens a real draft pull request, so it cannot run
+without stage credentials, and a target that fails for everyone who has not deployed is worse than no target.
+The scripted parts of it are the control plane's own suites (`pnpm nx run sisyphus-control-plane:test`), which
+cover admission, provisioning and teardown against a real database; what is left below is the part only a
+deployed stage can prove.
 
-Or by hand: launch a delegated workflow against `sisyphus-scratch-a` with the prompt "add a CHANGELOG entry for
-an unreleased version". In Phase 4 that launch is the **admin-only ad hoc path** (T064a) — execution profiles,
-and with them the non-admin launch route, arrive in Phase 5 (Scenario 3).
+Launch a delegated workflow against `sisyphus-scratch-a` with the prompt "add a CHANGELOG entry for an
+unreleased version". In Phase 4 that launch is the **admin-only ad hoc path** (T064a) — execution profiles, and
+with them the non-admin launch route, arrive in Phase 5 (Scenario 3).
 
 **Check:**
 
@@ -596,10 +645,14 @@ _Added 2026-08-06._
 7. Tab through the shell from a cold page load, with the browser at a narrow width.
 
 **Check:** every request in (1) lands on the sign-in screen, not a 404 and not an unstyled framework page
-(FR-195, SC-057). Both failures in (2) return to the sign-in screen showing a readable reason naming the cause
-— out-of-domain and deactivated are distinguishable, and neither leaks whether the account exists (FR-195).
-In (3) the sidebar shows Workflows, Needs attention and Fleet, and **no Admin group at all** — not a disabled
-one (FR-193). In (4) the Admin group is present with all six surfaces. Every screen the role can open is
+(FR-195, SC-057). Both failures in (2) return to the sign-in screen showing a readable reason. That reason
+names **both** possible causes — out-of-domain identity and deactivated account — and states that it will not
+say which: they are deliberately indistinguishable, because discriminating them would tell an unauthenticated
+caller whether an account exists (FR-195 as amended, FR-190). A generic provider failure remains distinct from
+a refusal. In (3) the sidebar shows Workflows, Launch a run, Needs attention and account settings, and **no
+Admin group at all** — not a disabled one, and no fleet-oversight link either, since that screen is admin-gated
+and FR-190 forbids advertising a surface that will answer `NOT_FOUND` (FR-193 as amended). In (4) the Admin
+group is present with all six surfaces, plus fleet oversight. Every screen the role can open is
 reachable in ≤3 clicks from any other (SC-056). The current section is marked by something other than colour
 alone (FR-201). In (5) the session ends and the browser returns to sign-in (FR-194, SC-058). In (6) the
 engineer gets the **styled** not-found boundary inside the shell with a route back, never `FORBIDDEN` and
@@ -608,8 +661,8 @@ focus ring, and the page body does not scroll horizontally.
 
 **Also check the states, per screen (FR-201):** a list with zero rows renders a stated empty case, not a blank
 region; a screen whose query is in flight renders its loading case; a screen whose query fails renders the
-reason plus a next action. Walk all thirteen screens — this is the criterion the design audit's "every screen"
-line was previously missing.
+reason plus a next action. Walk every screen under the shell route group — this is the criterion the design
+audit's "every screen" line was previously missing.
 
 ---
 
@@ -638,26 +691,53 @@ no Slack identity resolved and that notifications will not be delivered, rather 
 
 _Added 2026-08-06._
 
+A developer's machine almost always has `~/.aws` on it, so `pnpm install` on its own does **not** prove the
+credential-free claim — the install would have succeeded either way and the scenario would pass while testing
+nothing. Reproduce a clean clone explicitly: delete the generated trees, then run the install configs with
+every `AWS_*` variable unset **and** the shared config and credentials files pointed somewhere that does not
+exist. That last part is what actually removes the credentials.
+
 ```bash
-# From a clean clone, with no AWS credentials configured:
-pnpm install                       # postinstall runs the install config; generated types appear
+# 1. Clean clone, no credentials. Delete the generated type trees first — a stale `.sst/`
+#    makes the typecheck pass on types the install never had to produce.
+rm -rf {apps/sisyphus-admin,apps/sisyphus-control-plane,apps/sisyphus-executor,packages/sisyphus-infra}/.sst
+
+#    `pnpm install` runs each of the four `postinstall` hooks. To assert the credential-free part,
+#    run the same command the hook runs, under a scrubbed environment:
+for p in packages/sisyphus-infra apps/sisyphus-admin apps/sisyphus-control-plane apps/sisyphus-executor; do
+  (cd "$p" && env -u AWS_PROFILE -u AWS_REGION -u AWS_DEFAULT_REGION -u AWS_ACCESS_KEY_ID \
+      -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+      AWS_CONFIG_FILE=/nonexistent AWS_SHARED_CREDENTIALS_FILE=/nonexistent \
+      AWS_EC2_METADATA_DISABLED=true \
+      pnpm exec sst install --config sst-install.config.ts --stage install) || echo "FAILED: $p"
+done
+
 pnpm nx run-many -t typecheck      # must be clean, with no credentials present
 ```
 
 1. Inspect `packages/sisyphus-infra/src/` for any `*Provider` / `*Surface` interface, injected constructor, or
-   structural redeclaration of the deployment tool's types.
+   structural redeclaration of the deployment tool's types:
+   `grep -rE '\b[A-Za-z]*(Provider|Surface)\b' packages/sisyphus-infra/src`.
 2. Diff each deployable's `sst-install.config.ts` provider block against its `sst.config.ts`.
 3. Grep every `sst` invocation across `project.json` files and package scripts.
 4. Open both loose-check lists in each project that has them.
 5. Delete a character from a policy-document helper's action string and run its colocated test.
 
-**Check:** (1) returns nothing (SC-060). (2) the provider set and every pinned version match exactly — a
-mismatch means the generated types describe something a deploy will not resolve (FR-199). (3) every command
-that acts on a stack — deploy, **destroy**, unlock — names its config file; an omission is a defect, not a
-shortcut (FR-199). (4) `sisyphus-api` and `sisyphus-integration-jira` have no such files at all; the four that
-do list only generated globs, and `sisyphus-infra`'s ignored-code set is narrower than an application's
-(FR-198, SC-061). (5) the test fails — if it passes, the policy content is not actually under test and FR-200
-is unmet.
+**Check:** (1) the grep is not silent, and what it returns is the point. The only matches allowed are
+`oidc-provider.ts`'s use of AWS's **identity** provider — `aws.iam.OpenIdConnectProvider`,
+`getOpenIdConnectProvider`, the local `provider` binding and the exported `createOidcProvider` /
+`OidcProviderConfig`, plus the one line in `index.ts` that re-exports them. That is an AWS resource type, not
+an injected seam. Anything else — an interface the package declares so a caller can pass an implementation in
+— is the shape SC-060 forbids. (2) the provider set and every pinned version match exactly — a mismatch means
+the generated types describe something a deploy will not resolve (FR-199). All four files must name the same
+single `aws` provider at the same version; the install configs deliberately omit `region`, because a config
+that resolves a region has to read the environment, and that is the thing being proved unnecessary. (3) every
+command that acts on a stack — deploy, **destroy**, unlock — names its config file; an omission is a defect,
+not a shortcut (FR-199). (4) `sisyphus-api`, `sisyphus-integration-jira` and `sisyphus-notify` have no such
+files at all; the four that do list exactly one glob, `.sst/**/*.ts`, and every one of the four ignores **no**
+error codes — `ignored-error-codes.json` is `[]` in all of them, including `sisyphus-infra`. A non-empty list
+anywhere is a regression to argue about on its own merits (FR-198, SC-061). (5) the test fails — if it passes,
+the policy content is not actually under test and FR-200 is unmet.
 
 Confirm too that `.sst/**` appears in all three of `tsconfig.json` `include`, the loose-glob list, and
 `eslint.config.mjs` `ignores`. Removing it from the first breaks compilation; from the second, the gate fails
@@ -670,11 +750,31 @@ on generated code; from the third, lint does.
 ```bash
 pnpm nx affected -t lint typecheck test design-lint --base=main
 pnpm qlty:diff
+pnpm knip:orphans
 ```
 
 **Bar:** zero lint or security issues at medium+, ≤10% duplication in changed files, `strict` typecheck clean,
-**zero** design-lint errors with every residual warning explained in `DESIGN.md`'s own prose (FR-022, SC-015).
-No `QLTY_*` override may be used to pass CI.
+**zero** design-lint errors with every residual warning explained in `DESIGN.md`'s own prose (FR-022, SC-015),
+and **zero** orphaned modules. No `QLTY_*` override may be used to pass CI.
+
+`pnpm knip:orphans` is the assembly gate (SC-063). It answers one question the other four cannot: does every
+module that ships have a caller reachable from something that runs in production? A module can compile, lint
+cleanly and pass its own suite while nothing but that suite ever imports it — which is how a finished-looking
+feature reaches a stage doing nothing. The gate runs knip in `--production` mode, so test files and every
+non-production entry drop out of the graph and a module's own suite stops counting as a caller.
+
+Two ways to make it lie, both worth knowing:
+
+- **A missing `!`.** Only entry and project patterns suffixed `!` in `knip.json` are production patterns.
+  Strip the suffix and knip resolves an empty entry set, analyses nothing, and exits zero in about a second.
+  A suspiciously fast pass is the symptom.
+- **A barrel promoted to a production entry.** Listing `src/*/index.ts` as a production entry makes every
+  module the barrel re-exports reachable by definition, which is precisely the gap the gate exists to find.
+  Barrels belong in `entry` without the `!`, so the default `pnpm knip` run still treats them as a surface
+  while the gate does not.
+
+When it fails, the finding is a module with no production caller. That is a wiring task, not dead code:
+delete it only once you are sure nothing was ever meant to call it.
 
 ### Design audits — not covered by the linters
 

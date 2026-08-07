@@ -49,6 +49,7 @@ const detail = (overrides: Record<string, unknown> = {}): WorkflowDetailResult =
     originatingIntegrationName: null,
     workspaceId: 'workspace-1',
     workspaceName: 'Acme platform',
+    storagePark: overrides.storagePark ?? null,
   }) as unknown as WorkflowDetailResult
 
 describe('toWorkflowDetailReadouts', () => {
@@ -129,6 +130,34 @@ describe('toWorkflowDetailReadouts', () => {
 
     expect(readouts.startedByLabel).toBe('integration')
     expect(readouts.startedBy).toBe('Acme Jira')
+  })
+
+  it('carries a storage park through, so the panel can say the run is waiting (FR-082)', () => {
+    const readouts = toWorkflowDetailReadouts(
+      detail({
+        workflow: { state: 'running', terminalOutcome: null, outcomeReason: null },
+        storagePark: {
+          boundary: 'pause',
+          attempt: 2,
+          maxAttempts: 8,
+          nextDelayMs: 2000,
+          detail: 'the snapshot bucket is unreachable',
+          reportedAt: MOVED,
+          waiting: true,
+        },
+      }),
+      NOW,
+    )
+
+    expect(readouts.storagePark?.headline).toBe('Waiting on storage')
+    // The state chip is untouched. During a park the run genuinely is `running`, and that is what
+    // the heartbeat is reporting; a readout that overrode it would put the panel and the machine
+    // surface in disagreement.
+    expect(readouts.state).toBe('running')
+  })
+
+  it('leaves the park readout absent for a run that never parked', () => {
+    expect(toWorkflowDetailReadouts(detail(), NOW).storagePark).toBeUndefined()
   })
 })
 

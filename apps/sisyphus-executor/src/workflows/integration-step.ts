@@ -250,6 +250,12 @@ export const runIntegrationStep = async (
           action: INTEGRATION_ACTION,
           workflowId: input.workflowId,
           target: [step.entryId, step.name],
+          // The platform's vocabulary has four kinds and integration is a push onto a downstream
+          // repository — a merge, a tag, a promotion — so `branch_pushed` is the one it is. The
+          // skill's own name for the step stays in the key, where it distinguishes one step from
+          // the next; the kind is what a person scanning what the run did outside the platform
+          // reads.
+          kind: 'branch_pushed',
         },
         perform: async (idempotencyKey) =>
           input.integrator({

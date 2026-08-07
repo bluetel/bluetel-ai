@@ -7,9 +7,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { SisyphusDatabase } from '../../db'
 import {
   configurationAudit,
+  executionProfiles,
   executionProfileVersions,
   setupBundles,
   setupBundleVersions,
+  workflows,
   workspaceEntries,
   workspaces,
   workspaceVersions,
@@ -19,10 +21,11 @@ import type { AuthorisationDenial, SisyphusContext, SisyphusSession } from '../c
 import { createCallerFactory } from '../procedures'
 import { memoiseScope } from '../scope'
 
+import { findProfileVersion } from './profile-store'
 import { createProfilesRouter, profilesRouter, profileTargetNotFoundError } from './profiles'
 import type { FakeReachabilityProbe } from './reachability-fake'
 import { createFakeReachabilityProbe } from './reachability-fake'
-import { createUserFixtures, readTestDatabaseUrl } from './test-database'
+import { createGate, createUserFixtures, readTestDatabaseUrl } from './test-database'
 
 /**
  * The refusal a call produced.
@@ -234,6 +237,37 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
     }
 
     return version.id
+  }
+
+  /**
+   * A run pinned to one profile version, exactly as `workflow.start` writes it.
+   *
+   * Inserted directly rather than through `workflow.start`: this suite is about profiles, and
+   * reaching for the launch path to build a fixture would make a failure there look like one here.
+   */
+  const seedRunPinnedTo = async (
+    executionProfileId: string,
+    executionProfileVersionId: string,
+  ): Promise<string> => {
+    const [workflow] = await fixtures
+      .db()
+      .insert(workflows)
+      .values({
+        type: 'delegated',
+        state: 'running',
+        ownerUserId: admin.id,
+        executionProfileId,
+        executionProfileVersionId,
+        setupBundleVersionId: enabledBundleVersionId,
+        workspaceVersionId,
+        model: 'claude-sonnet-5',
+        instanceType: 'm7i.xlarge',
+        purchaseMode: 'on_demand',
+        sessionId: randomUUID(),
+      })
+      .returning({ id: workflows.id })
+
+    return workflow.id
   }
 
   beforeAll(async () => {
@@ -477,6 +511,104 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
     const trail = await auditFor(created.profile.id)
     expect(trail.map((row) => row.action).sort()).toStrictEqual(['registered', 'replaced'])
   })
+
+  /**
+   * **FR-125's actual claim on the profile side: "an in-flight workflow MUST be unaffected."**
+   *
+   * The test above is sequential — create, edit, assert — so it proves versions are append-only and
+   * nothing more. Append-only is the weaker property: an implementation with no concurrency safety
+   * at all satisfies it, because at no point does it have two transactions open. FR-125 is a
+   * statement about an edit that lands *while a run is in flight*, and the only honest way to test
+   * that is to make the two overlap.
+   *
+   * The run below holds its transaction open on `findProfileVersion` — the resolver that
+   * reconstructs its configuration — while an admin's edit publishes version 2 and commits inside
+   * that window. What makes the pass mean something is the same three things the workspace suite
+   * relies on: Postgres reports the run's backend `idle in transaction`; the run is provably still
+   * unsettled when the edit returns; and the run's second read **sees** the edit — the parent row
+   * has moved on to version 2 — while its own pinned version row is unchanged. Absent that last
+   * assertion, an isolated snapshot would explain the result just as well as an immutable version.
+   */
+  it('leaves a run’s pinned version untouched by an edit landing mid-run (FR-125)', async () => {
+    const created = await asAdmin().create({
+      ...launchValues(),
+      name: `mid-run-${fixtures.suffix}`,
+    })
+
+    const pinnedVersionId = created.version.id
+    const workflowId = await seedRunPinnedTo(created.profile.id, pinnedVersionId)
+
+    const running = createGate()
+    const editLanded = createGate()
+    let runSettled = false
+
+    const run = fixtures
+      .db()
+      .transaction(async (tx) => {
+        const atLaunch = await findProfileVersion(tx, pinnedVersionId)
+        running.open()
+        await editLanded.opened
+
+        const afterEdit = await findProfileVersion(tx, pinnedVersionId)
+        const [parent] = await tx
+          .select({ currentVersionId: executionProfiles.currentVersionId })
+          .from(executionProfiles)
+          .where(eq(executionProfiles.id, created.profile.id))
+
+        return { atLaunch, afterEdit, currentVersionId: parent.currentVersionId }
+      })
+      .finally(() => {
+        runSettled = true
+      })
+
+    await running.opened
+    expect(await fixtures.backendsInTransaction()).toBeGreaterThan(0)
+
+    // The edit lands inside the run's window, and disagrees with version 1 about every value a
+    // run's configuration is reconstructed from.
+    const edited = await asAdmin().update({
+      ...launchValues(),
+      executionProfileId: created.profile.id,
+      instanceType: 'm7i.8xlarge',
+      turnCap: 400,
+      spendCap: '900.0000',
+      promptPreamble: 'Rewritten house style.',
+      lockedFields: [],
+    })
+
+    expect(edited.version.version).toBe(2)
+    expect(runSettled).toBe(false)
+
+    editLanded.open()
+    const observed = await run
+
+    // The run saw the edit — the parent row moved on — so nothing below is a snapshot hiding it.
+    expect(observed.currentVersionId).toBe(edited.version.id)
+    expect(observed.currentVersionId).not.toBe(pinnedVersionId)
+
+    // And the version it launched under is the same row, value for value.
+    expect(observed.afterEdit).toStrictEqual(observed.atLaunch)
+    expect(observed.afterEdit).toMatchObject({
+      id: pinnedVersionId,
+      version: 1,
+      instanceType: 'm7i.xlarge',
+      turnCap: 40,
+      promptPreamble: 'House style applies.',
+      lockedFields: ['model'],
+    })
+
+    // The pin on the run itself did not move either, and resolving through it still answers with
+    // version 1 now that everything has committed.
+    const [workflow] = await fixtures
+      .db()
+      .select({ executionProfileVersionId: workflows.executionProfileVersionId })
+      .from(workflows)
+      .where(eq(workflows.id, workflowId))
+    expect(workflow.executionProfileVersionId).toBe(pinnedVersionId)
+
+    const resolved = await findProfileVersion(fixtures.db(), pinnedVersionId)
+    expect(resolved).toMatchObject({ instanceType: 'm7i.xlarge', turnCap: 40 })
+  }, 30_000)
 
   it('clones the current version into a new, disabled profile with no grants (FR-127)', async () => {
     const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })

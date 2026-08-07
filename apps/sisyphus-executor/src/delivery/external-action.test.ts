@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ExternalActionIdentity } from './external-action'
+import type { ExternalActionInput } from '../report'
+
+import type { ExternalActionIdentity, ExternalActionRecorder } from './external-action'
 import {
   createExternalActionLedger,
   EXTERNAL_ACTION_KEY_SEPARATOR,
   externalActionKey,
+  ExternalActionNotEntitledError,
+  externalActionTargetReference,
   pendingExternalActions,
   performExternalAction,
   pullRequestIdentity,
@@ -62,6 +66,7 @@ const ticketCommentIdentity = (input: {
   action: 'comment',
   workflowId: input.workflowId,
   target: [input.ticket, input.purpose],
+  kind: 'comment_posted',
 })
 
 const ticketTransitionIdentity = (input: {
@@ -72,6 +77,7 @@ const ticketTransitionIdentity = (input: {
   action: 'transition',
   workflowId: input.workflowId,
   target: [input.ticket, input.status],
+  kind: 'ticket_transitioned',
 })
 
 describe('the key', () => {
@@ -350,6 +356,234 @@ describe('an action whose remote cannot be asked', () => {
     expect(pendingExternalActions(ledger)).toStrictEqual([
       { key: externalActionKey(identity), attempts: 1 },
     ])
+  })
+})
+
+/**
+ * **The durable half (FR-076).**
+ *
+ * These are the tests that would have caught the gap T180 named: the in-memory ledger is per
+ * process, so every test above passes just as happily with an instance that was re-provisioned
+ * mid-delivery and came back knowing nothing. What makes the guarantee cross-process is the row
+ * and its unique index, and the only way to test that from here is to stand up a fake of the
+ * machine surface that behaves like the index does — one winner per key, and a `succeeded` row
+ * that nobody may act over.
+ */
+const createFakeExternalActionSurface = (): ExternalActionRecorder & {
+  readonly rows: Map<string, { result: ExternalActionInput['result']; attemptCount: number }>
+  readonly calls: ExternalActionInput[]
+} => {
+  const rows = new Map<string, { result: ExternalActionInput['result']; attemptCount: number }>()
+  const calls: ExternalActionInput[] = []
+
+  return {
+    rows,
+    calls,
+    reportExternalAction: async (input) => {
+      calls.push(input)
+      const key = `${input.kind}:${input.idempotencyKey}`
+      const stored = rows.get(key)
+
+      if (stored === undefined) {
+        rows.set(key, { result: input.result, attemptCount: input.attemptCount })
+
+        return Promise.resolve({
+          action: {} as never,
+          claimed: true,
+          alreadyPerformed: input.result === 'succeeded',
+        })
+      }
+
+      // The progression rule the procedure enforces: `succeeded` is terminal, nothing regresses
+      // to `pending`, and the attempt count moves under `greatest`.
+      const result =
+        stored.result === 'succeeded' || input.result === 'pending' ? stored.result : input.result
+
+      rows.set(key, {
+        result,
+        attemptCount: Math.max(stored.attemptCount, input.attemptCount),
+      })
+
+      return Promise.resolve({
+        action: {} as never,
+        claimed: false,
+        alreadyPerformed: result === 'succeeded',
+      })
+    },
+  }
+}
+
+describe('the durable ledger', () => {
+  const identity = ticketCommentIdentity({ workflowId: RUN, ticket: 'ABC-1', purpose: 'summary' })
+
+  it('says whether it is durable at all, rather than leaving it to be inferred', () => {
+    expect(createExternalActionLedger<string>().isDurable).toBe(false)
+    expect(
+      createExternalActionLedger<string>({ recorder: createFakeExternalActionSurface() }).isDurable,
+    ).toBe(true)
+  })
+
+  it('claims the action before performing it, never after', async () => {
+    const surface = createFakeExternalActionSurface()
+    const ledger = createExternalActionLedger<string>({ recorder: surface })
+    const order: string[] = []
+
+    await performExternalAction(ledger, {
+      identity,
+      perform: (): Promise<string> => {
+        order.push(`perform after ${String(surface.calls.length)} report(s)`)
+        return Promise.resolve('posted')
+      },
+    })
+
+    // The claim is only useful if it is the thing that gates the action. A ledger that reported
+    // afterwards would be a log, and a second process asking would already be too late.
+    expect(surface.calls[0]).toMatchObject({ result: 'pending', attemptCount: 1 })
+    expect(order).toStrictEqual(['perform after 1 report(s)'])
+    expect(surface.calls[1]).toMatchObject({ result: 'succeeded' })
+  })
+
+  it('sends the derived key and the platform kind, so the index is scoped as the schema is', async () => {
+    const surface = createFakeExternalActionSurface()
+    const ledger = createExternalActionLedger<string>({ recorder: surface })
+
+    await performExternalAction(ledger, {
+      identity,
+      perform: (): Promise<string> => Promise.resolve('posted'),
+    })
+
+    expect(surface.calls[0]).toMatchObject({
+      kind: 'comment_posted',
+      idempotencyKey: externalActionKey(identity),
+      targetReference: externalActionTargetReference(identity),
+    })
+  })
+
+  /**
+   * The failure the whole change exists to prevent, and the one no in-memory test can reach: the
+   * instance is reclaimed mid-delivery and replaced. The replacement's map is empty and its remote
+   * cannot be asked, so before T180 it re-posted.
+   */
+  it('refuses to act after a re-provision, when the row says the action already landed', async () => {
+    const surface = createFakeExternalActionSurface()
+    let performs = 0
+    const perform = (): Promise<string> => {
+      performs += 1
+      return Promise.resolve('posted')
+    }
+
+    await performExternalAction(createExternalActionLedger<string>({ recorder: surface }), {
+      identity,
+      perform,
+    })
+
+    // A fresh instance: a fresh ledger, an empty map, the same durable row.
+    const replacement = createExternalActionLedger<string>({ recorder: surface })
+
+    await expect(performExternalAction(replacement, { identity, perform })).rejects.toBeInstanceOf(
+      ExternalActionNotEntitledError,
+    )
+    expect(performs).toBe(1)
+  })
+
+  it('lets a re-provisioned run recover the result when the remote can be asked', async () => {
+    const surface = createFakeExternalActionSurface()
+    const remote = createTicketRemote()
+
+    await performExternalAction(createExternalActionLedger<string>({ recorder: surface }), {
+      identity,
+      find: remote.find,
+      perform: (): Promise<string> => remote.post('the summary'),
+    })
+
+    // `find` runs before the claim, so a remote that can answer produces the result rather than a
+    // refusal — the durable row records that an action happened, not what it produced.
+    const outcome = await performExternalAction(
+      createExternalActionLedger<string>({ recorder: surface }),
+      { identity, find: remote.find, perform: (): Promise<string> => remote.post('the summary') },
+    )
+
+    expect(outcome.disposition).toBe('already-performed')
+    expect(remote.posts).toBe(1)
+  })
+
+  it('refuses the loser of a race for one key, so two live instances cannot both act', async () => {
+    const surface = createFakeExternalActionSurface()
+    let performs = 0
+    const perform = async (): Promise<string> => {
+      performs += 1
+
+      return new Promise<string>((resolve) => {
+        setTimeout(() => {
+          resolve('posted')
+        }, 0)
+      })
+    }
+
+    const [first, second] = await Promise.allSettled([
+      performExternalAction(createExternalActionLedger<string>({ recorder: surface }), {
+        identity,
+        perform,
+      }),
+      performExternalAction(createExternalActionLedger<string>({ recorder: surface }), {
+        identity,
+        perform,
+      }),
+    ])
+
+    expect([first.status, second.status].sort()).toStrictEqual(['fulfilled', 'rejected'])
+    expect(performs).toBe(1)
+  })
+
+  it('names which refusal it is, because the two mean different things afterwards', async () => {
+    const surface = createFakeExternalActionSurface()
+
+    const post = (): Promise<string> => Promise.resolve('posted')
+
+    await performExternalAction(createExternalActionLedger<string>({ recorder: surface }), {
+      identity,
+      perform: post,
+    })
+
+    const refused = await performExternalAction(
+      createExternalActionLedger<string>({ recorder: surface }),
+      { identity, perform: post },
+    ).catch((error: unknown) => error)
+
+    expect(refused).toBeInstanceOf(ExternalActionNotEntitledError)
+    expect((refused as ExternalActionNotEntitledError).refusal).toBe('already-performed')
+  })
+
+  it('reports a genuine failure as failed rather than leaving the row claimed for ever', async () => {
+    const surface = createFakeExternalActionSurface()
+    const ledger = createExternalActionLedger<string>({ recorder: surface })
+
+    await expect(
+      performExternalAction(ledger, {
+        identity,
+        find: (): Promise<string | undefined> => Promise.resolve(undefined),
+        perform: (): Promise<string> => Promise.reject(new Error('connection refused')),
+      }),
+    ).rejects.toThrow('connection refused')
+
+    // A row stuck on `pending` would make this run's own retry look like somebody else's claim.
+    expect(surface.calls.at(-1)).toMatchObject({ result: 'failed', attemptCount: 1 })
+  })
+
+  it('changes nothing for a ledger with no recorder, so adoption is call site by call site', async () => {
+    const ledger = createExternalActionLedger<string>()
+    let performs = 0
+
+    const outcome = await performExternalAction(ledger, {
+      identity,
+      perform: (): Promise<string> => {
+        performs += 1
+        return Promise.resolve('posted')
+      },
+    })
+
+    expect(outcome.disposition).toBe('performed')
+    expect(performs).toBe(1)
   })
 })
 

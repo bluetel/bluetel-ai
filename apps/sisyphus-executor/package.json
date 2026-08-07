@@ -3,11 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "postinstall": "sst install --config sst-install.config.ts --stage install"
+  },
   "devDependencies": {
     "@bluetel-ai/eslint-config-base": "workspace:*",
     "@bluetel-ai/sisyphus-infra": "workspace:*",
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.12",
+    "loose-ts-check": "^2.0.0",
     "sst": "^3.19.3",
     "tsx": "^4.21.0",
     "typescript": "~5.9.2",

@@ -25,6 +25,16 @@ describe('the workflow barrel', () => {
     }
   })
 
+  it('exports the launch-configuration read, so SC-021 has one route (T188)', () => {
+    for (const name of [
+      'readLaunchConfiguration',
+      'loadLaunchConfiguration',
+      'reconstructLaunchConfiguration',
+    ] as const) {
+      expect(typeof barrel[name]).toBe('function')
+    }
+  })
+
   it('exports the launch path', () => {
     expect(typeof barrel.startWorkflow).toBe('function')
     expect(typeof barrel.resolveLaunchPlan).toBe('function')

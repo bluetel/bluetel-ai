@@ -30,6 +30,7 @@ const detail: WorkflowDetailReadouts = {
   reviewerSummary: null,
   needsReassignment: false,
   promptTruncated: false,
+  storagePark: undefined,
 }
 
 describe('WorkflowSummaryCard', () => {
@@ -115,6 +116,35 @@ describe('WorkflowSummaryCard', () => {
     )
 
     expect(markup).toContain('truncated oldest-comment-first')
+  })
+
+  it('says the run is waiting on storage, and that it is being retried (FR-082)', () => {
+    const markup = renderToStaticMarkup(
+      <WorkflowSummaryCard
+        detail={{
+          ...detail,
+          storagePark: {
+            waiting: true,
+            headline: 'Waiting on storage',
+            explanation: 'It has not stalled: the write is being retried — attempt 2 of 8.',
+            cause: 'the snapshot bucket is unreachable',
+          },
+        }}
+      />,
+    )
+
+    expect(markup).toContain('Waiting on storage')
+    expect(markup).toContain('attempt 2 of 8')
+    expect(markup).toContain('the snapshot bucket is unreachable')
+    // The chip still reports the run's actual state. A park does not change it, and a panel that
+    // overwrote it here would be disagreeing with the heartbeat.
+    expect(markup).toContain('data-state="running"')
+  })
+
+  it('says nothing about storage for a run that never parked', () => {
+    const markup = renderToStaticMarkup(<WorkflowSummaryCard detail={detail} />)
+
+    expect(markup).not.toContain('storage')
   })
 
   it('writes no literal colour, size or radius outside the meter’s computed width (SC-015)', () => {

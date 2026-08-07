@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentQuiescedState } from '../agent'
 import { AgentAdapterError } from '../agent'
@@ -311,5 +311,125 @@ describe('suspend', () => {
     expect(harness.calls).not.toContain('registerSnapshot')
     expect(harness.calls).not.toContain('acknowledge')
     expect(harness.calls).not.toContain('releaseCompute')
+  })
+})
+
+/**
+ * **The budget terms, as bounds rather than as declarations (T185, FR-205, SC-003).**
+ *
+ * `supervision/budget.ts` gives the quiesce, the capture and the registration a share of SC-003's
+ * ten seconds each. These assert that exceeding one *does* something, and that what it does is the
+ * thing the requirement asks for — which differs per step, and is the whole design.
+ */
+describe('the SC-003 terms this routine enforces', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const hang = async (): Promise<never> => new Promise<never>(() => undefined)
+
+  it('records when the suspension began, which is what the idle ceiling counts from', async () => {
+    const at = new Date('2026-08-05T12:00:00.000Z')
+    const harness = harnessFor('pause', { now: () => at })
+
+    expect((await suspend(harness.options)).suspendedAt).toStrictEqual(at)
+  })
+
+  it('rejects rather than snapshotting mid-turn when the quiesce term is blown', async () => {
+    vi.useFakeTimers()
+
+    const harness = harnessFor('pause', {
+      quiesceTimeoutMs: 50,
+      agent: { quiesce: hang, stop: hang },
+    })
+    const pausing = suspend(harness.options)
+    const settled = expect(pausing).rejects.toThrow(/turn boundary/)
+
+    await vi.advanceTimersByTimeAsync(50)
+    await settled
+
+    // Nothing below step 1 ran, so nothing was captured and nobody was told a pause had happened.
+    expect(harness.calls).toStrictEqual([])
+  })
+
+  it('bounds the quiesce even when the adapter ignores the timeout it was handed', async () => {
+    // Passing a number to a port is a request. An adapter that ignores it — a fake, a future
+    // adapter, a bug — would otherwise leave the *largest* term of the budget unenforced, which is
+    // exactly the shape FR-205 forbids.
+    vi.useFakeTimers()
+
+    let handed: number | undefined
+    const harness = harnessFor('pause', {
+      quiesceTimeoutMs: 50,
+      agent: {
+        quiesce: async (options) => {
+          handed = options?.timeoutMs
+          return hang()
+        },
+        stop: hang,
+      },
+    })
+    const pausing = suspend(harness.options)
+    const settled = expect(pausing).rejects.toThrow(/50ms budget/)
+
+    await vi.advanceTimersByTimeAsync(50)
+    await settled
+
+    expect(handed).toBe(50)
+  })
+
+  it('parks and retries a capture that blew its term, rather than failing the run', async () => {
+    // FR-082's case, reached by a deadline rather than by a refusal: the store is answering, just
+    // not inside the first attempt's share of the ten seconds.
+    vi.useFakeTimers()
+
+    const reports: string[] = []
+    let attempts = 0
+    const harness = harnessFor(
+      'pause',
+      {
+        snapshotCaptureBudgetMs: 50,
+        snapshotRetryBudgetMs: 10_000,
+        parkBudget: { maxAttempts: 3, initialDelayMs: 1, maxDelayMs: 1, factor: 2 },
+        onParked: (report) => {
+          reports.push(report.reason)
+        },
+      },
+      async () => {
+        attempts += 1
+
+        if (attempts === 1) {
+          return hang()
+        }
+
+        return CAPTURED
+      },
+    )
+
+    const pausing = suspend(harness.options)
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    // The retry is given room, so a large working tree is not condemned by a deadline that is
+    // already missed. The pause completes — late, and visibly so.
+    await expect(pausing).resolves.toMatchObject({ snapshot: CAPTURED, parkedAttempts: 1 })
+    expect(reports[0]).toMatch(/50ms budget/)
+  })
+
+  it('fails the pause when registration blows its term, so nothing unregistered is acknowledged', async () => {
+    // FR-049's ordering, enforced by the deadline: a snapshot the platform cannot confirm it
+    // registered must never be reported to a person as a pause they can resume from.
+    vi.useFakeTimers()
+
+    const harness = harnessFor('pause', {
+      snapshotRegisterBudgetMs: 50,
+      registerSnapshot: hang,
+    })
+    const pausing = suspend(harness.options)
+    const settled = expect(pausing).rejects.toThrow(/registering the pause snapshot/)
+
+    await vi.advanceTimersByTimeAsync(50)
+    await settled
+
+    expect(harness.calls).not.toContain('acknowledge')
   })
 })

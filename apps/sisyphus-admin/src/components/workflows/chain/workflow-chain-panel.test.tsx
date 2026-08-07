@@ -133,4 +133,12 @@ describe('WorkflowChainPanel', () => {
     expect(markup).not.toMatch(/\d+(?:\.\d+)?(?:px|rem|em)\b/)
     expect(markup).not.toContain('style=')
   })
+
+  it('says it is reading the chain rather than leaving the card blank (FR-201)', () => {
+    const markup = render({ requestedWorkflowId: 'run-a', chain: undefined, loading: true })
+
+    expect(markup).toContain('data-note="loading"')
+    expect(markup).toContain('reading this chain')
+    expect(markup).not.toContain('no runs in this chain')
+  })
 })

@@ -126,4 +126,26 @@ describe('WorkflowList', () => {
     expect(markup).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
     expect(markup).not.toMatch(/style="[^"]*\d+(px|rem)/)
   })
+
+  it('says it is reading rather than leaving the body blank (FR-201)', () => {
+    const markup = renderToStaticMarkup(<WorkflowList rows={[]} loading onLoadMore={noop} />)
+
+    expect(markup).toContain('data-note="loading"')
+    expect(markup).toContain('reading the runs you may see')
+  })
+
+  it('does not claim the filters matched nothing while the read is in flight', () => {
+    const markup = renderToStaticMarkup(<WorkflowList rows={[]} loading onLoadMore={noop} />)
+
+    expect(markup).not.toContain('no runs match these filters')
+    expect(markup).not.toContain('data-note="empty"')
+  })
+
+  it('replaces the reading line with the empty one, in the same place and the same type', () => {
+    const loading = renderToStaticMarkup(<WorkflowList rows={[]} loading onLoadMore={noop} />)
+    const settled = renderToStaticMarkup(<WorkflowList rows={[]} onLoadMore={noop} />)
+
+    expect(settled).toContain('data-note="empty"')
+    expect(loading.match(/type-data-mono/g)?.length).toBe(settled.match(/type-data-mono/g)?.length)
+  })
 })

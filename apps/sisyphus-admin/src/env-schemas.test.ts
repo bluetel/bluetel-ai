@@ -29,6 +29,19 @@ describe('serverSchemas', () => {
       expect(() => serverSchemas.SISYPHUS_MACHINE_CREDENTIAL_SECRET.parse(undefined)).toThrow()
     })
 
+    it('rejects a missing Slack token, so a mounted machine surface cannot notify nobody silently', () => {
+      expect(() => serverSchemas.SISYPHUS_SLACK_BOT_TOKEN.parse(undefined)).toThrow()
+      expect(() => serverSchemas.SISYPHUS_SLACK_BOT_TOKEN.parse('')).toThrow()
+    })
+
+    it('requires an absolute panel URL, because it is written into a Slack message (FR-137)', () => {
+      expect(() => serverSchemas.SISYPHUS_PANEL_URL.parse(undefined)).toThrow()
+      expect(() => serverSchemas.SISYPHUS_PANEL_URL.parse('/workflows')).toThrow()
+      expect(serverSchemas.SISYPHUS_PANEL_URL.parse('https://sisyphus.example.com')).toBe(
+        'https://sisyphus.example.com',
+      )
+    })
+
     it('rejects every missing bucket name', () => {
       expect(() => serverSchemas.SISYPHUS_LOGS_BUCKET.parse(undefined)).toThrow()
       expect(() => serverSchemas.SISYPHUS_BUNDLES_BUCKET.parse(undefined)).toThrow()

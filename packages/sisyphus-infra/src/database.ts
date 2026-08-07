@@ -6,122 +6,92 @@
  * outputs is what keeps `sisyphus-api` the only member that ever holds a
  * database credential: the panel and the control plane read one parameter, and
  * the executor is never granted the parameter at all.
+ *
+ * Both stages run the smallest instance class and storage AWS allows, with no
+ * standby, to keep cost minimal. Production still gets a fortnight of backups
+ * and deletion protection; every other stage is disposable by design, because
+ * a personal stage that cannot be torn down is a stage nobody deletes.
  */
 
-import { getResourceIdentifier, type ResourceScope } from './lib'
+import { getConnectionUrlParameterName, getResourceIdentifier, type ResourceScope } from './lib'
+import { isProductionStage } from './sst-app'
 
-const PRODUCTION_STAGE = 'production'
+/** The database, and the role the panel and the control plane connect as. */
+const DATABASE_NAME = 'sisyphus'
+
+const DEFAULT_ENGINE_VERSION = '17.4'
 
 export interface DatabaseConfig {
   readonly scope: ResourceScope
-  /** Plain stage name — pass `getPlainStage($app.stage)`, not the suffixed stack. */
+  /** Plain stage name — pass `scope.stack`, not the suffixed SST stage. */
   readonly stage: string
+  readonly username?: string
+  /**
+   * The master password, in clear text.
+   *
+   * This is the single, named exception FR-202 allows: the value is needed in
+   * order to *construct* the instance and to compose the connection URL, so it
+   * cannot arrive already wrapped. Both places it lands — the instance argument
+   * and the parameter — wrap it before it reaches stack state.
+   */
+  readonly password: string
   readonly instanceClass?: string
   readonly allocatedStorageGb?: number
   readonly engineVersion?: string
 }
 
-export interface DatabaseSpecification {
-  readonly identifier: string
-  readonly engine: 'postgres'
-  readonly engineVersion: string
-  readonly instanceClass: string
-  readonly allocatedStorageGb: number
-  /** Always true — FR-072 forbids platform credentials and data at rest in the clear. */
-  readonly storageEncrypted: true
-  /** Always false — the control plane and panel reach it from inside the VPC only. */
-  readonly publiclyAccessible: false
-  readonly multiAvailabilityZone: boolean
-  readonly backupRetentionDays: number
-  readonly deletionProtection: boolean
-  readonly databaseName: string
-  /** Parameter Store path the connection URL is published to. */
+export interface Database {
+  readonly instance: aws.rds.Instance
+  /** Secret-wrapped, and only knowable once the instance has an endpoint. */
+  readonly connectionUrl: $util.Output<string>
+  readonly connectionUrlParameter: aws.ssm.Parameter
+  /** The path the URL was published to, for a caller reporting it as an output. */
   readonly connectionUrlParameterName: string
 }
 
-/**
- * The Parameter Store path a stage's connection URL is published to. Built from
- * the plain stage so `<stage>-bootstrap` and `<stage>-website` read and write
- * the same entry.
- */
-export const getConnectionUrlParameterName = (stage: string): string =>
-  `/sisyphus/${stage}/database/connection-url`
+export const createDatabase = (config: DatabaseConfig): Database => {
+  const isProduction = isProductionStage(config.stage)
+  const identifier = getResourceIdentifier(config.scope, 'database')
+  const username = config.username ?? DATABASE_NAME
 
-/**
- * Pure description of the instance. Production gets a standby, a fortnight of
- * backups and deletion protection; every other stage is disposable by design,
- * because a personal stage that cannot be torn down is a stage nobody deletes.
- */
-export const buildDatabaseSpecification = (config: DatabaseConfig): DatabaseSpecification => {
-  const isProduction = config.stage === PRODUCTION_STAGE
-
-  return {
-    identifier: getResourceIdentifier(config.scope, 'database'),
+  const instance = new aws.rds.Instance(identifier, {
+    identifier,
     engine: 'postgres',
-    engineVersion: config.engineVersion ?? '17.4',
-    instanceClass: config.instanceClass ?? (isProduction ? 'db.t4g.small' : 'db.t4g.micro'),
-    allocatedStorageGb: config.allocatedStorageGb ?? (isProduction ? 50 : 20),
+    engineVersion: config.engineVersion ?? DEFAULT_ENGINE_VERSION,
+    instanceClass: config.instanceClass ?? 'db.t4g.micro',
+    allocatedStorage: config.allocatedStorageGb ?? 20,
+    // FR-072 forbids platform credentials and data at rest in the clear.
     storageEncrypted: true,
+    // The control plane and panel reach it from inside the VPC only.
     publiclyAccessible: false,
-    multiAvailabilityZone: isProduction,
-    backupRetentionDays: isProduction ? 14 : 1,
+    multiAz: false,
+    backupRetentionPeriod: isProduction ? 14 : 1,
     deletionProtection: isProduction,
-    databaseName: 'sisyphus',
-    connectionUrlParameterName: getConnectionUrlParameterName(config.stage),
-  }
-}
+    dbName: DATABASE_NAME,
+    username,
+    password: $util.secret(config.password),
+    skipFinalSnapshot: !isProduction,
+  })
 
-export interface ParameterSpecification<TValue> {
-  readonly name: string
-  /** Always `SecureString` — the value is a credential (FR-072). */
-  readonly type: 'SecureString'
-  readonly value: TValue
-  readonly description: string
-}
+  const connectionUrl = $util.secret(
+    instance.endpoint.apply(
+      (endpoint) =>
+        `postgres://${username}:${encodeURIComponent(config.password)}@${endpoint}/${DATABASE_NAME}`,
+    ),
+  )
 
-/**
- * The narrow slice of the SST/Pulumi provider surface this primitive needs.
- * `sst.config.ts` supplies constructors closing over the real `sst`/`aws`
- * globals; nothing in this package imports them.
- */
-export interface DatabaseProvider<TInstance, TParameter, TValue> {
-  readonly createInstance: (name: string, specification: DatabaseSpecification) => TInstance
-  readonly createParameter: (
-    name: string,
-    specification: ParameterSpecification<TValue>,
-  ) => TParameter
-}
+  const connectionUrlParameterName = getConnectionUrlParameterName(config.stage)
 
-export interface CreatedDatabase<TInstance, TParameter> {
-  readonly specification: DatabaseSpecification
-  readonly instance: TInstance
-  readonly connectionUrlParameter: TParameter
-}
-
-/**
- * Creates the instance and publishes its connection URL.
- *
- * `resolveConnectionUrl` exists because the URL is only knowable from the
- * created instance — a Pulumi caller returns an `Output<string>` from it, and a
- * test returns a plain string.
- */
-export const createDatabase = <TInstance, TParameter, TValue>(
-  provider: DatabaseProvider<TInstance, TParameter, TValue>,
-  config: DatabaseConfig,
-  resolveConnectionUrl: (instance: TInstance) => TValue,
-): CreatedDatabase<TInstance, TParameter> => {
-  const specification = buildDatabaseSpecification(config)
-  const instance = provider.createInstance(specification.identifier, specification)
-
-  const connectionUrlParameter = provider.createParameter(
+  const connectionUrlParameter = new aws.ssm.Parameter(
     getResourceIdentifier(config.scope, 'database-connection-url'),
     {
-      name: specification.connectionUrlParameterName,
+      name: connectionUrlParameterName,
+      // Always `SecureString` — the value is a credential (FR-072).
       type: 'SecureString',
-      value: resolveConnectionUrl(instance),
+      value: connectionUrl,
       description: `Sisyphus PostgreSQL connection URL for stage "${config.stage}"`,
     },
   )
 
-  return { specification, instance, connectionUrlParameter }
+  return { instance, connectionUrl, connectionUrlParameter, connectionUrlParameterName }
 }

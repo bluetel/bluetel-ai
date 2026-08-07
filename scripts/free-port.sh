@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# cspell:ignore fuser
 # Kills whatever is listening on the given port and waits until it's free.
 # Usage: free-port.sh <port>
 set -euo pipefail

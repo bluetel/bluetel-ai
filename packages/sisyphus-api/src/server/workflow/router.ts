@@ -15,6 +15,7 @@ import { correctionsProcedure, correctProcedure } from './corrections'
 import type { WorkflowPage } from './filters'
 import type { IterationPass } from './iterations'
 import { readIterations } from './iterations'
+import { notificationSettingsProcedure } from './notification-settings'
 import { reassignOwnerProcedure } from './ownership'
 import type { SpendSummary, TimelineEntry, WorkflowDetail, WorkflowListing } from './queries'
 import {
@@ -128,7 +129,13 @@ export const workflowRouter = createTRPCRouter({
         listWorkflows({ db: ctx.db, scope: ctx.scope, input }),
     ),
 
-  /** One run in full (FR-014). `NOT_FOUND` when it is outside the caller's scope (FR-190). */
+  /**
+   * One run in full (FR-014). `NOT_FOUND` when it is outside the caller's scope (FR-190).
+   *
+   * Carries `watching` — whether the **caller** follows this run — so the FR-138 Watch/Unwatch
+   * control on the detail view renders in the right state on first paint. It is a field here rather
+   * than a procedure of its own on purpose; `./queries.ts` states the FR-190 argument for that.
+   */
   byId: scopedProcedure
     .input(workflowIdInput)
     .query(
@@ -231,11 +238,27 @@ export const workflowRouter = createTRPCRouter({
    * out-of-scope workflow exists — the refusal is the same `NOT_FOUND` a nonexistent id gets. The
    * preference procedures are `authedProcedure`: they name no workflow, so there is nothing for a
    * scope to constrain.
+   *
+   * Whether the caller already watches a given run is **not** a procedure here; it is the
+   * `watching` field on `byId`. See `./queries.ts` for why a third id-taking read would be a third
+   * place FR-190 has to hold.
    */
   watch: watchProcedure,
   unwatch: unwatchProcedure,
   notificationPreferences: notificationPreferencesProcedure,
   setNotificationPreference: setNotificationPreferenceProcedure,
+
+  /**
+   * The settings screen's whole state: the caller's Slack identity **and** their preferences
+   * (FR-138, FR-140).
+   *
+   * `authedProcedure` with **no input at all**, which is the security argument rather than a
+   * convenience: there is no field for whose settings these are, so this cannot be asked about
+   * anybody but the caller. It exists because `admin.users.list` is the only other read carrying
+   * `slack_user_id` and it is admin-only — leaving the engineers who need to know whether their
+   * notifications will arrive unable to find out. See `./notification-settings.ts`.
+   */
+  notificationSettings: notificationSettingsProcedure,
 
   /**
    * Supervision (FR-044, FR-049, FR-081, SC-003).

@@ -84,6 +84,58 @@ export const registerSnapshotInput = z.object({
   truncationRepaired: z.boolean().default(false),
 })
 
+/**
+ * A snapshot boundary the run could not write, and is holding at (FR-082).
+ *
+ * The counterpart to {@link registerSnapshotInput} and the reason both exist: a snapshot either
+ * lands, in which case the run moves on, or it does not, in which case the run **parks** — holds
+ * the agent at the turn boundary it already reached, spends no further tokens, keeps heartbeating,
+ * and retries the write. Without this input the second case is invisible to everything above the
+ * instance, and a run waiting on object storage is indistinguishable from one that has hung.
+ *
+ * `attempt` is 1-based and is the attempt that **failed**; `attempt + 1` is the one about to be
+ * tried. It is reported rather than counted here because the budget lives on the instance
+ * (`session/park.ts`) and a count derived server-side from the number of reports received would be
+ * wrong exactly when a report was lost — which is when storage is unreachable.
+ */
+export const reportSnapshotParkInput = z.object({
+  boundary: z.enum(SNAPSHOT_BOUNDARIES),
+  attempt: z.number().int().positive(),
+  maxAttempts: z.number().int().positive(),
+  /** How long the run will wait before the next attempt, so the panel can say when to look again. */
+  nextDelayMs: z.number().int().nonnegative(),
+  /** Why the write failed, sanitised by the executor. Free text, and therefore optional. */
+  detail: z.string().optional(),
+})
+
+/**
+ * The `workflow_events.detail` discriminator that marks a `parked` entry as a **storage** park.
+ *
+ * `parked` already carries a second meaning: `reportTerminal` writes it for the `parked_resumable`
+ * outcome, which is the opposite situation — the snapshot *did* land and the compute has been
+ * released. Both are parks and both belong on the timeline, so the reader needs one field to tell
+ * them apart, and this is it. Without the discriminator a panel would have to guess from the
+ * detail's shape, and would eventually guess wrong.
+ */
+export const SNAPSHOT_PARK_WAITING_ON = 'storage'
+
+/**
+ * The detail a storage park records, as it is read back off the timeline.
+ *
+ * A parser rather than a cast: `workflow_events.detail` is `jsonb`, so what comes out is `unknown`
+ * and the read path has no compile-time guarantee that the row it found was written by the version
+ * of this code that is running. `detail` is nullable here and optional on the input because the
+ * column stores an explicit `null` for "no explanation given".
+ */
+export const snapshotParkDetail = z.object({
+  waitingOn: z.literal(SNAPSHOT_PARK_WAITING_ON),
+  boundary: z.enum(SNAPSHOT_BOUNDARIES),
+  attempt: z.number().int().positive(),
+  maxAttempts: z.number().int().positive(),
+  nextDelayMs: z.number().int().nonnegative(),
+  detail: z.string().nullable(),
+})
+
 export const acknowledgeCorrectionInput = z.object({
   correctionId: uuidInput,
   outcome: z.enum(REPORTABLE_CORRECTION_DELIVERY_OUTCOMES),
@@ -184,6 +236,8 @@ export type HeartbeatInput = z.infer<typeof heartbeatInput>
 export type ReportBootstrapPhaseInput = z.infer<typeof reportBootstrapPhaseInput>
 export type AppendLogSegmentInput = z.infer<typeof appendLogSegmentInput>
 export type RegisterSnapshotInput = z.infer<typeof registerSnapshotInput>
+export type ReportSnapshotParkInput = z.infer<typeof reportSnapshotParkInput>
+export type SnapshotParkDetail = z.infer<typeof snapshotParkDetail>
 export type AcknowledgeCorrectionInput = z.infer<typeof acknowledgeCorrectionInput>
 export type AcknowledgeCommandInput = z.infer<typeof acknowledgeCommandInput>
 export type ReportSkillReferenceInput = z.infer<typeof reportSkillReferenceInput>

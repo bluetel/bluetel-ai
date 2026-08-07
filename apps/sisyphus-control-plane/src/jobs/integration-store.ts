@@ -18,7 +18,7 @@ import {
   workflowEvents,
   workflows,
 } from '@bluetel-ai/sisyphus-api/db'
-import { and, asc, count, desc, eq, gte, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm'
 
 /**
  * Every read and write the integration tick makes, in one place (T117).
@@ -268,9 +268,20 @@ export const resolveOwnerUserId = async (
   return input.defaultOwnerUserId ?? undefined
 }
 
+/** Why a ticket on a shared board belongs to somebody other than the integration asking (FR-104). */
+export type TicketOwnershipReason = 'already_started' | 'lower_integration_id'
+
+/** Who owns a contested ticket, and why. The sentence that goes on the run record. */
+export interface TicketOwnership {
+  readonly integrationId: string
+  /** The run the owner has already started, where it has. */
+  readonly workflowId: string | null
+  readonly reason: TicketOwnershipReason
+}
+
 /**
- * A claim on the same ticket held by a **different integration pointing at the same board**
- * (FR-104).
+ * Who is entitled to start a run for this ticket, when more than one integration points at the same
+ * board (FR-104).
  *
  * The scope is the subtle part. `ticket_claims` is unique on `(integration_id, external_id)`, which
  * is right: `FIX-1` on one client's board and `FIX-1` on another's are different tickets, and a
@@ -278,12 +289,36 @@ export const resolveOwnerUserId = async (
  * cross-integration guard is scoped to integrations sharing a `base_url` and `project_prefix` —
  * two rows genuinely pointing at the same board, which is the misconfiguration FR-104 is about.
  *
- * What the guard guarantees is that **exactly one workflow starts**. The deterministic
- * lowest-`integrations.id` winner holds when the ticks are ordered; where a higher-id integration
- * claimed first, the claim stands — the run it began cannot be recalled — and the collision is recorded on the
- * lower-id integration's run, which is what puts the misconfiguration in front of an admin.
+ * ## The rule is applied **before** the claim, which is what makes it independent of tick timing
+ *
+ * FR-104 requires the winner to be deterministic and to *not depend on tick timing*. A guard that
+ * only looked for an existing claim could not satisfy that: whichever integration ticked first
+ * claimed, and the winner was decided by the scheduler rather than by the configuration. Two
+ * deployments with identical rows would start their run under different integrations depending on
+ * which cron minute came round first, and the "ambiguity recorded" would name a different loser
+ * each way.
+ *
+ * So the decision is taken from configuration alone: **the lowest `integrations.id` among the
+ * enabled integrations on a board owns that board's tickets**, and a higher-id integration defers
+ * rather than claiming. Whichever order they tick in, the run is started by the same integration.
+ * Disabled siblings are ignored, because FR-104 is about *enabled* integrations matching the same
+ * item, and a disabled row must not be able to block a board indefinitely.
+ *
+ * The existing-claim branch stays, and stays first, as the double-spend backstop: a claim written
+ * before this rule existed, or by an integration that has since been disabled, still means a paid
+ * run exists, and a second one cannot be recalled by pointing at a rule.
+ *
+ * ## What deferral costs, stated rather than hidden
+ *
+ * A ticket that only the higher-id integration's filters match is deferred to an owner that will
+ * never claim it, so it starts no run. That is recorded as a skip with the owner named — never
+ * silent (FR-143) — and it is the honest consequence of two enabled integrations being pointed at
+ * one board, which FR-104 treats as a misconfiguration for an admin to resolve rather than as a
+ * configuration the platform should quietly make the best of.
+ *
+ * @returns The owner, or `undefined` when the caller owns the ticket and may proceed.
  */
-export const findCompetingClaim = async (
+export const findTicketOwner = async (
   reader: IntegrationReader,
   input: {
     readonly integrationId: string
@@ -291,23 +326,24 @@ export const findCompetingClaim = async (
     readonly baseUrl: string
     readonly projectPrefix: string
   },
-): Promise<{ readonly integrationId: string; readonly workflowId: string | null } | undefined> => {
+): Promise<TicketOwnership | undefined> => {
+  const onTheSameBoard = and(
+    eq(integrations.baseUrl, input.baseUrl),
+    eq(integrations.projectPrefix, input.projectPrefix),
+    ne(integrations.id, input.integrationId),
+  )
+
   const siblings = await reader
     .select({ id: integrations.id })
     .from(integrations)
-    .where(
-      and(
-        eq(integrations.baseUrl, input.baseUrl),
-        eq(integrations.projectPrefix, input.projectPrefix),
-        ne(integrations.id, input.integrationId),
-      ),
-    )
+    .where(onTheSameBoard)
 
   if (siblings.length === 0) {
     return undefined
   }
 
-  return firstRow(
+  // A run already exists. Enabled or not, lowest id or not: it cannot be un-started.
+  const claim = firstRow(
     await reader
       .select({ integrationId: ticketClaims.integrationId, workflowId: ticketClaims.workflowId })
       .from(ticketClaims)
@@ -323,6 +359,30 @@ export const findCompetingClaim = async (
       .orderBy(asc(ticketClaims.integrationId))
       .limit(1),
   )
+
+  if (claim !== undefined) {
+    return { ...claim, reason: 'already_started' }
+  }
+
+  // Nobody has claimed it. The rule decides, and it decides the same way on every tick.
+  const owner = firstRow(
+    await reader
+      .select({ id: integrations.id })
+      .from(integrations)
+      .where(
+        and(
+          onTheSameBoard,
+          eq(integrations.enabled, true),
+          lt(integrations.id, input.integrationId),
+        ),
+      )
+      .orderBy(asc(integrations.id))
+      .limit(1),
+  )
+
+  return owner === undefined
+    ? undefined
+    : { integrationId: owner.id, workflowId: null, reason: 'lower_integration_id' }
 }
 
 /** Everything a started run needs that does not come from the ticket. */

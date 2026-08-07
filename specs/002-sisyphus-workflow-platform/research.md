@@ -529,6 +529,77 @@ away). A dashboard at `/` (a thirteenth screen with no requirement behind it, an
 workflow list's queries to drift from). Rendering admin links disabled rather than absent (discloses that the
 surface exists).
 
+**Outcome, 2026-08-07.** Built as described, and the route-group choice proved load-bearing in a way the
+decision above understated: a boundary renders inside the layout chain of the segment it catches, so a root-only
+`not-found.tsx` renders the non-admin's refusal as a bare card outside the shell. **Four** boundary files were
+needed, not two — one pair inside `(app)` for refusals thrown by screens, one pair at the root for unmatched
+URLs and for the refusal the shell layout itself throws, since a boundary cannot render inside the layout that
+threw.
+
+---
+
+## R18. Where the notification path lives
+
+_Added 2026-08-07, decided during implementation._
+
+**Decision.** Delivery — Slack messenger, recipient selection, coalescing planner, the audit row — lives in a
+shared package, `packages/sisyphus-notify`. Both emitters depend on it and neither depends on the other: the
+control plane composes it in its own composition root, and `sisyphus-api` declares a one-method port
+(`WorkflowEventEmitter`) that its host injects.
+
+**Rationale.** The nine FR-136 events are written from two places and only two: the control plane's reconcile
+sweep sets `failed` and `parked_resumable`, and `sisyphus-api`'s `reportTerminal` sets the other four terminal
+outcomes plus `review_iteration_failed`. Nothing else in the system writes a terminal state — established by
+grep, not assumption. So the delivery layer has exactly two callers in different packages, which is what a
+shared package is for.
+
+The port on the `sisyphus-api` side is what keeps the dependency arrow honest: that package must not know how a
+notification is delivered, who receives it, or that Slack exists. It knows only that something may want to be
+told. When the port is absent the emission is a silent no-op, which is the correct default — FR-140 requires
+that an unnotifiable recipient never fails the run that triggered the notification.
+
+**One non-obvious fact this turned on.** The machine surface is mounted by the **panel**
+(`apps/sisyphus-admin/src/app/api/machine/[trpc]/route.ts`), not by the control plane. Five of the nine events
+therefore originate in a request served by the network-facing deployable, which is why the panel — not the
+control plane — is where the notifier gets injected.
+
+**Alternatives rejected.** Adding an `exports` field to the control-plane app and depending on it from the panel
+(an app depending on another app; it would also have made the panel's build pull in the provisioning code that
+FR-035 exists to keep separate). Emitting inside the state transaction (a throwing notifier would roll back the
+outcome even with the throw swallowed — so emission happens after commit, and the transaction is a separate
+named function specifically so an emission cannot be added inside it). Emitting on every report rather than
+only when the write was recorded (FR-047 retries would announce twice).
+
+---
+
+## R19. What the assembly gate can and cannot assert
+
+_Added 2026-08-07, decided during implementation._
+
+**Decision.** The gate (SC-063) asserts the **module-level** condition — no shipped file without a production
+caller — via `knip --production`, run in CI outside the `nx affected` set. It does not attempt the symbol-level
+condition.
+
+**Rationale.** Module-level is SC-063's actual wording, and it catches the failures that occurred: it detects a
+planted orphan, detects a module whose only production caller is removed while its barrel export and its tests
+remain, and on its first genuine run found thirteen orphaned files across two complete features. Running it
+outside `nx affected` is deliberate — knip is not nx-aware, and the caller that went missing usually lives in a
+project the diff never touched.
+
+**Why not symbol-level.** Measured, not assumed. `--include-entry-exports` reports the entire `sisyphus-infra`
+public API as dead, because every deployment config imports it as
+`const { createBuckets } = await import('@bluetel-ai/sisyphus-infra')` and knip does not attribute names
+destructured from a dynamic import — the module resolves, the symbols do not. Independently, production mode
+reports ~2,060 exports used only by tests. Gating either would mean thousands of ignore entries, which is the
+silent-suppression failure the gate exists to prevent. Structurally the module-level check absorbs much of the
+residue anyway: barrels are deliberately not production entries, so a module reachable only through one falls
+out of the graph and is reported.
+
+**The trap worth recording.** `knip --production` only honours entry and project patterns carrying a trailing
+`!`. No pattern in this repository had one, so the production run resolved an empty entry set, analysed **zero
+files**, and exited clean — for as long as it had existed. A gate that passes instantly and reports nothing is
+the shape of this failure; both `knip.json` and the CI step now carry a comment saying so.
+
 ---
 
 ## Open spikes

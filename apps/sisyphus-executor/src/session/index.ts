@@ -14,6 +14,13 @@ export {
 export type { ConversationLog } from './conversation-log'
 
 export {
+  createPauseIdleCeiling,
+  PAUSE_IDLE_CEILING_MS,
+  pauseIdleCeilingReason,
+} from './idle-ceiling'
+export type { PauseIdleCeiling, PauseIdleCeilingOptions, PauseIdleExpiry } from './idle-ceiling'
+
+export {
   createQuietMetadataReader,
   DEFAULT_INTERRUPTION_POLL_MS,
   watchForInterruption,

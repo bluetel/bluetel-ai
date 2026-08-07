@@ -42,9 +42,25 @@ export { toIntegrationReadouts, wasAutoDisabled } from './integration-listing'
 export type { IntegrationReadouts } from './integration-listing'
 
 export {
-  createUnavailableIntegrationsClient,
-  INTEGRATIONS_UNAVAILABLE,
-} from './integrations-client'
+  formatCounts,
+  formatDuration,
+  looksSilentlyStalled,
+  toRunHistory,
+  toRunHistoryRow,
+} from './run-history'
+export type { RunHistoryRow } from './run-history'
+
+export { useIntegrationsApiClient, INTEGRATION_LIST_LIMIT } from './api-integrations-client'
+
+export { toOwnerOptions, toProfileOptions } from './integration-options'
+
+// `LISTING_CARRIES_NO_CREDENTIAL` is deliberately **not** re-exported. It is the compile-time
+// assertion that the router's row has no credential field, it is checked where it is declared, and
+// a barrel that carried it would put a name containing "credential" on this package's public
+// surface — which is the one thing the next test in `index.test.ts` exists to forbid.
+export { toExtraFilters, toIntegrationView } from './integration-view'
+export type { IntegrationListingOutput } from './integration-view'
+
 export type {
   IntegrationMappingView,
   IntegrationRunView,
@@ -56,6 +72,8 @@ export type {
 } from './integrations-client'
 
 export { IntegrationsPanel } from './integrations-panel'
+
+export { IntegrationsScreen } from './integrations-screen'
 
 export { APPENDED_FIELDS, PromptPreview } from './prompt-preview'
 

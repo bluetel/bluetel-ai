@@ -9,6 +9,14 @@ describe('serverSchemas', () => {
     expect(() => serverSchemas.SISYPHUS_MACHINE_SURFACE_URL.parse('machine')).toThrow()
   })
 
+  it('requires the forge API base, and requires it to be a URL', () => {
+    expect(() => serverSchemas.SISYPHUS_FORGE_API_URL.parse(undefined)).toThrow()
+    expect(() => serverSchemas.SISYPHUS_FORGE_API_URL.parse('api.forge.example')).toThrow()
+    expect(serverSchemas.SISYPHUS_FORGE_API_URL.parse('https://api.forge.example')).toBe(
+      'https://api.forge.example',
+    )
+  })
+
   it('requires all four bucket names', () => {
     for (const key of [
       'SISYPHUS_LOGS_BUCKET',
@@ -51,7 +59,14 @@ describe('the envelope boundary', () => {
   })
 
   it('stays small: every entry is instance-level, so growth here is the smell', () => {
-    expect(declaredKeys).toHaveLength(8)
+    expect(declaredKeys).toHaveLength(9)
+  })
+
+  it('declares a forge URL and no forge credential, in any spelling', () => {
+    expect(declaredKeys).toContain('SISYPHUS_FORGE_API_URL')
+    expect(declaredKeys.filter((key) => /FORGE/.test(key))).toStrictEqual([
+      'SISYPHUS_FORGE_API_URL',
+    ])
   })
 })
 

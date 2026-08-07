@@ -1,5 +1,6 @@
 import type { CandidateItem } from '@bluetel-ai/sisyphus-api/contracts'
-import { integrationRuns, ticketClaims, workflows } from '@bluetel-ai/sisyphus-api/db'
+import { integrationRuns, integrations, ticketClaims, workflows } from '@bluetel-ai/sisyphus-api/db'
+import { createFakeWorkflowNotifier } from '@bluetel-ai/sisyphus-notify'
 import { desc, eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
@@ -442,6 +443,78 @@ describeWithDatabase('the integration tick (T117, FR-102..FR-108, FR-130, FR-159
     expect(envelope.ok).toBe(true)
     expect(envelope.jobName).toBe('integration-tick')
   })
+
+  describe('tells the owners what the tick started (T177, FR-139, FR-141)', () => {
+    it('announces the runs it started, with their owner, in one notice', async () => {
+      const integration = await fixtures.seedIntegration()
+      await fixtures.seedMapping({ integrationId: integration.id })
+      const { dependencies } = dependenciesWith([
+        fakeCandidate({ externalId: 'FIX-1' }),
+        fakeCandidate({ externalId: 'FIX-2' }),
+      ])
+      const notifier = createFakeWorkflowNotifier()
+
+      const outcome = await integrationTick({
+        ...dependencies,
+        notifier,
+        integrationId: integration.id,
+      })
+      if (outcome.outcome !== 'completed') throw new Error('the tick did not complete')
+
+      // One notice covering both runs, not one per run: the fan-out is what FR-139's summary is
+      // about, and the grouping happens behind the port rather than here.
+      expect(notifier.tickNotices).toHaveLength(1)
+      expect(notifier.tickNotices[0]?.integrationName).toBe(integration.name)
+      expect(notifier.tickNotices[0]?.starts).toStrictEqual(
+        outcome.startedWorkflowIds.map((workflowId) => ({
+          workflowId,
+          ownerUserId: fixtures.ownerUserId(),
+        })),
+      )
+    })
+
+    it('announces nothing for a tick that started nothing', async () => {
+      const integration = await fixtures.seedIntegration()
+      // No mapping, so the one candidate resolves to no profile and is skipped.
+      const { dependencies } = dependenciesWith([fakeCandidate()])
+      const notifier = createFakeWorkflowNotifier()
+
+      await integrationTick({ ...dependencies, notifier, integrationId: integration.id })
+
+      expect(notifier.tickNotices).toStrictEqual([])
+    })
+
+    it('completes the tick and keeps the runs when the notification fails (FR-141)', async () => {
+      const integration = await fixtures.seedIntegration()
+      await fixtures.seedMapping({ integrationId: integration.id })
+      const { dependencies } = dependenciesWith([fakeCandidate()])
+      const notifier = createFakeWorkflowNotifier({ failure: new Error('slack is unreachable') })
+
+      const outcome = await integrationTick({
+        ...dependencies,
+        notifier,
+        integrationId: integration.id,
+      })
+      if (outcome.outcome !== 'completed') throw new Error('the tick did not complete')
+
+      // Not a failed run: FR-106 counts consecutive failures towards auto-disabling the board, and
+      // a Slack outage must not eventually switch off a connector that never faltered.
+      expect(outcome.started).toBe(1)
+      expect(await fixtures.countWorkflows()).toBe(1)
+      expect(outcome.notificationError?.message).toBe('slack is unreachable')
+    })
+
+    it('ticks at all without a notifier, which is how every other test here runs', async () => {
+      const integration = await fixtures.seedIntegration()
+      await fixtures.seedMapping({ integrationId: integration.id })
+      const { dependencies } = dependenciesWith([fakeCandidate()])
+
+      const outcome = await integrationTick({ ...dependencies, integrationId: integration.id })
+      if (outcome.outcome !== 'completed') throw new Error('the tick did not complete')
+
+      expect(outcome.notificationError).toBeUndefined()
+    })
+  })
 })
 
 /**
@@ -572,19 +645,85 @@ describeWithDatabase('exactly-once claiming (FR-102, R8)', () => {
     expect(claim.workflowId).not.toBeNull()
   })
 
-  it('starts one workflow when two integrations point at the same board (FR-104)', async () => {
-    const first = await fixtures.seedIntegration({ name: `board-a-${fixtures.suffix}` })
-    const second = await fixtures.seedIntegration({ name: `board-b-${fixtures.suffix}` })
-    await fixtures.seedMapping({ integrationId: first.id })
-    await fixtures.seedMapping({ integrationId: second.id })
+  /**
+   * FR-104's determinism, tested as determinism (T183).
+   *
+   * The requirement is not only "one workflow": it is that **which** integration starts it is fixed
+   * by the configuration and does not depend on tick timing. So the same two rows are ticked in
+   * both orders and the same integration has to win, which is an assertion a first-past-the-post
+   * guard cannot pass. A single sequential tick would have passed with the winner reversed, which
+   * is exactly what it used to do.
+   */
+  describe.each([
+    ['lowest id first', 'lowest-first'],
+    ['lowest id second', 'lowest-second'],
+  ] as const)('two integrations on one board, ticked %s (FR-104)', (_label, order) => {
+    it('starts exactly one workflow, under the lowest-id integration either way', async () => {
+      const one = await fixtures.seedIntegration({ name: `board-a-${fixtures.suffix}` })
+      const other = await fixtures.seedIntegration({ name: `board-b-${fixtures.suffix}` })
+      await fixtures.seedMapping({ integrationId: one.id })
+      await fixtures.seedMapping({ integrationId: other.id })
 
-    await tickFor(first.id)
-    const loser = await tickFor(second.id)
-    if (loser.outcome !== 'completed') throw new Error('the tick did not complete')
+      // The rule, restated here rather than read off the code under test: lowest `integrations.id`.
+      const winner = one.id < other.id ? one : other
+      const loser = one.id < other.id ? other : one
 
-    expect(await fixtures.countWorkflows()).toBe(1)
-    expect(loser.skips[0].reason).toBe('claimed_by_another_integration')
-    expect(loser.skips[0].detail).toContain(first.id)
+      const ticks = order === 'lowest-first' ? [winner, loser] : [loser, winner]
+      const outcomes = [await tickFor(ticks[0].id), await tickFor(ticks[1].id)]
+
+      expect(await fixtures.countWorkflows()).toBe(1)
+      expect(await fixtures.countWorkflowsFor(winner.id)).toBe(1)
+      expect(await fixtures.countWorkflowsFor(loser.id)).toBe(0)
+
+      // And the ambiguity is recorded against the integration that stood down, naming the winner.
+      const loserOutcome = outcomes[order === 'lowest-first' ? 1 : 0]
+      if (loserOutcome.outcome !== 'completed') throw new Error('the tick did not complete')
+      expect(loserOutcome.started).toBe(0)
+      expect(loserOutcome.skips[0].reason).toBe('claimed_by_another_integration')
+      expect(loserOutcome.skips[0].detail).toContain(winner.id)
+    })
+  })
+
+  it('records why it stood down before anybody has claimed, not merely that somebody had', async () => {
+    // The branch a first-past-the-post guard has no answer for: the higher-id integration ticks
+    // first, and there is no claim to find. It must still defer, or the winner would be whichever
+    // cron minute came round first.
+    const one = await fixtures.seedIntegration({ name: `board-a-${fixtures.suffix}` })
+    const other = await fixtures.seedIntegration({ name: `board-b-${fixtures.suffix}` })
+    await fixtures.seedMapping({ integrationId: one.id })
+    await fixtures.seedMapping({ integrationId: other.id })
+
+    const winner = one.id < other.id ? one : other
+    const loser = one.id < other.id ? other : one
+
+    const outcome = await tickFor(loser.id)
+    if (outcome.outcome !== 'completed') throw new Error('the tick did not complete')
+
+    expect(await fixtures.countWorkflows()).toBe(0)
+    expect(outcome.skips[0].detail).toContain('lowest-id enabled integration on this board')
+    expect(outcome.skips[0].detail).toContain(winner.id)
+  })
+
+  it('lets the only enabled integration on a board start its ticket, disabled siblings notwithstanding', async () => {
+    // FR-104 is about two *enabled* integrations. A disabled row must not be able to hold a board
+    // hostage just by sorting lower.
+    const one = await fixtures.seedIntegration({ name: `board-a-${fixtures.suffix}` })
+    const other = await fixtures.seedIntegration({ name: `board-b-${fixtures.suffix}` })
+    const lower = one.id < other.id ? one : other
+    const higher = one.id < other.id ? other : one
+
+    await fixtures
+      .db()
+      .update(integrations)
+      .set({ enabled: false })
+      .where(eq(integrations.id, lower.id))
+    await fixtures.seedMapping({ integrationId: higher.id })
+
+    const outcome = await tickFor(higher.id)
+    if (outcome.outcome !== 'completed') throw new Error('the tick did not complete')
+
+    expect(outcome.started).toBe(1)
+    expect(await fixtures.countWorkflowsFor(higher.id)).toBe(1)
   })
 
   it('lets two integrations on different boards each start their own FIX-7', async () => {

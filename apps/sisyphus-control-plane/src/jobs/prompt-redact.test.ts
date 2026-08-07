@@ -1,3 +1,6 @@
+// Prefix of a synthetic Atlassian token fixture. File-scoped so the dictionary never legitimises a
+// real credential shape repo-wide.
+// cspell:ignore ATATT
 import type { PromptParts } from '@bluetel-ai/sisyphus-api/contracts'
 import { describe, expect, it } from 'vitest'
 

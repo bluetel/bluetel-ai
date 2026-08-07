@@ -2,7 +2,15 @@
 
 import { describeTrpcError } from '@sisyphus-admin/components/admin/trpc-error'
 import type { FieldErrorContent } from '@sisyphus-admin/components/ui'
-import { Card, CardBody, CardHeader, Field, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  Field,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 import { api } from '@sisyphus-admin/trpc'
 import { useState } from 'react'
 
@@ -136,8 +144,10 @@ export const UsersPanel = () => {
               setSearch(event.target.value)
             }}
           />
-          {users.isPending || items.length > 0 ? null : (
-            <p className="type-data-mono text-graphite">no users match that search</p>
+          {users.isPending ? <LoadingState>reading the user list</LoadingState> : null}
+
+          {users.isPending || users.error !== null || items.length > 0 ? null : (
+            <EmptyState>no users match that search</EmptyState>
           )}
         </CardBody>
       </Card>
@@ -167,7 +177,11 @@ export const UsersPanel = () => {
         />
       ))}
 
-      <RoleChangeHistory entries={history.data?.items ?? []} loading={history.isPending} />
+      <RoleChangeHistory
+        entries={history.data?.items ?? []}
+        loading={history.isPending}
+        error={history.error === null ? undefined : describeTrpcError(history.error)}
+      />
     </div>
   )
 }

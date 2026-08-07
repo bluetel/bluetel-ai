@@ -1,6 +1,12 @@
 import type { SisyphusDependencies, SisyphusSession } from '@bluetel-ai/sisyphus-api/server'
+import {
+  createNotificationStore,
+  createWebApiSlackMessenger,
+  createWorkflowNotifier,
+} from '@bluetel-ai/sisyphus-notify'
 import { env } from '@sisyphus-admin/env'
 import { getAuthDatabase } from '@sisyphus-admin/lib/auth'
+import { WebClient } from '@slack/web-api'
 
 import { createScopedCredentialResolver, joseCredentialVerifier } from './machine-credential'
 import { recordDenial } from './record-denial'
@@ -8,8 +14,9 @@ import { recordDenial } from './record-denial'
 /**
  * What `sisyphus-api` is handed at the **machine** mount (`/api/machine`).
  *
- * It is a different object from {@link import('./dependencies').createSisyphusDependencies}, and
- * the two differences are the whole of FR-005 as this app expresses it:
+ * It is a different object from {@link import('./dependencies').createSisyphusDependencies}. Two of
+ * the differences are the whole of FR-005 as this app expresses it; the third is the notifier, and
+ * it is about FR-136 rather than about authorisation — see below.
  *
  * 1. `resolveMachineCredential` is the real verifier here and answers `null` on the interactive
  *    mount, so an executor credential presented at `/api/trpc` is never even inspected;
@@ -51,6 +58,27 @@ export const resolveNoSession = (): Promise<SisyphusSession | null> => Promise.r
  * recorder to the verifier as well means the *precise* reason is recorded as
  * `machine_credential_invalid` alongside the coarse one, so an attempted forgery is
  * distinguishable from a torn-down credential in the trail.
+ *
+ * ## The notifier, and why it is supplied here rather than on the interactive mount
+ *
+ * `workflow_succeeded`, `workflow_capped`, `workflow_cancelled`, `workflow_needs_attention` and
+ * `review_iteration_failed` are all set by **an executor reporting in** — `reportTerminal` and
+ * `recordIteration` on the machine surface — so this is the mount that needs a way to announce
+ * them. `sisyphus-api` emits through `SisyphusDependencies.notifier`, after the state transaction
+ * has committed and never inside it, and treats an absent one as a silent no-op. Supplying it is
+ * therefore the difference between a platform that records outcomes and one that tells anybody
+ * about them (FR-136).
+ *
+ * What is supplied is `@bluetel-ai/sisyphus-notify`'s `WorkflowNotifier` — **not an adapter**. The
+ * package declares `WorkflowEventEmitter` as a one-method port whose notice is a subset of this
+ * one's and whose return it never reads, precisely so the object the control plane already builds
+ * is assignable as-is. Both hosts consequently deliver through the same store, the same coalescing
+ * window and the same Slack seam; there is one implementation of "who hears about this run".
+ *
+ * The Slack client and the panel URL are resolved exactly as the control plane's `src/context.ts`
+ * resolves them — from the validated environment, in the composition root and nowhere else, so no
+ * resolver in `sisyphus-api` is ever handed a way to reach Slack. `WebClient` opens no connection
+ * when it is constructed, so a request that notifies nothing pays for nothing.
  */
 export const createMachineDependencies = (): SisyphusDependencies => ({
   db: getAuthDatabase(),
@@ -62,4 +90,9 @@ export const createMachineDependencies = (): SisyphusDependencies => ({
     recordDenial,
   }),
   recordDenial,
+  notifier: createWorkflowNotifier({
+    store: createNotificationStore({ db: getAuthDatabase() }),
+    messenger: createWebApiSlackMessenger({ client: new WebClient(env.SISYPHUS_SLACK_BOT_TOKEN) }),
+    panel: { baseUrl: env.SISYPHUS_PANEL_URL },
+  }),
 })

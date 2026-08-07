@@ -1,3 +1,5 @@
+<!-- cspell:ignore edoburu bitnami -->
+
 # Spike S3 — live-log transport under connection pooling
 
 Task T013. Closes the open question in `research.md` R6: `LISTEN/NOTIFY` needs a pinned session, and

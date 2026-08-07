@@ -7,8 +7,10 @@ import {
   Card,
   CardBody,
   CardHeader,
+  EmptyState,
   Field,
   FieldError,
+  LoadingState,
   StateChip,
 } from '@sisyphus-admin/components/ui'
 
@@ -69,6 +71,15 @@ interface ProfileLaunchFormProps {
   error?: FieldErrorContent
   /** A refusal that belongs to reading the profile list itself, rather than to launching. */
   catalogueError?: FieldErrorContent
+  /**
+   * True while the profile list is being read.
+   *
+   * Without it this card had no loading case, and the consequence was worse than a missing state:
+   * an in-flight read rendered `profiles 0` and offered the picker's *empty* placeholder — "No
+   * execution profile is available to you" — which is a claim about the caller's access, made
+   * before the platform had answered (FR-201). Reading and having none are now different screens.
+   */
+  loading?: boolean
   /** What the last completed launch did (FR-040). */
   notice?: LaunchNotice
 }
@@ -88,6 +99,7 @@ export const ProfileLaunchForm = ({
   startedAt,
   error,
   catalogueError,
+  loading = false,
   notice,
 }: ProfileLaunchFormProps) => {
   const pending = startedAt !== undefined
@@ -98,7 +110,7 @@ export const ProfileLaunchForm = ({
       <Card>
         <CardHeader>
           <span>which profile</span>
-          <StateChip>{`profiles ${String(profiles.length)}`}</StateChip>
+          <StateChip>{loading ? 'reading' : `profiles ${String(profiles.length)}`}</StateChip>
         </CardHeader>
         <CardBody className="gap-default flex flex-col">
           <p className="type-body text-graphite measure-prose">
@@ -107,17 +119,26 @@ export const ProfileLaunchForm = ({
             prompt is the only thing left to supply.
           </p>
           {catalogueError === undefined ? null : <FieldError {...catalogueError} />}
+
+          {loading ? <LoadingState>reading the profiles you may launch on</LoadingState> : null}
+
+          {loading || catalogueError !== undefined || profiles.length > 0 ? null : (
+            <EmptyState>no execution profile has been granted to you</EmptyState>
+          )}
+
           <LaunchSelect
             label="Execution profile"
             value={executionProfileId}
             options={profiles}
             placeholder={
-              profiles.length === 0
-                ? 'No execution profile is available to you'
-                : 'Choose a profile'
+              loading
+                ? 'Reading the profiles you may launch on'
+                : profiles.length === 0
+                  ? 'No execution profile is available to you'
+                  : 'Choose a profile'
             }
             hint="only enabled profiles with a published version can start a run"
-            disabled={pending || profiles.length === 0}
+            disabled={pending || loading || profiles.length === 0}
             error={errors.executionProfileId}
             onChange={onSelectProfile}
           />
@@ -152,9 +173,7 @@ export const ProfileLaunchForm = ({
               />
             </>
           ) : (
-            <p className="type-data-mono text-graphite">
-              choose a profile to see what a run on it would use
-            </p>
+            <EmptyState>choose a profile to see what a run on it would use</EmptyState>
           )}
         </CardBody>
       </Card>

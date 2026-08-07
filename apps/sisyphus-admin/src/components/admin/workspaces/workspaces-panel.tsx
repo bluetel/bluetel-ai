@@ -7,7 +7,9 @@ import {
   Card,
   CardBody,
   CardHeader,
+  EmptyState,
   FieldError,
+  LoadingState,
   StateChip,
 } from '@sisyphus-admin/components/ui'
 import { api } from '@sisyphus-admin/trpc'
@@ -151,8 +153,10 @@ export const WorkspacesPanel = () => {
             <FieldError {...describeTrpcError(workspaces.error)} />
           )}
 
-          {workspaces.isPending || items.length > 0 ? null : (
-            <p className="type-data-mono text-graphite">no workspaces have been created</p>
+          {workspaces.isPending ? <LoadingState>reading the workspaces</LoadingState> : null}
+
+          {workspaces.isPending || workspaces.error !== null || items.length > 0 ? null : (
+            <EmptyState>no workspaces have been created</EmptyState>
           )}
 
           {target === undefined ? (

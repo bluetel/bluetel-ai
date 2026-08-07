@@ -71,6 +71,14 @@ export { REPORT_ENTRY_RESULT_PATH, reportEntryResult } from './entry-results'
 export type { EntryResultReport } from './entry-results'
 
 export {
+  EXTERNAL_ACTION_IDEMPOTENCY_INDEX,
+  reportExternalAction,
+  reportExternalActionProcedure,
+  supersedesExternalActionResult,
+} from './external-actions'
+export type { ExternalAction, ExternalActionReport } from './external-actions'
+
+export {
   firstRow,
   isTerminalState,
   loadMachineWorkflow,
@@ -106,6 +114,13 @@ export { reportReviewerSummary } from './reviewer-summary'
 export type { ReviewerSummaryReport } from './reviewer-summary'
 
 export {
+  REPORT_SKILL_REFERENCE_PATH,
+  reportSkillReference,
+  reportSkillReferenceProcedure,
+} from './skill-references'
+export type { SkillReference, SkillReferenceReport } from './skill-references'
+
+export {
   chainSessionIds,
   missingSnapshotState,
   REGISTER_SNAPSHOT_PATH,
@@ -115,6 +130,13 @@ export {
   snapshotExpiry,
 } from './snapshot'
 export type { MissingSnapshotState, RegisteredSnapshot } from './snapshot'
+
+export {
+  reportSnapshotPark,
+  reportSnapshotParkProcedure,
+  snapshotParkDetailFor,
+} from './snapshot-park'
+export type { SnapshotParkReport } from './snapshot-park'
 
 export { machineSurfaceRouter } from './router'
 export type { MachineSurfaceRouter } from './router'

@@ -29,6 +29,8 @@ describe('WorkflowTimeline', () => {
     const markup = renderToStaticMarkup(<WorkflowTimeline entries={[]} loading />)
 
     expect(markup).toContain('reading')
+    expect(markup).toContain('data-note="loading"')
+    expect(markup).toContain('reading the lifecycle record')
     expect(markup).not.toContain('no lifecycle events recorded yet')
   })
 

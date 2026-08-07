@@ -141,6 +141,7 @@ export const transitionTicket = async (
       action: TICKET_TRANSITION_ACTION,
       workflowId: input.workflowId,
       target: [input.ticketReference, toState],
+      kind: 'ticket_transitioned',
     },
     ...(input.ticket.find === undefined
       ? {}
