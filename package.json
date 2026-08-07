@@ -38,7 +38,7 @@
     "jiti": "2.4.2",
     "knip": "^6.7.0",
     "lint-staged": "16.4.0",
-    "nx": "22.6.1",
+    "nx": "22.7.7",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.5.14",
     "tsx": "^4.21.0"
