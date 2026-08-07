@@ -10,7 +10,7 @@
     "@bluetel-ai/eslint-config-base": "workspace:*",
     "@bluetel-ai/sisyphus-infra": "workspace:*",
     "@types/node": "^22.0.0",
-    "esbuild": "^0.25.12",
+    "esbuild": "^0.28.1",
     "loose-ts-check": "^2.0.0",
     "sst": "^3.19.3",
     "tsx": "^4.21.0",
