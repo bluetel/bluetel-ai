@@ -72,25 +72,33 @@ jobs:
 
       - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
 
-      - run: pnpm exec nx affected -t lint test typecheck --parallel=$(nproc)
+      # `design-lint` joins the affected run rather than living in a separate job or a second CI
+      # provider: splitting the blocking gates across two systems leaves one of them not running it
+      # (FR-069). Projects without the target are simply skipped by `nx affected`.
+      - run: pnpm exec nx affected -t lint test typecheck design-lint --parallel=$(nproc)
 
       - name: Check if deploy is needed
         id: check-deploy
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         run: |
+          # `nx show projects` prints a JSON array whenever stdout is not a
+          # terminal, which it never is here — so ask for JSON explicitly and
+          # parse it as JSON. Splitting that output on newlines yields a single
+          # "app" whose name is the whole array, and every app is then silently
+          # never deployed while this job still reports success.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.deploy_all }}" = "true" ]; then
             # Manual trigger with deploy_all: target every project that has trigger-deploy, not just affected
-            AFFECTED=$(pnpm exec nx show projects --withTarget=trigger-deploy 2>/dev/null || echo "")
+            AFFECTED=$(pnpm exec nx show projects --withTarget=trigger-deploy --json 2>/dev/null || echo "[]")
           else
             # List affected projects that have a trigger-deploy target
-            AFFECTED=$(pnpm exec nx show projects --affected --withTarget=trigger-deploy 2>/dev/null || echo "")
+            AFFECTED=$(pnpm exec nx show projects --affected --withTarget=trigger-deploy --json 2>/dev/null || echo "[]")
           fi
-          if [ -n "$AFFECTED" ]; then
-            # Convert newline-separated list to compact single-line JSON array for matrix
-            JSON=$(echo "$AFFECTED" | sed 's/^[[:space:]]*//' | jq -Rsc 'split("\n") | map(select(length > 0))')
+          JSON=$(printf '%s' "$AFFECTED" | jq -c 'map(select(length > 0))')
+          COUNT=$(printf '%s' "$JSON" | jq 'length')
+          if [ "$COUNT" -gt 0 ]; then
             echo "deploy-needed=true" >> "$GITHUB_OUTPUT"
             echo "affected-apps=$JSON" >> "$GITHUB_OUTPUT"
-            echo "Deploy needed for: $AFFECTED"
+            echo "Deploy needed for: $JSON"
           else
             echo "deploy-needed=false" >> "$GITHUB_OUTPUT"
             echo "affected-apps=[]" >> "$GITHUB_OUTPUT"

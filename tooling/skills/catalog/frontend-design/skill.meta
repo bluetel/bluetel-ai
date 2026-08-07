@@ -1,6 +1,6 @@
 name=frontend-design
-version=1.0.0
+version=1.0.1
 description=Create distinctive, production-grade frontend interfaces with high design quality. Use when: building or styling web components, pages, layouts, or applications (landing pages, dashboards, React components, HTML/CSS), or beautifying any web UI. Works from the app's DESIGN.md and gates token changes on design-lint.
 argument_hint=Optional: the app or component you're designing/styling
 requires=
-next_step=Add a design-lint Nx target|This skill gates any DESIGN.md or token change on `pnpm exec nx run <app>:design-lint`. An app without that target (and a pinned `@google/design.md` devDependency) lets token drift through unchecked.|the app being styled has no `design-lint` target in its project.json
+next_step=Add a design-lint task|This skill gates any DESIGN.md or token change on running `design.md lint DESIGN.md`. An app without that task wired up (and a pinned `@google/design.md` devDependency) lets token drift through unchecked.|the app being styled has no design-lint task defined in its package/build manager config

@@ -1,0 +1,54 @@
+{
+  "name": "sisyphus-control-plane",
+  "projectType": "application",
+  "implicitDependencies": ["sisyphus-infra"],
+  "targets": {
+    "trigger-deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'sisyphus-control-plane is deployable'"
+      },
+      "cache": false
+    },
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'Refusing to deploy: pass --configuration=staging or --configuration=production' >&2 && exit 1",
+        "cwd": "apps/sisyphus-control-plane"
+      },
+      "configurations": {
+        "production": { "command": "sst deploy --stage production" },
+        "staging": { "command": "sst deploy --stage staging" }
+      },
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "eslint .",
+        "cwd": "apps/sisyphus-control-plane"
+      },
+      "inputs": ["default", "^default", "{projectRoot}/eslint.config.mjs"],
+      "cache": true
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "apps/sisyphus-control-plane"
+      },
+      "inputs": ["default", "^default", "{projectRoot}/tsconfig.json"],
+      "cache": true
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run",
+        "cwd": "apps/sisyphus-control-plane"
+      },
+      "inputs": ["default", "^default"],
+      "cache": true
+    }
+  }
+}

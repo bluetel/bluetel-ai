@@ -68,9 +68,36 @@ jobs:
               return;
             }
 
-            core.setOutput('app_name', appMatch[1]);
-            core.setOutput('stage', stageMatch[1]);
-            core.setOutput('trigger_sha', commitMatch[1]);
+            // These three values come out of an issue body — attacker-influenced text — and are
+            // then used to build a shell command and a deploy target. `[^`]+` accepts everything
+            // except a backtick, which includes `;`, `$(…)` and newlines, so the regex alone is
+            // not a constraint. Validate against closed sets before anything downstream sees
+            // them: an app must be a real deployable, a stage must be one we deploy to, and a
+            // commit must be a full hex SHA. Anything else fails the run rather than being
+            // sanitised, because there is no legitimate way for a malformed value to get here.
+            const DEPLOYABLE_APPS = ['sisyphus-admin', 'sisyphus-control-plane', 'sisyphus-executor'];
+            const DEPLOY_STAGES = ['production', 'staging'];
+
+            const app = appMatch[1];
+            const stage = stageMatch[1];
+            const sha = commitMatch[1];
+
+            if (!DEPLOYABLE_APPS.includes(app)) {
+              core.setFailed(`'${app}' is not a deployable app`);
+              return;
+            }
+            if (!DEPLOY_STAGES.includes(stage)) {
+              core.setFailed(`'${stage}' is not a deployable stage`);
+              return;
+            }
+            if (!/^[0-9a-f]{40}$/.test(sha)) {
+              core.setFailed('Commit in the issue body is not a full 40-character SHA');
+              return;
+            }
+
+            core.setOutput('app_name', app);
+            core.setOutput('stage', stage);
+            core.setOutput('trigger_sha', sha);
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -78,6 +105,45 @@ jobs:
               issue_number: context.issue.number,
               body: `Approved by @${context.actor}. Deployment of \`${appMatch[1]}\` to \`${stageMatch[1]}\` is starting.`
             });
+
+      # FR-070 asks that a deployment record who approved it, which commit and
+      # which stage. The approval issue carries the app, the stage and the
+      # commit, and the comment carries the approver — but the issue is closed on
+      # success and is not part of the run. Writing all four to the run summary
+      # is what keeps the approval auditable from the deployment itself once the
+      # issue is gone. This records the approval; it does not gate it. The gate
+      # is the write-permission check above, and there is deliberately no second
+      # one here.
+      - name: Record approver on the run
+        uses: actions/github-script@v9
+        env:
+          APP_NAME: ${{ steps.parse.outputs.app_name }}
+          STAGE: ${{ steps.parse.outputs.stage }}
+          TRIGGER_SHA: ${{ steps.parse.outputs.trigger_sha }}
+        with:
+          script: |
+            const app = process.env.APP_NAME;
+            const stage = process.env.STAGE;
+            const sha = process.env.TRIGGER_SHA;
+            const approver = context.actor;
+
+            await core.summary
+              .addHeading('Deployment approval', 2)
+              .addTable([
+                [
+                  { data: 'Field', header: true },
+                  { data: 'Value', header: true },
+                ],
+                ['Approved by', `@${approver}`],
+                ['App', app],
+                ['Stage', stage],
+                ['Commit', sha],
+                ['Approval issue', `#${context.issue.number}`],
+                ['Approved at', new Date().toISOString()],
+              ])
+              .write();
+
+            core.notice(`${app} → ${stage} at ${sha} approved by @${approver}`);
 
       - uses: actions/checkout@v6
         with:
@@ -95,19 +161,33 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Both values are validated against closed sets in `parse` above. They are still passed
+      # through `env:` and quoted rather than interpolated into the command, so that the
+      # validation is a second line of defence and not the only one — a `${{ }}` here would be
+      # substituted into the shell before it ever ran.
       - name: Deploy
-        run: pnpm exec nx run ${{ steps.parse.outputs.app_name }}:deploy --configuration=${{ steps.parse.outputs.stage }}
+        run: pnpm exec nx run "$APP_NAME:deploy" --configuration="$STAGE"
         env:
+          APP_NAME: ${{ steps.parse.outputs.app_name }}
+          STAGE: ${{ steps.parse.outputs.stage }}
           AWS_REGION: ${{ vars.AWS_REGION || 'eu-west-2' }}
 
       - name: Report outcome
         if: always()
         uses: actions/github-script@v9
+        env:
+          JOB_STATUS: ${{ job.status }}
+          APP_NAME: ${{ steps.parse.outputs.app_name }}
+          STAGE: ${{ steps.parse.outputs.stage }}
         with:
           script: |
-            const success = '${{ job.status }}' === 'success';
-            const app = '${{ steps.parse.outputs.app_name }}';
-            const stage = '${{ steps.parse.outputs.stage }}';
+            // Read from the environment rather than interpolating. A `${{ }}` inside a JS string
+            // literal is substituted before the script parses, so a single quote in the value
+            // would close the literal and the rest would run as code — in a step holding a
+            // repository token.
+            const success = process.env.JOB_STATUS === 'success';
+            const app = process.env.APP_NAME;
+            const stage = process.env.STAGE;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
