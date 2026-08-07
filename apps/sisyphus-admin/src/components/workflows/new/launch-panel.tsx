@@ -296,6 +296,7 @@ export const LaunchPanel = ({
           onChange={(patch) => {
             setValues((current) => ({ ...current, ...patch }))
           }}
+          loading={canLaunchAdHoc && profiles.isPending}
           resumeFromSessionId={resumeFromSessionId}
           onResumeChange={setResumeFromSessionId}
           onSubmit={() => {

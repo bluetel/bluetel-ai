@@ -5,7 +5,9 @@ import {
   Card,
   CardBody,
   CardHeader,
+  EmptyState,
   FieldError,
+  LoadingState,
   Meter,
   StateChip,
 } from '@sisyphus-admin/components/ui'
@@ -96,9 +98,12 @@ export const SpendSummaryCard = ({
       </div>
 
       {readouts.groups.length === 0 ? (
-        <p className="type-data-mono text-graphite">
-          {loading ? 'reading' : 'no spend recorded in your scope'}
-        </p>
+        <>
+          {loading ? <LoadingState>reading spend across your scope</LoadingState> : null}
+          {loading || error !== undefined ? null : (
+            <EmptyState>no spend recorded in your scope</EmptyState>
+          )}
+        </>
       ) : (
         <ol className="gap-close flex flex-col">
           {readouts.groups.map((group) => (

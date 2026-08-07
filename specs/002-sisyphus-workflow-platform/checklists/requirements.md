@@ -2,9 +2,8 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-08-05
-**Last updated**: 2026-08-06 (second `/speckit-clarify` session: 5 clarifications integrated — navigation
-shell and root route, notification-preference surfaces, filtered strict typecheck, three-file deployment
-config split, infrastructure de-abstraction)
+**Last updated**: 2026-08-06 (implementation of Phases 15–18; two requirement contradictions resolved; Phase 19
+opened for what implementation exposed)
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -165,6 +164,53 @@ plane's declared Lambda handler names a file that does not exist, there is no de
 production caller. Two tables — `skill_references` and `external_actions` — are written by nothing, so their
 tested read paths can only ever return empty and the exactly-once guarantee the spec attributes to a unique
 index is not what the implementation does.
+
+**Implementation of Phases 15–18 (2026-08-06) — what building it proved, and what it changed.** All 48 tasks
+landed. Three classes of outcome are worth recording, because two of them contradict things this document
+previously asserted.
+
+_Two requirements were self-contradictory and could not both be satisfied._ Both are now amended in place with
+the reasoning attached, and both were resolved in favour of FR-190, the non-disclosure requirement:
+
+- **FR-195** required out-of-domain and deactivated sign-in failures to be shown as distinct reasons. They
+  cannot be. The authentication callback returns a boolean, so both refusals arrive as one `AccessDenied`
+  code, and separating them would mean telling an unauthenticated caller whether an account exists.
+- **FR-193** listed Fleet among the always-visible sidebar items while fleet oversight is admin-gated, so
+  satisfying it literally meant showing engineers a link that answers `NOT_FOUND`. Access is now the
+  criterion and the list is illustrative.
+
+_Measuring the latency criteria found three defects that summing constants could not._ This is the clearest
+vindication of FR-205 in the document: the notification worst case is **50s, not the declared 80s** (the tick
+wait and the coalescing window overlap rather than add); the declared snapshot budget covered **two**
+sequential operations under one heading, so bounding each at the stated figure yields **10.5s against SC-003's
+10s ceiling** while the reported total still said 9s; and `QUIESCE_BUDGET_MS` was passed to an adapter and
+trusted, so an adapter that ignored it left the budget's largest term unenforced. None of these was visible to
+a test that asserts a constant equals the sum of its own addends.
+
+_Three tests were proven not to test their requirement._ Breaking the resolver they claim to cover left the
+existing FR-125 tests green while only the new mid-run tests went red; SC-021 had no test and **no read path
+capable of one** — `queries.ts` joined the mutable profile row and never the pinned version, so a completed run
+read back showing whatever the profile said today.
+
+_And implementation found a second layer of absence the audit could not see._ See Phase 19: wiring the entry
+points revealed that `DeveloperPort`, `Forge`, `FindingsPublisher` and `TicketPort` are types with no
+implementation, and that a storage park was rendered in the panel as its own opposite ("the snapshot is stored
+and the compute has been released"). **A port with a type, a barrel entry and a passing fake is
+indistinguishable from a working one** — to a reader, and to the gate.
+
+_The assembly gate (SC-063) earned its place within minutes of existing._ Two things are worth recording. First,
+**the tool was already installed and was analysing nothing**: `knip --production` only honours entry patterns
+carrying a trailing `!`, no pattern had one, so the production run resolved an empty entry set, examined zero
+files repo-wide, and exited clean — a check that looked like it ran. Second, once fixed it immediately found two
+complete feature directories with no importer: the **live log viewer** (nine files — SSE consumption, sequence
+reconciliation, segment store) and the **supervision controls** (pause, resume, stop, mid-run correction). Both
+are US1 and US2 core promises. Both have a purpose-built named slot in the workflow detail panel rendering the
+words "not mounted", each with a doc comment naming the task that would connect it. Those tasks are checked:
+they built the components. Nothing mounted them, and no task said to.
+
+This is the same defect as T172–T180 at the opposite end of the system, which settles the question of whether
+that was a one-off decomposition slip. It was not — it is what happens whenever "build X" and "connect X" are
+allowed to be the same task. The gate now fails on the condition instead of an audit hoping to notice it.
 
 None of this was visible to the gate: every unit suite passes, typecheck passes, lint passes, and
 `.github/workflows/ci.yml` provides no Postgres and never sets `SISYPHUS_TEST_DATABASE_URL`, so roughly a

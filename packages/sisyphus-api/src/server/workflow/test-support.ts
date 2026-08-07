@@ -429,5 +429,9 @@ export const createTwoProfileFixture = (connectionString: string): TwoProfileFix
   }
 }
 
-/** Re-exported so a suite needs one import to decide whether to run. */
-export { readTestDatabaseUrl } from '../admin/test-database'
+/**
+ * Re-exported so a suite needs one import to decide whether to run — and one idiom, shared with
+ * the admin suites, for holding a transaction open while a second one commits.
+ */
+export { createGate, readTestDatabaseUrl } from '../admin/test-database'
+export type { Gate } from '../admin/test-database'

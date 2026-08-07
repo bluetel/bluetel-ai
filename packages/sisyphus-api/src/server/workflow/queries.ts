@@ -6,6 +6,7 @@ import type { Artifact, LogSegment, SisyphusDatabase, Workflow, WorkflowEntry } 
 import {
   artifacts,
   executionProfiles,
+  executionProfileVersions,
   integrations,
   logSegments,
   users,
@@ -21,6 +22,11 @@ import { requireWorkflowInScope, scopedWorkflowWhere } from '../scope'
 
 import type { WorkflowPage } from './filters'
 import { toWorkflowPage, workflowListConditions } from './filters'
+import type { LaunchConfiguration } from './launch-configuration'
+import { loadLaunchConfiguration } from './launch-configuration'
+import type { StoragePark } from './storage-park'
+import { readStoragePark } from './storage-park'
+import { isWatching } from './watch'
 
 /**
  * **Every workflow read path (T041).**
@@ -96,11 +102,24 @@ export interface WorkflowListing {
   readonly originatingIntegrationId: string | null
   readonly originatingIntegrationName: string | null
   readonly executionProfileId: string | null
+  /**
+   * The profile's name **as it stands now** — a display name, never a launch value.
+   *
+   * Read from the mutable parent row on purpose: an operator scanning the list recognises the
+   * profile by what it is called today. What the run was *configured* with is a different question,
+   * and {@link WorkflowListing.executionProfileVersion} is the field that keeps the two from being
+   * confused — see `./launch-configuration.ts`.
+   */
   readonly executionProfileName: string | null
+  /** The profile version the run pinned (FR-126). Null when it was launched ad hoc. */
+  readonly executionProfileVersion: number | null
   /** The workspace, not its repositories: FR-012 says identify the set, not enumerate it. */
   readonly workspaceId: string
   readonly workspaceName: string
 }
+
+/** The pinned profile version, joined for its number. Aliased so the name it carries is unmistakable. */
+const pinnedProfileVersion = alias(executionProfileVersions, 'pinned_profile_version')
 
 const workflowListingColumns = {
   id: workflows.id,
@@ -121,6 +140,7 @@ const workflowListingColumns = {
   originatingIntegrationName: integrations.name,
   executionProfileId: workflows.executionProfileId,
   executionProfileName: executionProfiles.name,
+  executionProfileVersion: pinnedProfileVersion.version,
   workspaceId: workspaces.id,
   workspaceName: workspaces.name,
 } as const
@@ -143,7 +163,14 @@ export const listWorkflows = async (
     .innerJoin(owner, eq(owner.id, workflows.ownerUserId))
     .leftJoin(initiator, eq(initiator.id, workflows.initiatedByUserId))
     .leftJoin(integrations, eq(integrations.id, workflows.originatingIntegrationId))
+    // Two joins onto the profile, and the difference between them is the point: `executionProfiles`
+    // is the mutable parent, joined for the name the row displays, while `pinnedProfileVersion` is
+    // keyed on the version the run recorded and is the only thing here that says what it ran with.
     .leftJoin(executionProfiles, eq(executionProfiles.id, workflows.executionProfileId))
+    .leftJoin(
+      pinnedProfileVersion,
+      eq(pinnedProfileVersion.id, workflows.executionProfileVersionId),
+    )
     .innerJoin(workspaceVersions, eq(workspaceVersions.id, workflows.workspaceVersionId))
     .innerJoin(workspaces, eq(workspaces.id, workspaceVersions.workspaceId))
     .where(scopedWorkflowWhere(scope, workflowListConditions(db, input)))
@@ -159,10 +186,50 @@ export interface WorkflowDetail {
   readonly entries: readonly WorkflowEntry[]
   readonly ownerDisplayName: string
   readonly initiatedByDisplayName: string | null
+  /** The profile's name as it stands now. A display name — see {@link WorkflowDetail.launchConfiguration}. */
   readonly executionProfileName: string | null
   readonly originatingIntegrationName: string | null
   readonly workspaceId: string
   readonly workspaceName: string
+  /**
+   * What the run was launched with, reconstructed from the versions it pinned (SC-021).
+   *
+   * Resolved through `workflows.execution_profile_version_id` rather than through the profile's
+   * current version, so a run launched under version 3 still reads back as version 3 after the
+   * profile has been edited seven times. `./launch-configuration.ts` states which fields come from
+   * the pin and which from the live row, and separates them in the type.
+   */
+  readonly launchConfiguration: LaunchConfiguration
+  /**
+   * Whether **the caller** currently follows this run (FR-138).
+   *
+   * A field on the detail read rather than a procedure of its own, and the reason is FR-190 rather
+   * than convenience. `watch`/`unwatch` are two mutations that already answer `NOT_FOUND`
+   * indistinguishably for an out-of-scope run and a nonexistent one; a third id-taking *read* would
+   * be a third place that rule has to be re-derived, and the failure mode when it is got wrong is
+   * silence — an `isWatching` procedure that answered `false` for a workflow the caller may not see
+   * has said the workflow exists. Riding on `byId` means the answer is only ever computed for an id
+   * `requireWorkflowInScope` has already admitted, so the disclosure is structurally impossible
+   * rather than checked.
+   *
+   * It is also the request the panel is already making: the Watch/Unwatch control lives on the
+   * detail view, so this costs one extra indexed lookup on a query that has run anyway, instead of
+   * a second round trip that would render the control in the wrong state until it landed.
+   *
+   * Always the caller's own — `scope.userId`, never a parameter. There is no input field for whose
+   * watch this is, so "am I following it?" cannot become "is Alice following it?".
+   */
+  readonly watching: boolean
+  /**
+   * The run's latest snapshot park, or null if it has never parked (FR-082).
+   *
+   * Rides on the detail read for the same reason {@link WorkflowDetail.watching} does: it is wanted
+   * on exactly the screen this read already serves, and a second id-taking read would be a second
+   * place FR-190's scope rule has to hold. `storagePark.waiting` is what lets the panel say the run
+   * is **waiting on storage** rather than render a live run holding at a turn boundary as though it
+   * had stalled. See `./storage-park.ts` for how the end of a park is derived rather than reported.
+   */
+  readonly storagePark: StoragePark | null
 }
 
 /**
@@ -208,6 +275,23 @@ export const readWorkflowDetail = async (
     .where(eq(workflowEntries.workflowId, workflow.id))
     .orderBy(asc(workflowEntries.id))
 
+  // Issued separately rather than folded into the naming query above, because it answers a
+  // different question with different rows: the query above reads what things are *called*, and
+  // this reads what the run *ran with*. Keeping them apart is what stops the pinned version being
+  // quietly re-derived from the live profile the next time this select is edited (SC-021).
+  const launchConfiguration = await loadLaunchConfiguration(db, workflow)
+
+  // Reached only after `requireWorkflowInScope` has admitted the id, and keyed on the resolved
+  // scope's own user — so it can neither confirm an out-of-scope run nor report somebody else's
+  // watch. `isWatching` is `../workflow/watch.ts`'s, so there is one definition of what a watch is.
+  const watching = await isWatching(db, { workflowId: workflow.id, userId: options.scope.userId })
+
+  // Same gating as everything above it: keyed on the row `requireWorkflowInScope` returned, and
+  // reading only `workflow_events`, which carries no scope predicate of its own and must not grow
+  // one. The panel needs it on the first paint — a run that is waiting on storage has to say so
+  // before an operator concludes it has hung (FR-082).
+  const storagePark = await readStoragePark(db, workflow)
+
   return {
     workflow,
     entries,
@@ -217,6 +301,9 @@ export const readWorkflowDetail = async (
     originatingIntegrationName: naming?.originatingIntegrationName ?? null,
     workspaceId: naming?.workspaceId ?? '',
     workspaceName: naming?.workspaceName ?? '',
+    launchConfiguration,
+    watching,
+    storagePark,
   }
 }
 
@@ -329,6 +416,15 @@ export interface SpendSummary {
 const spendGroupings = {
   client: { id: workflows.originatingIntegrationId, label: integrations.name },
   workspace: { id: workspaces.id, label: workspaces.name },
+  /**
+   * The **profile**, not the profile version — and deliberately so, unlike the reads above.
+   *
+   * A spend total is a question about a cost centre over time, and a profile edited three times in
+   * a quarter is one cost centre, not four. Grouping on the pinned version would split a client's
+   * bill across every edit anybody made to their preset, which is the opposite of what FR-156 asks
+   * for. So the mutable parent row is the right join here; what a given run was configured with is
+   * `./launch-configuration.ts`, per run, and is not a question an aggregate can answer.
+   */
   profile: { id: workflows.executionProfileId, label: executionProfiles.name },
   user: { id: workflows.ownerUserId, label: owner.displayName },
 } as const

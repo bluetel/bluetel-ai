@@ -1,6 +1,6 @@
 /**
- * The `app()` half of a deployable's `sst.config.ts`, and the types its `run()`
- * half is written against.
+ * The stage vocabulary, and the one teardown decision the three deployables must
+ * not disagree about.
  *
  * Removal policy is here rather than in each config for the same reason bucket
  * retention is: three deployables each spelling out their own policy are three
@@ -9,10 +9,10 @@
  * stage, a review stage — removes them, because a personal stage that cannot be
  * torn down is a stage nobody deletes.
  *
- * Nothing here imports SST. `SstConfigDefinition` is the shape `$config` takes,
- * declared structurally so a config file typechecks without the generated
- * `.sst/platform/config.d.ts` that only exists after `sst install`. See the note
- * at the top of `index.ts`.
+ * Everything here is plain data derived from a stage string. The config file
+ * spreads {@link getStageRemoval} into the object it returns from `app()`; the
+ * shape of that object is the deployment tool's own type and is not restated
+ * here (FR-066).
  */
 
 import { getPlainStage } from './get-plain-stage'
@@ -25,63 +25,43 @@ export type DeployStage = (typeof DEPLOY_STAGES)[number]
 export const isDeployStage = (stage: string): stage is DeployStage =>
   (DEPLOY_STAGES as readonly string[]).includes(stage)
 
+/** The one stage whose resources are sized, backed up and protected differently. */
+export const PRODUCTION_STAGE = 'production'
+
+/**
+ * Whether a stage is production, decided from the **plain** stage so
+ * `production-bootstrap` and `production-website` answer as `production` does.
+ * Every "is this production?" test routes through here (FR-202).
+ */
+export const isProductionStage = (sstStage: string): boolean =>
+  getPlainStage(sstStage) === PRODUCTION_STAGE
+
 /** Matches `deploy.yml`'s `vars.AWS_REGION || 'eu-west-2'` fallback. */
 export const DEFAULT_AWS_REGION = 'eu-west-2'
 
 export type SstRemovalPolicy = 'remove' | 'retain'
 
-/** The single argument SST hands `app()`. Only `stage` is depended on here. */
-export interface SstAppInput {
-  readonly stage: string
-}
-
-export interface SstAppConfig {
-  readonly name: string
-  readonly home: 'aws'
+/** What a stage does when its stack is torn down. */
+export interface StageRemoval {
   readonly removal: SstRemovalPolicy
   /** Production alone refuses a destructive update without an explicit unprotect. */
   readonly protect: boolean
-  readonly providers: { readonly aws: { readonly region: string } }
-}
-
-export interface SstAppOptions {
-  /** SST app name — per deployable, and deliberately *not* the resource-name prefix. */
-  readonly appName: string
-  /** `input.stage`, suffix included. */
-  readonly sstStage: string
-  readonly region?: string
 }
 
 /**
- * The `app()` return value for one deployable.
+ * The teardown policy for one stage, spread into the object a deployable's
+ * `app()` returns.
  *
- * The plain stage decides the policy, so `production-bootstrap` is protected
- * exactly as `production` is — the bootstrap stage holds the account's identity
- * provider, which is the single resource whose accidental removal breaks every
- * other stage's ability to deploy.
+ * The plain stage decides it, so `production-bootstrap` is protected exactly as
+ * `production` is — the bootstrap stage holds the account's identity provider,
+ * which is the single resource whose accidental removal breaks every other
+ * stage's ability to deploy.
  */
-export const buildSstApp = (options: SstAppOptions): SstAppConfig => {
-  if (options.appName.trim() === '') {
-    throw new Error('Cannot build an SST app config without an app name')
-  }
-
-  const stage = getPlainStage(options.sstStage)
+export const getStageRemoval = (sstStage: string): StageRemoval => {
+  const stage = getPlainStage(sstStage)
 
   return {
-    name: options.appName,
-    home: 'aws',
     removal: isDeployStage(stage) ? 'retain' : 'remove',
-    protect: stage === 'production',
-    providers: { aws: { region: options.region ?? DEFAULT_AWS_REGION } },
+    protect: isProductionStage(stage),
   }
-}
-
-/**
- * The shape `$config` accepts. A config file declares `$config` locally against
- * this type, so the file still typechecks in CI, where `.sst/` does not exist,
- * without widening any app's tsconfig.
- */
-export interface SstConfigDefinition<TOutputs> {
-  readonly app: (input: SstAppInput) => SstAppConfig
-  readonly run: () => Promise<TOutputs>
 }

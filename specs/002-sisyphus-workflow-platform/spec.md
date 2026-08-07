@@ -38,13 +38,14 @@ Four configuration constructs keep client onboarding out of the platform's relea
 Together with repository skills, that means the four things that vary per client — conventions,
 credentials, what to work on, and how work arrives — are all configuration rather than code.
 
-The platform is delivered as six workspace projects, all carrying the codename:
+The platform is delivered as seven workspace projects, all carrying the codename:
 
 | Project                              | Kind    | Role                                                                                                                            |
 | ------------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/sisyphus-api`              | package | The one shared contract: database schema, domain types, entire typed API surface + resolvers                                    |
 | `packages/sisyphus-infra`            | package | Shared, app-agnostic infrastructure primitives for all Sisyphus deployables                                                     |
 | `packages/sisyphus-integration-jira` | package | The Jira connector — one standalone package per integration type, implementing the connector contract owned by `sisyphus-api`   |
+| `packages/sisyphus-notify`           | package | Slack notification delivery, recipient resolution and the attempt record — shared by the two apps that notify                   |
 | `apps/sisyphus-admin`                | app     | Internet-facing admin panel — auth, workflow list/detail, live log view, pause/correct UI, webhook + executor reporting ingress |
 | `apps/sisyphus-control-plane`        | app     | Non-network-facing backend job runner — provisions and tears down workflow compute, mints scoped credentials                    |
 | `apps/sisyphus-executor`             | app     | The worker that runs on the provisioned instance and drives the Claude Code CLI                                                 |
@@ -786,9 +787,19 @@ profile and confirm they can see and supervise that one workflow without gaining
 - **FR-001**: The platform MUST be delivered as workspace projects whose names all carry the Sisyphus
   codename: `packages/sisyphus-api`, `packages/sisyphus-infra`,
   `packages/sisyphus-integration-<type>` — one standalone package per integration type, of which
-  `packages/sisyphus-integration-jira` is the only one in scope — `apps/sisyphus-admin`,
+  `packages/sisyphus-integration-jira` is the only one in scope — `packages/sisyphus-notify`, which
+  owns the Slack notification path (FR-136 to FR-141), `apps/sisyphus-admin`,
   `apps/sisyphus-control-plane`, `apps/sisyphus-executor`, published under the `@bluetel-ai/*` scope.
   Each integration type is its own package (FR-192).
+
+  _Amended 2026-08-07 during implementation._ As first written this listed six projects and placed the
+  notification path inside `apps/sisyphus-control-plane`, where it began, because the abandoned-run sweep was
+  the only caller. It is not the only caller: five of the nine notifiable events are raised on the machine
+  surface, which `apps/sisyphus-admin` mounts, so two apps need one delivery path. An app MUST NOT depend on
+  another app, so the shared half is a seventh member both apps depend on rather than a directory one of them
+  owns. Adding it is a promotion of existing code, not new scope; no other requirement changes, and the
+  dependency arrow to `sisyphus-api` stays one-way.
+
 - **FR-002**: Sisyphus projects MUST NOT depend on the existing proof-of-concept projects
   (`kiro-github-worker`, `admin-dashboard`, `dify-kiro-node`, `rockhub`); shared behaviour MUST be
   reimplemented in `sisyphus-api` or `sisyphus-infra` rather than imported from a POC. Updated these poc now removed.
@@ -871,18 +882,38 @@ profile and confirm they can see and supervise that one workflow without gaining
   progress-animation frames and cursor manipulation, and MUST have secrets redacted, while preserving
   the meaningful content and its ordering.
 - **FR-193**: Every authenticated screen MUST render inside one **application shell** providing a persistent
-  left sidebar and a top bar. The sidebar MUST link to Workflows, Needs attention and Fleet, plus an **Admin**
-  group (setup bundles, workspaces, execution profiles, integrations, users, audit) that MUST be present only
-  for admins — an engineer MUST NOT be shown links to surfaces they cannot open. The shell MUST mark the
-  section matching the current route. No screen may be reachable only by typing its URL.
+  left sidebar and a top bar. The sidebar MUST link to every screen the signed-in user may open, and MUST NOT
+  link to any screen they may not — the rule is the user's own access, not a fixed list. For an engineer that
+  is at minimum Workflows, Launch a run, Needs attention and their own account settings; for an admin it
+  additionally includes fleet oversight and the **Admin** group (setup bundles, workspaces, execution profiles,
+  integrations, users, audit). A group left with no permitted items MUST be absent entirely, not rendered empty
+  or disabled. The shell MUST mark the section matching the current route by some signal other than colour
+  alone. No screen may be reachable only by typing its URL.
+
+  _Amended 2026-08-06 during implementation._ As first written this requirement listed Fleet among the
+  always-visible items while fleet oversight is an admin-gated surface, so satisfying it literally would have
+  shown engineers a link that answers `NOT_FOUND` — which FR-190 forbids. Access is now the criterion and the
+  list is illustrative, which resolves the contradiction in FR-190's favour. If fleet oversight should instead
+  be visible to engineers scoped to their own profiles, that is a change to the gate on that screen, not to
+  this requirement.
+
 - **FR-194**: The top bar MUST display the signed-in user's identity and MUST expose a **sign-out** control
   that terminates the session and returns the user to the sign-in screen.
 - **FR-195**: The panel MUST provide a **sign-in screen** at the route the authentication layer is configured
   to use for both the sign-in prompt and the authentication-error return. It MUST offer the single Google
   provider, MUST render inside the design system rather than the framework default, and MUST show a readable
-  reason when it has been reached as an error return — at minimum: out-of-domain identity, deactivated
-  account, and generic failure. An unauthenticated request to any authenticated screen MUST arrive here, not
-  at a 404.
+  reason when it has been reached as an error return. A reason MUST NOT disclose whether an account exists,
+  and where two causes cannot be distinguished without disclosing that, the screen MUST name both causes and
+  say plainly that it will not identify which applies. At minimum it MUST distinguish a **refusal** (naming
+  both out-of-domain identity and deactivated account) from a **generic provider failure**. An unauthenticated
+  request to any authenticated screen MUST arrive here, not at a 404.
+
+  _Amended 2026-08-06 during implementation._ As first written this required out-of-domain and deactivated to
+  be shown as distinct reasons. They cannot be: the authentication layer's sign-in callback returns a boolean,
+  so both refusals arrive as one `AccessDenied` code, and separating them would require the panel to look up
+  whether an account exists and report the answer to an unauthenticated caller — precisely the oracle FR-190
+  forbids. Resolved in FR-190's favour; the two causes are named together rather than discriminated.
+
 - **FR-196**: The root route `/` MUST redirect an authenticated user to the workflow list and an
   unauthenticated one to the sign-in screen. It MUST NOT be a dead end.
 - **FR-197**: The panel MUST provide **route-level not-found and error boundaries** rendered in the design

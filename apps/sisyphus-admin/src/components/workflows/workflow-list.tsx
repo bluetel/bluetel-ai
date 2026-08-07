@@ -4,7 +4,9 @@ import {
   Card,
   CardBody,
   CardHeader,
+  EmptyState,
   FieldError,
+  LoadingState,
   StateChip,
 } from '@sisyphus-admin/components/ui'
 
@@ -70,9 +72,8 @@ export const WorkflowList = ({
           not shift the page under you.
         </p>
         {error === undefined ? null : <FieldError {...error} />}
-        {loading || rows.length > 0 ? null : (
-          <p className="type-data-mono text-graphite">no runs match these filters</p>
-        )}
+        {loading ? <LoadingState>reading the runs you may see</LoadingState> : null}
+        {loading || rows.length > 0 ? null : <EmptyState>no runs match these filters</EmptyState>}
       </CardBody>
     </Card>
 

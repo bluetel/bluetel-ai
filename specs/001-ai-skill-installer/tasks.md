@@ -1,3 +1,5 @@
+<!-- cspell:ignore taskstoissues -->
+
 # Tasks: AI Skill Installer
 
 **Input**: Design documents from `/specs/001-ai-skill-installer/`

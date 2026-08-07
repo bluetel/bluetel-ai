@@ -57,7 +57,12 @@ describe('WorkflowEntriesCard', () => {
     const markup = renderToStaticMarkup(<WorkflowEntriesCard entries={[]} loading />)
 
     expect(markup).toContain('reading')
+    // In the body as well as in the chip: a card whose well is blank while a query runs is
+    // indistinguishable from one whose query came back with nothing (FR-201).
+    expect(markup).toContain('data-note="loading"')
+    expect(markup).toContain('reading this run’s repositories')
     expect(markup).not.toContain('no workspace entries recorded')
+    expect(markup).not.toContain('data-note="empty"')
   })
 
   it('writes no literal colour, size or radius (SC-015)', () => {

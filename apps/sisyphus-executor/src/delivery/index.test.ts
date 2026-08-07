@@ -34,6 +34,14 @@ describe('the delivery barrel', () => {
     expect(Object.keys(delivery)).not.toContain('DEFAULT_PROMOTION_ORDER')
   })
 
+  it('exports the forge implementation, its taxonomy and its retry policy (FR-077)', () => {
+    expect(typeof delivery.createHttpForge).toBe('function')
+    expect(typeof delivery.ForgeError).toBe('function')
+    expect(typeof delivery.isRetryableForgeError).toBe('function')
+    expect(typeof delivery.parseRepositorySlug).toBe('function')
+    expect(delivery.DEFAULT_FORGE_RETRY_POLICY.maxAttempts).toBe(3)
+  })
+
   it('offers nothing that would change a repository', () => {
     // FR-079 keeps the rebase decision with the repository's skills. The
     // barrel offers no way to take it: there is no exported action, only a

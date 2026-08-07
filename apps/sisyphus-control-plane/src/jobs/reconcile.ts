@@ -6,6 +6,8 @@ import {
   workflowEvents,
   workflows,
 } from '@bluetel-ai/sisyphus-api/db'
+import type { WorkflowNotifier } from '@bluetel-ai/sisyphus-notify'
+import { notificationEventForState } from '@bluetel-ai/sisyphus-notify'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 
 import type { ComputeProvisioner } from '../aws'
@@ -42,6 +44,33 @@ import type { QueueDrain } from './teardown-workflow'
  * `outcome_reason` and on the timeline, attributed to `reconciler`, because "your run failed" with
  * no reason is indistinguishable from a platform bug.
  *
+ * ## The third thing a sweep is looking for: a pause nobody came back to (T181, FR-049, US2 §4)
+ *
+ * A paused run is in {@link ACTIVE_STATES} because a pause **holds its instance** — that is the
+ * difference between pausing and parking, and it is the whole reason pausing is useful. It is also
+ * why a pause cannot be allowed to last for ever: an instance held for a person who never came back
+ * is the same silent cost as a leaked lease, arriving by a different route and looking, to every
+ * check above, perfectly healthy. Its heartbeat is current, its instance is running, and its lease
+ * is live, because all of that is true.
+ *
+ * So a paused run is also judged against the clock. Past {@link PAUSE_IDLE_CEILING_MS} plus
+ * {@link PAUSE_IDLE_GRACE_MS} it is moved out — to `parked_resumable`, because FR-049 registers a
+ * snapshot before a pause is ever acknowledged, so a paused run is a resumable run by
+ * construction — its lease is released in the same pass, and the owner is told it was **parked**
+ * rather than failed.
+ *
+ * **Where `paused_at` comes from.** There is no such column, and this does not add one. The
+ * timeline already carries the fact: `acknowledgeSupervisionCommand` writes a `paused` row into
+ * `workflow_events` in the same transaction that moves the state, exactly once per pause. The most
+ * recent one is when the current pause began — "most recent" rather than "the one", because a run
+ * may be paused, resumed and paused again, and the state being `paused` now is what makes the
+ * latest `paused` row the live one. A second column holding the same fact would be a second thing
+ * to keep in step, and the interesting failure of such pairs is that they disagree.
+ *
+ * **A paused run with no `paused` row is left alone.** That is a run whose pause predates the
+ * timeline entry, or one seeded by hand; the sweep has no evidence of when it began and so has no
+ * business acting, which is the same rule the checks below apply to a missing heartbeat.
+ *
  * ## The thing this must not do
  *
  * A reconciler that kills healthy runs is worse than one that leaks. Three cases look like death
@@ -56,6 +85,21 @@ import type { QueueDrain } from './teardown-workflow'
  *
  * So absence of a heartbeat is only evidence after {@link PROVISIONING_GRACE_MS}, absence of an
  * instance is only evidence once one was recorded, and the tag is parsed rather than assumed.
+ *
+ * ## Telling the owner (T177, FR-136, FR-141)
+ *
+ * This is the one job in the control plane that puts a run into a state FR-136 names — `failed`, or
+ * `parked_resumable` — and it is therefore the one that has to announce it. The owner of a run
+ * whose instance vanished learns nothing from the panel unless they happen to be looking at it, and
+ * SC-034 gives them two minutes.
+ *
+ * The notification is emitted **after** `moveWorkflow`'s transaction has committed, never inside
+ * it: a Slack round trip inside a row lock would hold the lock for the duration of a network call,
+ * and a failure inside it would roll back a state change that has already been decided. It is also
+ * wrapped, and its failures are collected into {@link ReconcileResult.notificationErrors} rather
+ * than raised — FR-141 makes a run that could not be announced a swept run with a failed
+ * notification, not a failed sweep. The `notifier` is optional so a caller that has not wired one
+ * still reconciles; announcing is not the sweep's purpose.
  *
  * ## Order within one pass
  *
@@ -84,6 +128,28 @@ export const HEARTBEAT_LAPSE_MS = 5 * 60 * 1000
  */
 export const PROVISIONING_GRACE_MS = 20 * 60 * 1000
 
+/**
+ * How long a paused run may sit untouched before its instance is handed back (FR-049, US2 §4).
+ *
+ * The same thirty minutes the executor counts in `session/idle-ceiling.ts`, and the reasoning for
+ * the number lives there. Two copies of one threshold in two apps is not ideal — the shared home
+ * would be `packages/sisyphus-api` — but the duplication is at least honest, because the two are
+ * not doing the same job: the executor's is the one that normally fires, and this is the backstop
+ * for the case where it could not.
+ */
+export const PAUSE_IDLE_CEILING_MS = 30 * 60 * 1000
+
+/**
+ * How much longer than the ceiling the reconciler waits before acting on a paused run.
+ *
+ * The instance is meant to hand itself back at the ceiling; this sweep exists for the instance that
+ * did not — because it crashed, hung, or had its capacity reclaimed before the timer fired. The
+ * grace is what keeps the two from racing: without it, a sweep landing in the same second as the
+ * executor's timer would move the run while the executor was reporting its own outcome, and one of
+ * the two would be writing over the other's account of how the run ended.
+ */
+export const PAUSE_IDLE_GRACE_MS = 5 * 60 * 1000
+
 /** States in which a workflow may still be holding compute. A lease outliving one of these leaks. */
 const ACTIVE_STATES = ['provisioning', 'running', 'paused'] as const
 
@@ -94,8 +160,17 @@ export interface ReconcileOptions {
   readonly now?: () => Date
   readonly heartbeatLapseMs?: number
   readonly provisioningGraceMs?: number
+  readonly pauseIdleCeilingMs?: number
+  readonly pauseIdleGraceMs?: number
   /** Run once at the end if anything was released, for the same reason teardown runs it. */
   readonly queueDrain?: QueueDrain
+  /**
+   * Tells the run's owner it was swept (FR-136). Optional: a sweep with no notifier still sweeps.
+   *
+   * See the module comment for why this is a seam rather than a Slack client, and why its failures
+   * are reported rather than raised.
+   */
+  readonly notifier?: WorkflowNotifier
 }
 
 /** A workflow the sweep moved out of a non-terminal state, and why. */
@@ -133,6 +208,14 @@ export interface ReconcileResult {
   /** Non-terminal runs the sweep looked at and left running. */
   readonly healthy: number
   readonly queueDrainError: Error | undefined
+  /**
+   * Notifications the sweep could not hand off, one per move it failed to announce (FR-141).
+   *
+   * Reported rather than raised. A run that was correctly swept and could not be announced is a
+   * swept run with a failed notification; turning it into a failed sweep would have the reconciler
+   * retry a move it has already made, every minute, for as long as Slack is unreachable.
+   */
+  readonly notificationErrors: readonly Error[]
 }
 
 /** See `admit-workflow.ts`: `noUncheckedIndexedAccess` is off, so indexing needs an honest type. */
@@ -244,6 +327,45 @@ const releaseLease = async (options: {
   }
 }
 
+/**
+ * When each of these runs was last paused, from the timeline.
+ *
+ * See the module comment for why this is `workflow_events` rather than a `workflows.paused_at`
+ * column. A workflow absent from the answer has no `paused` row and is deliberately left alone.
+ *
+ * @param db - The handle.
+ * @param workflowIds - The runs currently in state `paused`.
+ */
+const pauseBeganAt = async (
+  db: SisyphusDatabase,
+  workflowIds: readonly string[],
+): Promise<Map<string, Date>> => {
+  if (workflowIds.length === 0) {
+    return new Map()
+  }
+
+  const rows = await db
+    .select({ workflowId: workflowEvents.workflowId, createdAt: workflowEvents.createdAt })
+    .from(workflowEvents)
+    .where(
+      and(inArray(workflowEvents.workflowId, [...workflowIds]), eq(workflowEvents.event, 'paused')),
+    )
+
+  const latest = new Map<string, Date>()
+
+  for (const row of rows) {
+    const seen = latest.get(row.workflowId)
+
+    // Latest wins: a run may have been paused, resumed and paused again, and it is the current
+    // pause the ceiling is about.
+    if (seen === undefined || row.createdAt.getTime() > seen.getTime()) {
+      latest.set(row.workflowId, row.createdAt)
+    }
+  }
+
+  return latest
+}
+
 /** Every live lease, with the state of the run holding it. */
 const liveLeases = async (db: SisyphusDatabase) =>
   db
@@ -270,6 +392,8 @@ export const reconcile = async (options: ReconcileOptions): Promise<ReconcileRes
   const now = (options.now ?? ((): Date => new Date()))()
   const heartbeatLapseMs = options.heartbeatLapseMs ?? HEARTBEAT_LAPSE_MS
   const provisioningGraceMs = options.provisioningGraceMs ?? PROVISIONING_GRACE_MS
+  const pauseIdleCeilingMs = options.pauseIdleCeilingMs ?? PAUSE_IDLE_CEILING_MS
+  const pauseIdleGraceMs = options.pauseIdleGraceMs ?? PAUSE_IDLE_GRACE_MS
 
   const instances = await compute.listWorkflowInstances()
   const liveInstanceIds = new Set(instances.map((instance) => instance.instanceId))
@@ -284,8 +408,65 @@ export const reconcile = async (options: ReconcileOptions): Promise<ReconcileRes
     .from(workflows)
     .where(inArray(workflows.state, [...ACTIVE_STATES]))
 
+  const pausedSince = await pauseBeganAt(
+    db,
+    activeWorkflows
+      .filter((workflow) => workflow.state === 'paused')
+      .map((workflow) => workflow.id),
+  )
+
   const moved: MovedWorkflow[] = []
+  const notificationErrors: Error[] = []
   let healthy = 0
+
+  /**
+   * Announce one move, after its transaction has committed and outside anything that could fail
+   * because of it (FR-136, FR-141).
+   */
+  const announce = async (move: MovedWorkflow): Promise<void> => {
+    const event = notificationEventForState(move.to)
+    if (options.notifier === undefined || event === undefined) {
+      return
+    }
+
+    try {
+      await options.notifier.workflowEvent({ workflowId: move.workflowId, event, now })
+    } catch (thrown) {
+      notificationErrors.push(toError(thrown))
+    }
+  }
+
+  /**
+   * A pause nobody came back to (FR-049, US2 §4).
+   *
+   * Checked **after** the evidence above and never instead of it: a paused run whose instance has
+   * vanished is a vanished instance, and reporting it as an expired pause would tell the owner
+   * their run was parked in an orderly way when in fact the machine went away underneath it.
+   */
+  const idleCeilingReason = (workflow: {
+    readonly id: string
+    readonly state: string
+  }): string | undefined => {
+    if (workflow.state !== 'paused') {
+      return undefined
+    }
+
+    const began = pausedSince.get(workflow.id)
+
+    if (began === undefined) {
+      return undefined
+    }
+
+    const idleFor = now.getTime() - began.getTime()
+
+    return idleFor > pauseIdleCeilingMs + pauseIdleGraceMs
+      ? `paused and untouched for ${String(Math.round(idleFor / 1000))}s, beyond the ` +
+          `${String(Math.round(pauseIdleCeilingMs / 1000))}s pause idle ceiling and its ` +
+          `${String(Math.round(pauseIdleGraceMs / 1000))}s grace. The instance was released and ` +
+          'the run parked rather than failed: the pause registered a snapshot before it was ' +
+          'acknowledged, so resuming continues from there'
+      : undefined
+  }
 
   for (const workflow of activeWorkflows) {
     const lease = leaseByWorkflow.get(workflow.id)
@@ -312,15 +493,19 @@ export const reconcile = async (options: ReconcileOptions): Promise<ReconcileRes
         ? `no heartbeat within ${String(Math.round(provisioningGraceMs / 1000))}s of the lease being taken, so the instance never came up`
         : undefined
     })()
+    // Only for a run that survived every check above: a healthy paused run is still a run holding
+    // an instance, and the clock is the one thing left that can say it should not be.
+    const evidence = reason ?? idleCeilingReason(workflow)
 
-    if (reason === undefined) {
+    if (evidence === undefined) {
       healthy += 1
       continue
     }
 
-    const move = await moveWorkflow({ db, workflowId: workflow.id, reason, now })
+    const move = await moveWorkflow({ db, workflowId: workflow.id, reason: evidence, now })
     if (move !== undefined) {
       moved.push(move)
+      await announce(move)
     }
   }
 
@@ -397,7 +582,15 @@ export const reconcile = async (options: ReconcileOptions): Promise<ReconcileRes
     }
   }
 
-  return { moved, released, terminated, validationInstances, healthy, queueDrainError }
+  return {
+    moved,
+    released,
+    terminated,
+    validationInstances,
+    healthy,
+    queueDrainError,
+    notificationErrors,
+  }
 }
 
 /** The sweep wrapped in the uniform job envelope. */

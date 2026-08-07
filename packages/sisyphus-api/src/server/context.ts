@@ -3,6 +3,7 @@ import type { UserRole } from '../enums'
 
 import type { RepositoryReachabilityProbe } from './admin/reachability'
 import { memoiseAsync } from './memoise'
+import type { WorkflowEventEmitter } from './notify'
 import type { ScopeResolver } from './scope'
 import { createScopeResolver, createUnauthenticatedScopeResolver } from './scope'
 import type { TRPCContextOptions } from './trpc'
@@ -99,6 +100,20 @@ export interface SisyphusDependencies {
    * reports a check that did not happen. See `server/admin/reachability.ts`.
    */
   readonly repositoryReachability?: RepositoryReachabilityProbe
+  /**
+   * Where FR-136's notifications go — a port, not a Slack client (FR-140, FR-141).
+   *
+   * Four of FR-136's events plus `review_iteration_failed` are set on the machine surface in this
+   * package rather than by a control-plane job, so they need a way out of here that does not make
+   * this package depend on an app. This is that seam; see `server/notify/emitter.ts` for why it is
+   * a port and what a holder of one deliberately cannot do.
+   *
+   * Optional, and unlike {@link SisyphusDependencies.repositoryReachability} an omitted notifier is
+   * a **silent no-op** rather than a refusal. The asymmetry is deliberate: an unwired gate reports
+   * a check that did not happen, whereas an unwired notifier withholds a message and breaks
+   * nothing — and FR-140 already requires that an unnotifiable recipient never fails a run.
+   */
+  readonly notifier?: WorkflowEventEmitter
 }
 
 /** The request-scoped values added on top of `{ headers, dependencies }`. */

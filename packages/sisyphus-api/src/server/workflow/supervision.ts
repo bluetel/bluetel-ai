@@ -26,8 +26,14 @@ import {
  * **The path that makes the pause button work (T089, T096, FR-015, FR-049, FR-081, SC-003).**
  *
  * Without this module the panel's pause mutation writes a row nothing on the instance ever reads,
- * `suspend()` in the executor is fully specified and never invoked, and SC-003's ten-second pause is
- * unreachable — not slow, unreachable, because nothing closes the loop at all.
+ * and SC-003's ten-second pause is unreachable — not slow, unreachable, because nothing closes the
+ * loop at all.
+ *
+ * Both ends are now wired. The executor's entry point (`apps/sisyphus-executor/src/run/execute.ts`)
+ * races the workflow against `watchForInterruption` and drives `suspend()` from it, so a pause
+ * command collected in step 2 below reaches a suspension that actually happens — and the same path
+ * serves an instance reclamation (FR-054), which is why the two share it rather than each having
+ * their own.
  *
  * The loop has four parts and all four are here:
  *

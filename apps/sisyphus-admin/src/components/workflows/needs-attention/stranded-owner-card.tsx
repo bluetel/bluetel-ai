@@ -1,7 +1,15 @@
 'use client'
 
 import { DataReadout, describeTrpcError } from '@sisyphus-admin/components/admin'
-import { Card, CardBody, CardHeader, FieldError, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  FieldError,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 import type { FieldErrorContent } from '@sisyphus-admin/components/ui'
 import { toWorkflowRowReadouts } from '@sisyphus-admin/components/workflows'
 import type { LaunchOption } from '@sisyphus-admin/components/workflows/new'
@@ -84,10 +92,10 @@ export const StrandedOwnerCard = ({
 
         {workflows.error === null ? null : <FieldError {...describeTrpcError(workflows.error)} />}
 
+        {workflows.isPending ? <LoadingState>reading this owner’s runs</LoadingState> : null}
+
         {workflows.isPending || rows.length > 0 ? null : (
-          <p className="type-data-mono text-graphite">
-            none of these runs are within what you are permitted to see
-          </p>
+          <EmptyState>none of these runs are within what you are permitted to see</EmptyState>
         )}
 
         {rows.map((row) => (

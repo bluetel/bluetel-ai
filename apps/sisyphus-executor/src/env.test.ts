@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const completeEnvironment: Readonly<Record<string, string>> = {
   SISYPHUS_STAGE: 'staging',
   SISYPHUS_MACHINE_SURFACE_URL: 'https://sisyphus.example.com/api/machine',
+  SISYPHUS_FORGE_API_URL: 'https://api.forge.example',
   SISYPHUS_LOGS_BUCKET: 'sisyphus-staging-logs',
   SISYPHUS_SNAPSHOTS_BUCKET: 'sisyphus-staging-snapshots',
   SISYPHUS_BUNDLES_BUCKET: 'sisyphus-staging-bundles',
@@ -38,6 +39,7 @@ describe('env', () => {
 
     expect(env.SISYPHUS_STAGE).toBe('staging')
     expect(env.SISYPHUS_BUNDLES_BUCKET).toBe('sisyphus-staging-bundles')
+    expect(env.SISYPHUS_FORGE_API_URL).toBe('https://api.forge.example')
     expect(env.AWS_REGION).toBe('eu-west-2')
     expect(env.SISYPHUS_WORKSPACE_ROOT).toBe('/workspace')
   })

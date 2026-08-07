@@ -1,6 +1,14 @@
 import { DataReadout } from '@sisyphus-admin/components/admin/data-readout'
 import type { FieldErrorContent } from '@sisyphus-admin/components/ui'
-import { Card, CardBody, CardHeader, FieldError, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  FieldError,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 
 import type { GrantTrailReadouts } from './grant-trail'
 
@@ -38,9 +46,12 @@ export const GrantTrailCard = ({ rows, loading = false, error }: GrantTrailCardP
       {error === undefined ? null : <FieldError {...error} />}
 
       {rows.length === 0 ? (
-        <p className="type-data-mono text-graphite">
-          {loading ? 'reading' : 'no access changes recorded for this user'}
-        </p>
+        <>
+          {loading ? <LoadingState>reading this user’s access history</LoadingState> : null}
+          {loading || error !== undefined ? null : (
+            <EmptyState>no access changes recorded for this user</EmptyState>
+          )}
+        </>
       ) : (
         <ol className="gap-default flex flex-col">
           {rows.map((row) => (

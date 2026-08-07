@@ -109,6 +109,26 @@ export type {
   ScopedCredentialResolverOptions,
 } from './machine'
 
+/**
+ * The notification seam (FR-136, FR-141).
+ *
+ * Exported from `/server` because it is a **host** contract, not an internal one: the events this
+ * package sets are announced through `SisyphusDependencies.notifier`, and whichever app mounts the
+ * machine surface is what supplies one. `emitWorkflowEvent` comes with it so a host that emits on
+ * its own behalf gets the same never-throwing wrapper rather than writing a second try/catch with
+ * its own opinion of what FR-141 requires.
+ */
+export {
+  emitWorkflowEvent,
+  notificationEventForOutcome,
+  notificationEventForVerdict,
+} from './notify'
+export type {
+  WorkflowEventEmission,
+  WorkflowEventEmitter,
+  WorkflowEventNotification,
+} from './notify'
+
 export { healthRouter } from './health'
 
 export { appRouter, createCaller, createMachineCaller, machineRouter } from './root'

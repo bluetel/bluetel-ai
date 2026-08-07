@@ -23,6 +23,8 @@ describe('the machine barrel', () => {
       'reportEntryCheckout',
       'registerSnapshot',
       'reportReviewerSummary',
+      'reportSkillReference',
+      'reportExternalAction',
     ] as const) {
       expect(typeof barrel[name]).toBe('function')
     }
@@ -30,6 +32,13 @@ describe('the machine barrel', () => {
 
   it('exports the audit path the entry-result guard records under', () => {
     expect(barrel.REPORT_ENTRY_RESULT_PATH).toBe('machine.reportEntryResult')
+  })
+
+  it('exports the skill-reference audit path and the external-action progression rule', () => {
+    expect(barrel.REPORT_SKILL_REFERENCE_PATH).toBe('machine.reportSkillReference')
+    // Named so a reader can find the index the exactly-once guarantee actually rests on.
+    expect(barrel.EXTERNAL_ACTION_IDEMPOTENCY_INDEX).toBe('external_actions_idempotency_key')
+    expect(barrel.supersedesExternalActionResult('succeeded', 'failed')).toBe(false)
   })
 
   it('exports the audit paths the two newly mounted guards record under', () => {

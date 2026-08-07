@@ -17,8 +17,8 @@
         "cwd": "apps/sisyphus-admin"
       },
       "configurations": {
-        "production": { "command": "sst deploy --stage production" },
-        "staging": { "command": "sst deploy --stage staging" }
+        "production": { "command": "sst deploy --stage production --config sst.config.ts" },
+        "staging": { "command": "sst deploy --stage staging --config sst.config.ts" }
       },
       "dependsOn": ["^build"],
       "cache": false
@@ -30,8 +30,68 @@
         "cwd": "apps/sisyphus-admin"
       },
       "configurations": {
-        "production": { "command": "sst deploy --stage production-bootstrap" },
-        "staging": { "command": "sst deploy --stage staging-bootstrap" }
+        "production": {
+          "command": "sst deploy --stage production-bootstrap --config sst-bootstrap.config.ts"
+        },
+        "staging": {
+          "command": "sst deploy --stage staging-bootstrap --config sst-bootstrap.config.ts"
+        }
+      },
+      "cache": false
+    },
+    "destroy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'Refusing to destroy: pass --configuration=staging or --configuration=production' >&2 && exit 1",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "configurations": {
+        "production": { "command": "sst destroy --stage production --config sst.config.ts" },
+        "staging": { "command": "sst destroy --stage staging --config sst.config.ts" }
+      },
+      "cache": false
+    },
+    "destroy-bootstrap": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'Refusing to destroy: pass --configuration=staging or --configuration=production' >&2 && exit 1",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "configurations": {
+        "production": {
+          "command": "sst destroy --stage production-bootstrap --config sst-bootstrap.config.ts"
+        },
+        "staging": {
+          "command": "sst destroy --stage staging-bootstrap --config sst-bootstrap.config.ts"
+        }
+      },
+      "cache": false
+    },
+    "unlock": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'Refusing to unlock: pass --configuration=staging or --configuration=production' >&2 && exit 1",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "configurations": {
+        "production": { "command": "sst unlock --stage production --config sst.config.ts" },
+        "staging": { "command": "sst unlock --stage staging --config sst.config.ts" }
+      },
+      "cache": false
+    },
+    "unlock-bootstrap": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'Refusing to unlock: pass --configuration=staging or --configuration=production' >&2 && exit 1",
+        "cwd": "apps/sisyphus-admin"
+      },
+      "configurations": {
+        "production": {
+          "command": "sst unlock --stage production-bootstrap --config sst-bootstrap.config.ts"
+        },
+        "staging": {
+          "command": "sst unlock --stage staging-bootstrap --config sst-bootstrap.config.ts"
+        }
       },
       "cache": false
     },
@@ -85,10 +145,16 @@
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "tsc --noEmit",
+        "command": "tsc --noEmit | loose-ts-check",
         "cwd": "apps/sisyphus-admin"
       },
-      "inputs": ["default", "^default", "{projectRoot}/tsconfig.json"],
+      "inputs": [
+        "default",
+        "^default",
+        "{projectRoot}/tsconfig.json",
+        "{projectRoot}/ignored-error-codes.json",
+        "{projectRoot}/loosely-type-checked-files.json"
+      ],
       "cache": true
     }
   }

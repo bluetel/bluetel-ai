@@ -5,6 +5,7 @@ import type { BootstrapPhase, SisyphusDatabase, Workflow } from '../../db'
 import { bootstrapPhases, computeLeases, workflowEvents, workflows } from '../../db'
 import type { TerminalOutcome, WorkflowState } from '../../enums'
 import type { HeartbeatInput, ReportBootstrapPhaseInput, ReportTerminalInput } from '../../schemas'
+import { emitWorkflowEvent, notificationEventForOutcome } from '../notify'
 
 import type { MachineContext } from './guard'
 import { firstRow, isTerminalState, loadMachineWorkflow, resolveOptionalEntry } from './guard'
@@ -30,6 +31,14 @@ import { firstRow, isTerminalState, loadMachineWorkflow, resolveOptionalEntry } 
  * - `reportTerminal` keeps the **first** outcome and reports the second as not recorded, which is
  *   what makes FR-064's "exactly one outcome in force" hold against a retry as well as against a
  *   race.
+ *
+ * ## The one thing here that leaves the database
+ *
+ * `reportTerminal` announces the outcome it wrote (FR-136). Four of FR-136's six workflow events —
+ * `workflow_succeeded`, `workflow_capped`, `workflow_cancelled` and `workflow_needs_attention` —
+ * are reachable only through this function, so without the emission below they would never fire at
+ * all. It goes through the injected port in `../notify/`, **after** the transaction has committed
+ * and outside it, and it cannot fail the report: see {@link reportTerminal} for both arguments.
  */
 
 /** Anything that can run these statements — the pooled handle or a transaction on it. */
@@ -221,13 +230,10 @@ export interface TerminalReport {
 }
 
 /**
- * The last thing an executor says (FR-056, FR-064).
- *
- * The workflow row is locked before it is read, so two reports racing — the executor's and the
- * reconciler's backstop, say — cannot both see a non-terminal run and both write an outcome. The
- * loser reads the committed state and returns `recorded: false`.
+ * Write the outcome. Split out of {@link reportTerminal} so the transaction has a name and an
+ * end, and so it is visually impossible to add a notification inside it.
  */
-export const reportTerminal = async (
+const recordTerminalOutcome = async (
   ctx: MachineContext,
   input: ReportTerminalInput,
 ): Promise<TerminalReport> =>
@@ -278,3 +284,55 @@ export const reportTerminal = async (
 
     return { workflow: updated, recorded: true }
   })
+
+/**
+ * The last thing an executor says (FR-056, FR-064), and the message it sets off (FR-136).
+ *
+ * The workflow row is locked before it is read, so two reports racing — the executor's and the
+ * reconciler's backstop, say — cannot both see a non-terminal run and both write an outcome. The
+ * loser reads the committed state and returns `recorded: false`.
+ *
+ * ## Why the notification is out here rather than in the transaction
+ *
+ * Two reasons, and the second is the one that matters.
+ *
+ * A message about an uncommitted outcome can be a message about an outcome that never happens: the
+ * transaction can still roll back after the notifier has been called, and Slack has no undo. So the
+ * announcement waits for the commit, and the seam is constructed so it *cannot* be moved inside —
+ * `recordTerminalOutcome` owns the transaction and returns before this line is reached.
+ *
+ * More importantly, a notifier called inside `ctx.db.transaction` is enlisted in it. FR-141 says a
+ * delivery failure must not alter the workflow's outcome; a notifier that threw inside the
+ * transaction would roll the outcome back *even with the throw swallowed*, because the failure
+ * would already have poisoned the surrounding statement. `emitWorkflowEvent` never rejects, but
+ * that is the second line of defence, not the first — being outside the transaction is the first.
+ *
+ * ## Why only when `recorded`
+ *
+ * FR-047 has the executor retrying this call whenever the surface is unreachable, and it cannot
+ * tell a lost response from a failed write. A second report keeps the first outcome and changes
+ * nothing, so announcing it again would send a duplicate Slack message for a run that finished
+ * once — the burst FR-139 exists to prevent, arriving by the one route coalescing cannot see.
+ */
+export const reportTerminal = async (
+  ctx: MachineContext,
+  input: ReportTerminalInput,
+): Promise<TerminalReport> => {
+  const report = await recordTerminalOutcome(ctx, input)
+  // The **committed** outcome, not the requested one. They are the same today, and reading the row
+  // is what keeps them the same tomorrow: FR-118's `honestTerminalOutcome` substitutes
+  // `needs_attention` for a success that did not land every repository, and an announcement keyed
+  // on the request would then tell the owner their run succeeded while the record said otherwise.
+  const outcome = report.workflow.terminalOutcome
+
+  if (report.recorded && outcome !== null) {
+    // Result deliberately unread. There is nothing this function may do about a failed
+    // notification: the outcome is committed, and FR-141 forbids the delivery changing it.
+    await emitWorkflowEvent(ctx.dependencies.notifier, {
+      workflowId: ctx.workflowId,
+      event: notificationEventForOutcome(outcome),
+    })
+  }
+
+  return report
+}

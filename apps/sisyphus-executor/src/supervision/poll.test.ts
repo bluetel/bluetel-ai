@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { POLL_INTERVAL_MS } from './budget'
+import { POLL_INTERVAL_MS, PULL_ROUND_TRIP_MS } from './budget'
 import type {
   CollectedCommand,
   CommandAcknowledgement,
@@ -283,5 +283,113 @@ describe('the supervision poller', () => {
 
     expect(applied).toStrictEqual(['pause'])
     expect(recorder.acknowledgements).toHaveLength(1)
+  })
+})
+
+/**
+ * **The two terms this loop owns, as bounds (T185, FR-205, SC-003).**
+ *
+ * The complaint T185 names is that `PULL_ROUND_TRIP_MS` and `ACKNOWLEDGE_BUDGET_MS` were passed to
+ * no operation at all: a machine surface that stopped answering would have held the loop open for
+ * as long as the socket did, while the run it was supposed to be pausing sat there and the panel
+ * said nothing. These fail if either bound is taken back out.
+ */
+describe('the machine-surface calls this loop bounds', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  const hang = async (): Promise<never> => new Promise<never>(() => undefined)
+
+  it('abandons a pull that blew its term, applying nothing', async () => {
+    vi.useFakeTimers()
+
+    const errors: unknown[] = []
+    const applied: string[] = []
+    const cycling = createSupervisionPoller({
+      transport: {
+        pullPendingCommands: hang,
+        acknowledgeCommand: (): Promise<void> => Promise.resolve(),
+      },
+      handlers: recordingHandlers(applied),
+      pullTimeoutMs: 40,
+    }).cycle()
+    const settled = expect(cycling).rejects.toThrow(/pulling supervision commands/)
+
+    await vi.advanceTimersByTimeAsync(40)
+    await settled
+
+    expect(applied).toStrictEqual([])
+    expect(errors).toStrictEqual([])
+  })
+
+  it('keeps polling after a pull blew its term, because an unreachable surface is transient', async () => {
+    vi.useFakeTimers()
+
+    const errors: unknown[] = []
+    let pulls = 0
+    const poller = createSupervisionPoller({
+      transport: {
+        pullPendingCommands: async () => {
+          pulls += 1
+
+          return pulls === 1 ? hang() : []
+        },
+        acknowledgeCommand: (): Promise<void> => Promise.resolve(),
+      },
+      handlers: recordingHandlers([]),
+      pullTimeoutMs: 40,
+      intervalMs: 10,
+      onCycleError: (error) => {
+        errors.push(error)
+      },
+    })
+
+    const running = poller.run()
+    await vi.advanceTimersByTimeAsync(200)
+    poller.stop()
+    await vi.advanceTimersByTimeAsync(20)
+    await running
+
+    // FR-047: a surface that cannot be reached is something the executor retries through, not a
+    // reason to stop listening for a pause.
+    expect(errors).toHaveLength(1)
+    expect(pulls).toBeGreaterThan(1)
+  })
+
+  it('abandons an acknowledgement that blew its term, with the command already applied', async () => {
+    vi.useFakeTimers()
+
+    const applied: string[] = []
+    const cycling = createSupervisionPoller({
+      transport: {
+        pullPendingCommands: (): Promise<readonly CollectedCommand[]> =>
+          Promise.resolve([command({ id: 'c1' })]),
+        acknowledgeCommand: hang,
+      },
+      handlers: recordingHandlers(applied),
+      acknowledgeTimeoutMs: 40,
+    }).cycle()
+    const settled = expect(cycling).rejects.toThrow(/acknowledging the acknowledged command/)
+
+    await vi.advanceTimersByTimeAsync(40)
+    await settled
+
+    // The pause happened; only its receipt was lost. The surface is idempotent on
+    // `acknowledged_at is null`, so the row is collected again and closed out next pass.
+    expect(applied).toStrictEqual(['pause'])
+  })
+
+  it('leaves both bounds in force by default, so a caller cannot get an unbounded loop by omission', async () => {
+    vi.useFakeTimers()
+
+    const cycling = createSupervisionPoller({
+      transport: { pullPendingCommands: hang, acknowledgeCommand: hang },
+      handlers: recordingHandlers([]),
+    }).cycle()
+    const settled = expect(cycling).rejects.toThrow(/1000ms budget/)
+
+    await vi.advanceTimersByTimeAsync(PULL_ROUND_TRIP_MS)
+    await settled
   })
 })

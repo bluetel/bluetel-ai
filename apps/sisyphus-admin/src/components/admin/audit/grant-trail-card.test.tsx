@@ -90,4 +90,20 @@ describe('GrantTrailCard', () => {
     expect(markup).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
     expect(markup).not.toMatch(/style="[^"]*\d+(px|rem)/)
   })
+
+  it('says it is reading rather than leaving the trail blank (FR-201)', () => {
+    const markup = renderToStaticMarkup(<GrantTrailCard rows={[]} loading />)
+
+    expect(markup).toContain('data-note="loading"')
+    expect(markup).not.toContain('no access changes recorded for this user')
+  })
+
+  it('never claims nothing was recorded on a trail it could not read', () => {
+    const markup = renderToStaticMarkup(
+      <GrantTrailCard rows={[]} error={{ code: 'E_UNEXPECTED', action: 'Retry once.' }} />,
+    )
+
+    expect(markup).toContain('E_UNEXPECTED')
+    expect(markup).not.toContain('no access changes recorded for this user')
+  })
 })

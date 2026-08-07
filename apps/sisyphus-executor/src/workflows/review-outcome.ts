@@ -137,6 +137,7 @@ export const applyReviewOutcome = async (
           action: REVIEW_COMMENT_ACTION,
           workflowId: input.workflowId,
           target: [target.repository, String(target.pullRequestNumber)],
+          kind: 'comment_posted',
         },
         perform: async (idempotencyKey) =>
           input.publisher({

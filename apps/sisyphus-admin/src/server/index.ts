@@ -9,6 +9,8 @@
 export { decideAdminPageAccess, SIGN_IN_PATH } from './admin-page-access'
 export type { AdminPageAccess } from './admin-page-access'
 
+export { createServerCaller } from './caller'
+
 export { createSisyphusDependencies } from './dependencies'
 
 export {

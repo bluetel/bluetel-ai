@@ -39,6 +39,17 @@ export const serverSchemas = {
    */
   SISYPHUS_MACHINE_SURFACE_URL: z.string().url(),
 
+  /**
+   * Base URL of the code host's REST API, e.g. `https://api.forge.example`.
+   *
+   * Instance-level, and the note above is the test of that rather than a reason to hesitate: it is
+   * the same for every job this instance could run, it is a URL rather than a job parameter, and
+   * it grants nothing. The **credential** for that host is a different matter entirely — it is
+   * installed by the setup bundle (FR-075) and read from git by `run/forge-credential.ts`, so it
+   * is not here and must never be added here.
+   */
+  SISYPHUS_FORGE_API_URL: z.string().url(),
+
   /** Object storage the instance reads from and writes to. */
   SISYPHUS_LOGS_BUCKET: z.string().min(1),
   SISYPHUS_SNAPSHOTS_BUCKET: z.string().min(1),
@@ -72,6 +83,10 @@ export const ENVELOPE_ONLY_KEYS: readonly string[] = [
   'SISYPHUS_WORKFLOW_ID',
   'SISYPHUS_SESSION_ID',
   'SISYPHUS_SCOPED_CREDENTIAL',
+  // The forge's *base URL* is instance configuration and is in the schema above. A credential for
+  // it is not, in any spelling: the bundle installs it and `run/forge-credential.ts` reads it.
+  'SISYPHUS_FORGE_CREDENTIAL',
+  'SISYPHUS_FORGE_TOKEN',
   'SISYPHUS_MODEL',
   'SISYPHUS_TURN_CAP',
   'SISYPHUS_SPEND_CAP',

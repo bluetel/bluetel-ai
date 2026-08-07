@@ -654,43 +654,43 @@ already points at stops returning a 404.
 **Independent test**: sign out, request any route, and arrive at a styled sign-in screen; sign in as an engineer
 and reach every permitted screen from the sidebar without touching the address bar; sign out from a deep screen.
 
-- [ ] T146 Sign-in screen at `apps/sisyphus-admin/src/app/sign-in/page.tsx` — **do this first, it is a live
+- [x] T146 Sign-in screen at `apps/sisyphus-admin/src/app/sign-in/page.tsx` — **do this first, it is a live
       defect**: `apps/sisyphus-admin/src/lib/auth/config.ts:106-110` sets both `pages.signIn` and `pages.error`
       to `/sign-in` and no such route exists, so every unauthenticated visit and every auth failure 404s today.
       One Google provider, so no provider picker; built from `components/ui` primitives, not the framework
       default (FR-195)
-- [ ] T147 [P] Auth-error reason mapping in `apps/sisyphus-admin/src/app/sign-in/error-reason.ts` — translate
+- [x] T147 [P] Auth-error reason mapping in `apps/sisyphus-admin/src/app/sign-in/error-reason.ts` — translate
       the `error` query parameter into a readable cause covering at minimum out-of-domain identity, deactivated
       account and generic provider failure, reusing the existing decision vocabulary in
       `apps/sisyphus-admin/src/lib/auth/sign-in-decision.ts`. A reason MUST NOT disclose whether an account
       exists (FR-195, FR-190)
-- [ ] T148 [P] Root route redirect in `apps/sisyphus-admin/src/app/page.tsx`, replacing the current 7-line
+- [x] T148 [P] Root route redirect in `apps/sisyphus-admin/src/app/page.tsx`, replacing the current 7-line
       `<h1>Sisyphus</h1>` stub — authenticated to `/workflows`, unauthenticated to `/sign-in` (FR-196)
-- [ ] T149 Application shell layout at `apps/sisyphus-admin/src/app/(app)/layout.tsx` — a route group so a new
+- [x] T149 Application shell layout at `apps/sisyphus-admin/src/app/(app)/layout.tsx` — a route group so a new
       screen is inside the shell by existing rather than by remembering to import it. Renders the sidebar and
       top bar around `children` (FR-193, R17)
-- [ ] T150 Sidebar in `apps/sisyphus-admin/src/components/shell/sidebar.tsx` with
+- [x] T150 Sidebar in `apps/sisyphus-admin/src/components/shell/sidebar.tsx` with
       `apps/sisyphus-admin/src/components/shell/nav-items.ts` — Workflows, Needs attention, Fleet, plus an Admin
       group (bundles, workspaces, profiles, integrations, users, audit) **filtered out entirely for engineers,
       not rendered disabled**, so the nav never advertises a surface that will answer `NOT_FOUND` (FR-193,
       FR-190). Current section marked by something other than colour alone (FR-201)
-- [ ] T151 [P] Top bar in `apps/sisyphus-admin/src/components/shell/top-bar.tsx` — signed-in identity plus a
+- [x] T151 [P] Top bar in `apps/sisyphus-admin/src/components/shell/top-bar.tsx` — signed-in identity plus a
       sign-out control wired to `signOut`, which is exported at
       `apps/sisyphus-admin/src/lib/auth/index.ts:16` and imported by no component today (FR-194, SC-058)
-- [ ] T152 Move `app/workflows/`, `app/admin/` and the new `app/settings/` under `apps/sisyphus-admin/src/app/(app)/`
+- [x] T152 Move `app/workflows/`, `app/admin/` and the new `app/settings/` under `apps/sisyphus-admin/src/app/(app)/`
       so the shell wraps them. Route-group parentheses keep every URL unchanged — verify with the existing
       colocated page tests, which must pass without edits to their asserted paths
-- [ ] T153 [P] Root not-found boundary at `apps/sisyphus-admin/src/app/not-found.tsx` — catches the
+- [x] T153 [P] Root not-found boundary at `apps/sisyphus-admin/src/app/not-found.tsx` — catches the
       `notFound()` that `requireAdminPage()` throws for non-admins, which lands on the framework's unstyled
       default today. Renders inside the shell with a route back, reusing
       `apps/sisyphus-admin/src/components/admin/not-found-card.tsx` (FR-197)
-- [ ] T154 [P] Root error boundary at `apps/sisyphus-admin/src/app/error.tsx` — styled, inside the shell, with
+- [x] T154 [P] Root error boundary at `apps/sisyphus-admin/src/app/error.tsx` — styled, inside the shell, with
       an error code and a next action rather than a dead end (FR-197, FR-031)
-- [ ] T155 Per-screen loading, empty and error states across all thirteen screens — a list with zero rows
+- [x] T155 Per-screen loading, empty and error states across all thirteen screens — a list with zero rows
       renders a stated empty case, a query in flight renders a loading case, a failed query renders the reason
       plus a next action. Walk every `page.tsx` under `apps/sisyphus-admin/src/app/(app)/`; this is the
       criterion T141's "every screen" audit had no way to check (FR-201)
-- [ ] T156 Reconcile `apps/sisyphus-admin/src/components/admin/admin-shell.tsx` with the new layout — it
+- [x] T156 Reconcile `apps/sisyphus-admin/src/components/admin/admin-shell.tsx` with the new layout — it
       currently renders eyebrow, title and summary and is the closest thing to chrome the app has. It becomes
       the per-screen **page header** inside the shell, not a second shell; remove any framing the layout now
       owns and update `admin-shell.test.tsx` accordingly
@@ -710,20 +710,20 @@ administrator.
 **Independent test**: turn one event off and confirm it stops arriving while another still does; watch a
 workflow you do not own and receive its notifications; unwatch and stop.
 
-- [ ] T157 [US11] Notification settings screen at
+- [x] T157 [US11] Notification settings screen at
       `apps/sisyphus-admin/src/app/(app)/settings/notifications/page.tsx` — reads
       `workflow.notificationPreferences`, already mounted at
       `packages/sisyphus-api/src/server/workflow/router.ts:237` (FR-138)
-- [ ] T158 [US11] Preferences panel in
+- [x] T158 [US11] Preferences panel in
       `apps/sisyphus-admin/src/components/settings/notification-preferences-panel.tsx` — one control per
       notification event, writing through `workflow.setNotificationPreference`. Defaults come from
       `applyPreferenceDefaults` in `packages/sisyphus-api/src/server/workflow/watch.ts:171`, so a user who has
       never opened this screen is still notified about their own runs (FR-138)
-- [ ] T159 [P] [US11] Slack identity readout in
+- [x] T159 [P] [US11] Slack identity readout in
       `apps/sisyphus-admin/src/components/settings/slack-identity-readout.tsx` — states plainly when no Slack
       identity resolved and that notifications will not be delivered, rather than the screen silently
       succeeding (FR-140)
-- [ ] T160 [US11] Watch / Unwatch control in
+- [x] T160 [US11] Watch / Unwatch control in
       `apps/sisyphus-admin/src/components/workflows/watch-toggle.tsx`, mounted in
       `apps/sisyphus-admin/src/components/workflows/workflow-detail-panel.tsx` — calls `workflow.watch` /
       `workflow.unwatch`, offered for any workflow the requester may see, not only ones they own. Both are
@@ -745,57 +745,57 @@ between a primitive and the resource it creates.
 **Independent test**: from a clean clone with no AWS credentials, `pnpm install` then
 `pnpm nx run-many -t typecheck` is clean; grepping the package finds no `*Provider` / `*Surface` interface.
 
-- [ ] T161 Extract the pure layer first, before anything is rewritten:
+- [x] T161 Extract the pure layer first, before anything is rewritten:
       `packages/sisyphus-infra/src/retention.ts` (days and transitions per object class),
       `packages/sisyphus-infra/src/policies.ts` (each policy document's actions, resources and conditions, plus
       the CI identity provider's trusted subject), each with its colocated test. Move the assertions that
       already exist in `buckets.test.ts`, `oidc-provider.test.ts` and `runner-role.test.ts` onto these, so no
       security or retention assertion is lost in the rewrite (FR-200)
-- [ ] T162 Rewrite `packages/sisyphus-infra/src/buckets.ts` as `createBuckets(config)` instantiating
+- [x] T162 Rewrite `packages/sisyphus-infra/src/buckets.ts` as `createBuckets(config)` instantiating
       `sst.aws.Bucket` / `aws.s3.*` directly and returning `{ logs, snapshots, bundles, artifacts }`. Delete
       `BucketProvider`, `BucketSpecification(s)` and the `build*Specification` indirection; lifecycle rules come
       from `retention.ts`. Delete `buckets.test.ts` — the construct is deploy-verified (FR-066, FR-200)
-- [ ] T163 [P] Rewrite `packages/sisyphus-infra/src/database.ts` as `createDatabase(config)` returning the
+- [x] T163 [P] Rewrite `packages/sisyphus-infra/src/database.ts` as `createDatabase(config)` returning the
       instance and its parameter, deleting `DatabaseProvider` and `DatabaseSpecification` with
       `database.test.ts`
-- [ ] T164 Rewrite `packages/sisyphus-infra/src/oidc-provider.ts` as `async createOidcProvider(config)` —
+- [x] T164 Rewrite `packages/sisyphus-infra/src/oidc-provider.ts` as `async createOidcProvider(config)` —
       create in production, `getOpenIdConnectProvider` lookup elsewhere via the Promise API so the absence can
       be caught and rethrown naming the bootstrap step. Rewrite
       `packages/sisyphus-infra/src/runner-role.ts` as `createRunnerRole(config)`. Both take their policy
       documents from `policies.ts`; delete `OidcProviderSurface`, `RunnerRoleProvider` and both construct tests
-- [ ] T165 [P] Rewrite `packages/sisyphus-infra/src/scheduler.ts` as `createScheduler(config)` and add
+- [x] T165 [P] Rewrite `packages/sisyphus-infra/src/scheduler.ts` as `createScheduler(config)` and add
       `packages/sisyphus-infra/src/nextjs-website.ts` as `createNextjsWebsite(config)`, deriving its argument
       types from the construct's own constructor rather than restating them. Delete `SchedulerProvider` and
       `scheduler.test.ts`
-- [ ] T166 Retire the structural type layer: delete `SstConfigDefinition`, `SstAppInput` and `SstAppConfig`
+- [x] T166 Retire the structural type layer: delete `SstConfigDefinition`, `SstAppInput` and `SstAppConfig`
       from `packages/sisyphus-infra/src/sst-app.ts`, keeping only the pure removal-policy/protect decision as
       a tested helper so three deployables cannot disagree about teardown. Fold
       `packages/sisyphus-infra/src/stack-scope.ts` into `lib.ts` if it is only naming. Rewrite
       `packages/sisyphus-infra/src/index.ts` — explicit named re-exports, no `export *`, and none of the
       deleted provider types (FR-066, SC-060)
-- [ ] T167 [P] Add the `./scripts` subpath to `packages/sisyphus-infra/package.json` and populate
+- [x] T167 [P] Add the `./scripts` subpath to `packages/sisyphus-infra/package.json` and populate
       `packages/sisyphus-infra/src/scripts/` — `deploy-role-name.ts` as the single exported constant both the
       bootstrap role and the CI script build their identifier from, `ci-deploy-utils.ts` (OIDC token,
       assume-role, parameter-store → `process.env` / `.env` file), `get-deployment-environment.ts`, and an
       `index.ts` barrel. Two string literals that agree today are the failure this prevents (FR-200)
-- [ ] T168 Split each deployable's deployment config into three, replacing the stage-suffix `if` branch in
+- [x] T168 Split each deployable's deployment config into three, replacing the stage-suffix `if` branch in
       `apps/sisyphus-admin/sst.config.ts` and its siblings: `sst.config.ts` (application stack),
       `sst-bootstrap.config.ts` (parameters, CI identity provider, deploy role), `sst-install.config.ts`
       (no-op, providers only) — for `apps/sisyphus-admin`, `apps/sisyphus-control-plane` and
       `apps/sisyphus-executor`. Configuration is read inside `app()` / `run()`, never at module scope, and every
       import is a dynamic `await import()`; the install config's providers must be pinned to exactly the
       versions the application config declares (FR-199, FR-202, R16)
-- [ ] T169 [P] Wire the filtered typecheck: `ignored-error-codes.json` and `loosely-type-checked-files.json` in
+- [x] T169 [P] Wire the filtered typecheck: `ignored-error-codes.json` and `loosely-type-checked-files.json` in
       each of `apps/sisyphus-admin`, `apps/sisyphus-control-plane`, `apps/sisyphus-executor` and
       `packages/sisyphus-infra`, with the target changed to `tsc --noEmit | loose-ts-check` in each
       `project.json`. `.sst/**/*.ts` goes in all three of `tsconfig.json` `include`, the loose-glob list, and
       `eslint.config.mjs` `ignores`. `sisyphus-infra`'s ignored set stays narrow — only what its use of the
       ambient globals raises. `sisyphus-api` and `sisyphus-integration-jira` get neither file (FR-198, SC-061)
-- [ ] T170 Update each deployable's `project.json` so **every** command naming a stack also names its config
+- [x] T170 Update each deployable's `project.json` so **every** command naming a stack also names its config
       file — `deploy`, `bootstrap`, `destroy` and `unlock`. A `destroy` that omits it loads the wrong stack's
       configuration and mis-plans the teardown. Add the install config to `postinstall` in each deployable's
       `package.json`, so a fresh clone can typecheck (FR-199)
-- [ ] T171 Run quickstart.md Scenario 16 — the clean-clone, no-credentials typecheck, the install/application
+- [x] T171 Run quickstart.md Scenario 16 — the clean-clone, no-credentials typecheck, the install/application
       provider-parity diff, the grep for injected providers, and the deliberate break of a policy-document
       helper to prove its test actually fails. T140 covers Scenarios 1–13; this covers 14–16
 
@@ -818,42 +818,46 @@ a delegated run go from launch to draft PR.
 
 ### The trunk — nothing below this line has a task in Phases 1–14
 
-- [ ] T172 Control-plane Lambda entry point at `apps/sisyphus-control-plane/src/main.ts`, exporting the
+- [x] T172 Control-plane Lambda entry point at `apps/sisyphus-control-plane/src/main.ts`, exporting the
       `handler` symbol that `apps/sisyphus-control-plane/sst.config.ts:114` already declares as
       `src/main.handler` and passes to the function at `:225`. **The file does not exist**, so the deployed
       function has no handler to load. It dispatches by event to `jobs/admit-workflow`, `drain-queue`,
       `start-workflow`, `teardown-workflow`, `reconcile`, `integration-tick`, `sync-schedules` and
       `bootstrap-admins` — all built and tested (536 tests), all currently unreachable (FR-203)
-- [ ] T173 Executor entry point — replace the 22-line scaffold at `apps/sisyphus-executor/src/main.ts`, whose
+- [x] T173 Executor entry point — replace the 22-line scaffold at `apps/sisyphus-executor/src/main.ts`, whose
       own doc comment says "Bootstrap phases, the agent adapter and report-back land in later tasks". It must
       parse the job envelope, run the bootstrap phases, resolve skills, start the agent, run the output
       pipeline and report back, then suspend or tear down — composing `bootstrap/`, `agent/`, `session/`,
       `output/`, `report/`, `caps/`, `skills/`, `supervision/` and `workflows/`, **none of which it imports
-      today** (FR-203)
-- [ ] T174 [US1] Delegated-run orchestrator at `apps/sisyphus-executor/src/workflows/delegated.ts` —
+      today** (FR-203). **Correction, 2026-08-07:** this shipped checked with no colocated
+      `main.test.ts`, a breach of Constitution III, which the control plane's identical entry point did not
+      have. Found by cross-artifact analysis, not by any gate. Closed the same day — 29 tests, `main.ts`
+      unchanged. The task stays checked because its subject was delivered; the note stays because a checked
+      task that was in breach is the only evidence that the gate did not catch it (see T228)
+- [x] T174 [US1] Delegated-run orchestrator at `apps/sisyphus-executor/src/workflows/delegated.ts` —
       `apps/sisyphus-executor/src/workflows/` has `autonomous.ts` and thirteen siblings but no delegated path,
       so US1, the MVP story, has no module composing it. tasks.md:339 asserts "A delegated run completes end
       to end" as a Phase 4 checkpoint with no task behind it (FR-203)
-- [ ] T175 Call the supervision loop from the executor entry point: `watchForInterruption`
+- [x] T175 Call the supervision loop from the executor entry point: `watchForInterruption`
       (`apps/sisyphus-executor/src/session/interruption.ts:128`) has no production caller, so the one
       `suspend()` path it guards is unreachable. **Nothing anywhere imports `session/`.** Two source comments
       already record this — `apps/sisyphus-executor/src/supervision/poll.ts:7` and
       `packages/sisyphus-api/src/server/workflow/supervision.ts:29` both read "`suspend()` is fully specified
       and never invoked" (FR-203, FR-054)
-- [ ] T176 Start the heartbeat loop from the executor entry point — `report/client.ts` defines `heartbeat` at
+- [x] T176 Start the heartbeat loop from the executor entry point — `report/client.ts` defines `heartbeat` at
       `:101` and no non-test code calls it. Without it, `reconcile.ts`'s heartbeat-lapse detection
       (`HEARTBEAT_LAPSE_MS`, `reconcile.ts:76`) will park every live run (FR-048)
-- [ ] T177 [US11] Call `notifyWorkflowEvent` from the state-transition path —
+- [x] T177 [US11] Call `notifyWorkflowEvent` from the state-transition path —
       `apps/sisyphus-control-plane/src/notify/delivery.ts:177` has no production caller, and **no job imports
       `notify/` at all**. T084 and T085 built `slack.ts` and `coalesce.ts`; nothing invokes the delivery entry
       point they serve, so no notification has ever been sent (FR-136, FR-141)
-- [ ] T178 [US4] Call `runAutonomousWorkflow` (`apps/sisyphus-executor/src/workflows/autonomous.ts:195`) and
+- [x] T178 [US4] Call `runAutonomousWorkflow` (`apps/sisyphus-executor/src/workflows/autonomous.ts:195`) and
       `runReviewWorkflow` from the executor entry point, selected by workflow type. Both are tested and both
       are reachable only from their barrel and their tests (FR-203)
 
 ### Dead schema — a tested producer and a tested consumer with nothing joining them
 
-- [ ] T179 Mount a skill-reference report procedure on the machine router
+- [x] T179 Mount a skill-reference report procedure on the machine router
       (`packages/sisyphus-api/src/server/machine/router.ts`, which mounts twenty procedures and none for
       skills), and bind the executor's `SkillReferenceReporter` callback to it in
       `apps/sisyphus-executor/src/report/client.ts`. `reportSkillReferenceInput`
@@ -861,7 +865,7 @@ a delegated run go from launch to draft PR.
       digests and calls `report(...)` at `skills/resolve.ts:253,313,360` into a callback bound to nothing.
       `workflow.skillReferences` reads the table against live Postgres and can only ever return empty, so
       T134 is complete over a table no run will populate (FR-055, Scenario 12)
-- [ ] T180 [US4] Make external-action idempotency durable — mount a report procedure for
+- [x] T180 [US4] Make external-action idempotency durable — mount a report procedure for
       `reportExternalActionInput` (`packages/sisyphus-api/src/schemas/machine.ts:145`, imported by nothing) and
       write through the `external_actions` unique index at
       `packages/sisyphus-api/src/db/schema/supervision.ts:151`. Today retry safety is
@@ -872,26 +876,26 @@ a delegated run go from launch to draft PR.
 
 ### Requirements with no implementation, or none that meets them
 
-- [ ] T181 Implement the pause idle ceiling — `'on-idle-ceiling'`
+- [x] T181 Implement the pause idle ceiling — `'on-idle-ceiling'`
       (`apps/sisyphus-executor/src/session/suspend.ts:57`) is a union member whose only consumer is
       `plan.computeRelease === 'immediate'` at `:252`, i.e. it means "don't release" and nothing else. No
       threshold constant, no timer, no `paused_at`, no sweep. Add the threshold, record when a pause began,
       and extend `apps/sisyphus-control-plane/src/jobs/reconcile.ts` to park a run paused past it — its
       `ACTIVE_STATES` already includes `paused` (`:88`) but it only acts on lease loss and heartbeat lapse
       (FR-049, Scenario 5.6)
-- [ ] T182 [P] Seed a `paused` workflow in `apps/sisyphus-control-plane/src/jobs/reconcile.test.ts` — `paused`
+- [x] T182 [P] Seed a `paused` workflow in `apps/sisyphus-control-plane/src/jobs/reconcile.test.ts` — `paused`
       is in the fixture's own state union at `:43` and appears in no seed in the file, so that arm of
       `ACTIVE_STATES` is entirely untested
-- [ ] T183 Fix FR-104's determinism — `apps/sisyphus-control-plane/src/jobs/integration-store.ts:283-286`
+- [x] T183 Fix FR-104's determinism — `apps/sisyphus-control-plane/src/jobs/integration-store.ts:283-286`
       concedes the requirement is unmet: "the deterministic lowest-`integrations.id` winner holds **when the
       ticks are ordered**; where a higher-id integration claimed first, the claim stands." FR-104 forbids
       exactly that tick-timing dependence. Resolve the winner by the stated rule regardless of tick order, and
       test both branches — `integration-tick.test.ts:575-588` ticks sequentially and would pass if reversed
-- [ ] T184 [P] Consume `onParked` / `parkedAttempts` outside `session/` (FR-082) — both are implemented and
+- [x] T184 [P] Consume `onParked` / `parkedAttempts` outside `session/` (FR-082) — both are implemented and
       unit-tested in `apps/sisyphus-executor/src/session/park.ts` and `restore.ts`, with **zero hits outside
       that directory**. The continuing heartbeat and the panel's "waiting on storage" state both depend on
       them; the phrase appears in three executor comments and nowhere in `apps/sisyphus-admin/src`
-- [ ] T185 [P] Enforce the supervision budget terms as real timeouts —
+- [x] T185 [P] Enforce the supervision budget terms as real timeouts —
       `apps/sisyphus-executor/src/supervision/budget.ts:47-70` declares five terms and only `POLL_INTERVAL_MS`
       is wired to anything (`supervision/poll.ts:150`). `PULL_ROUND_TRIP_MS`, `QUIESCE_BUDGET_MS`,
       `SNAPSHOT_BUDGET_MS` and `ACKNOWLEDGE_BUDGET_MS` are passed as a timeout to no operation, so the budget
@@ -899,22 +903,22 @@ a delegated run go from launch to draft PR.
 
 ### Tests that pass without asserting the requirement
 
-- [ ] T186 [P] Assert the seven launch values `claimAndStart` copies onto the workflow row
+- [x] T186 [P] Assert the seven launch values `claimAndStart` copies onto the workflow row
       (`apps/sisyphus-control-plane/src/jobs/integration-store.ts:399-419`) — `workspaceVersionId`,
       `setupBundleVersionId`, `model`, `instanceType`, `purchaseMode`, `turnCap`, `spendCap`. Its colocated
       test asserts only `state`, `initiatedByUserId`, `executionProfileVersionId` and `ticketReference`;
       deleting `turnCap` and `spendCap` from the insert leaves the whole suite green (FR-101)
-- [ ] T187 [P] Test FR-125's actual claim — that a pin survives an edit landing **mid-run**. Both existing
+- [x] T187 [P] Test FR-125's actual claim — that a pin survives an edit landing **mid-run**. Both existing
       tests (`packages/sisyphus-api/src/server/admin/workspaces.test.ts:331` and `profiles.test.ts:448`) are
       sequential seed-edit-assert and prove append-only versioning, not concurrency. The machinery is already
       in the repo: reuse the `createGate` / `pg_stat_activity` choreography from
       `packages/sisyphus-api/src/server/workflow/start.test.ts:142-155`
-- [ ] T188 [P] Test SC-021 — read a completed run back and reconstruct its exact launch configuration. No test
+- [x] T188 [P] Test SC-021 — read a completed run back and reconstruct its exact launch configuration. No test
       does this today, and the production read path cannot: `queries.ts:146,194,374` join
       `executionProfiles` (the mutable current row, for its name) and never `executionProfileVersions`, so
       `findProfileVersion` is only ever called with `profile.currentVersionId`. This needs a resolver change,
       not only a test
-- [ ] T189 Replace the constant-arithmetic latency tests with measured ones (FR-205) —
+- [x] T189 Replace the constant-arithmetic latency tests with measured ones (FR-205) —
       `apps/sisyphus-control-plane/src/notify/coalesce.test.ts:34-49` asserts a function equals the sum of its
       own addends and that `80_000 < 120_000`; `apps/sisyphus-executor/src/supervision/budget.test.ts` does
       the same for the 10-second pause ceiling. Keep the budgets as declared intent, but add at least one test
@@ -922,28 +926,421 @@ a delegated run go from launch to draft PR.
 
 ### The gate itself
 
-- [ ] T190 **Make CI run the database-backed suites** (FR-204) — `.github/workflows/ci.yml` declares no
+- [x] T190 **Make CI run the database-backed suites** (FR-204) — `.github/workflows/ci.yml` declares no
       `services:`, no Postgres, and never sets `SISYPHUS_TEST_DATABASE_URL`. Roughly a third of the suite's
       assertions therefore never execute in CI while it reports green, including the exactly-once unique-index
       proof, the branch-lock advisory-lock proof, the iteration `CHECK` constraint, spend scoping and the
       skill-digest readback. Add a Postgres service, set the variable, run migrations, and make the guarded
       suites **fail rather than skip** when the variable is absent **in CI** — skipping locally stays correct
-- [ ] T191 [P] Fix the five broken commands in `specs/002-sisyphus-workflow-platform/quickstart.md` (SC-065):
+- [x] T191 [P] Fix the five broken commands in `specs/002-sisyphus-workflow-platform/quickstart.md` (SC-065):
       `sisyphus-control-plane:e2e` (`:185`) and `dev` on `sisyphus-control-plane` (`:38`) name targets that
       project does not have; `sisyphus-executor:spike-stdin` (`:57`), `sisyphus-admin:spike-log-stream`
       (`:70`) and `sisyphus-executor:spike-restore` (`:83`) name targets that exist nowhere — so the entire
       "reproduce the spikes" section is unrunnable. Either add the targets or correct the guide
-- [ ] T192 [P] Add a check that fails when a shipped module has no production caller (SC-063) — the condition
+- [x] T192 [P] Add a check that fails when a shipped module has no production caller (SC-063) — the condition
       that hid T172–T180. Knip's unused-export detection covers most of it; the residue is symbols a barrel
       re-exports and nothing imports. Anything legitimately unreferenced gets a documented `knip.json` entry,
       never a silent pass
-- [ ] T193 Re-run the full gate after this phase — `pnpm nx affected -t lint typecheck test design-lint
---base=main` plus `pnpm qlty:diff`, **with `SISYPHUS_TEST_DATABASE_URL` set**, and record the skipped
-      count as zero. The previously reported 4,930-passing figure was measured with the variable set; the
-      figure CI produces is not the same number
+- [x] T193 Re-run the full gate after this phase — **result, 2026-08-06**:
+      `nx run-many -t lint typecheck test design-lint` green for all **14 projects** with
+      `SISYPHUS_TEST_DATABASE_URL` set and `--skip-nx-cache`. **5,695 passing, 7 skipped.**
+
+      | Project                  | Passing |
+      | ------------------------ | ------- |
+      | `sisyphus-admin`         | 2,306   |
+      | `sisyphus-api`           | 1,519   |
+      | `sisyphus-executor`      | 908     |
+      | `sisyphus-control-plane` | 528     |
+      | `sisyphus-integration-jira` | 165  |
+      | `sisyphus-infra`         | 142     |
+      | `sisyphus-notify`        | 127     |
+
+      The skipped count is **7, not zero, and that is correct** — they are the S3 spike suite, which needs a
+      PgBouncer in `pool_mode = transaction` rather than a plain Postgres (`SPIKE_S3_DIRECT_URL` /
+      `SPIKE_S3_POOLED_URL`). The spike is closed; the harness is retained so its findings stay reproducible.
+      Every suite gated on `SISYPHUS_TEST_DATABASE_URL` now runs. The measurement that matters: `sisyphus-api`
+      alone reports **951 passing / 568 skipped** without the variable and **1,519 / 0** with it, so 568
+      assertions that CI previously never executed now do. `pnpm knip:orphans` exits 0 with an empty report.
+      `design-lint` 0 errors / 31 pre-existing warnings
 
 **Checkpoint**: a delegated run launched from the panel reaches a draft PR on a real instance — quickstart.md
 Scenario 2, which has never been executable.
+
+---
+
+## Phase 19: The ports behind the trunk (FR-203)
+
+_Added 2026-08-06, **during** the implementation of Phase 18 and because of it._ Wiring the entry points made a
+second layer of absence visible that no audit of the built tree had found, because from the outside a port with
+a type, a barrel entry and a passing fake looks exactly like a port with an implementation. Phase 18's premise
+was that Phases 1–14 built the parts and left out the trunk. That was true and incomplete: **some of the parts
+are types.**
+
+`T173` composes bootstrap → agent → output → report faithfully, and then a delegated run reports terminal
+`failed` naming the port it could not find. That is the correct behaviour and it was deliberately chosen over
+stubbing a proposal that would report success having done nothing — but it means the MVP boundary moves again.
+
+**Goal**: the composition Phase 18 built has something real at the end of every wire.
+
+**Independent test**: a delegated run launched from the panel opens a draft PR.
+
+**This phase is cut by plan.md's four rules** (see _How this feature's work must be cut_), because it exists as
+a direct consequence of their absence. Applied here they mean:
+
+1. **The checkpoint below is T213, a task** — not the sentence above it. The Phase 4 checkpoint claimed "a
+   delegated run completes end to end" with no task behind it, and stayed false through eleven phases.
+2. **Every port or slot names the task that fills it.** T194 fills `DeveloperPort`, T195 fills `Forge`, T196
+   fills `FindingsPublisher` / `TicketPort` / `IntegrationPlanner`, T197 fills `InstanceMetadataReader`. No
+   task in this phase may leave a new unfilled port without adding its filling task in the same breath.
+3. **Nothing is done while its subject has no production caller.** `pnpm knip:orphans` decides this, not
+   review.
+4. **Each gate is verified against a planted failure** — T215–T217, because three gates in this feature passed
+   convincingly while measuring nothing.
+
+**Ordering**: T194 and T195 first and in parallel — they are the entire distance between the system and
+Scenario 2. The port tasks T194–T198 then gate the eleven assembly tasks (T213, T214, T218–T226), which are the
+only items in this phase with hard predecessors: every one of them names at least one task it cannot start
+without, because a story's path cannot be run through a port that has no implementation. Everything else — the
+loose ends, the coverage gaps and the three gate verifications — can follow in any order.
+
+### The MVP blockers — nothing here has ever had an implementation
+
+- [x] T194 [US1] Agent-frame → `DevelopmentProposal` bridge. `src/agent` starts the agent, streams frames and
+      injects turns; nothing parses that frame stream into a proposal. `DeveloperPort` is a type with no
+      implementation, so `dispatchWorkflow` halts. This is the single largest remaining gap and US1 cannot
+      complete without it (FR-060, FR-203). **Implemented 2026-08-07, not yet closed**: five modules in
+      `src/agent/` (`proposal-block`, `development-proposal`, `develop-turn`, `frame-tap`, `developer-port`),
+      179 tests. The agent answers in a per-request nonce-delimited block, so pass 2 of the autonomous loop
+      cannot read pass 1's answer and the example inside the instruction cannot answer for the agent. No field
+      is ever defaulted — a missing one is reported as missing. **Closed 2026-08-07**: `assembleRun` now
+      defaults `ports` to `agentWorkflowPorts`, which builds this port from the running agent, and
+      `knip:orphans` is clean — rule 3's production caller is mechanically proven rather than asserted
+- [x] T195 [US1] `Forge` implementation — `apps/sisyphus-executor/src/delivery/forge.ts` defines the port and
+      nothing implements it, so **no pull request can be opened by any workflow type**. With T194 this is the
+      pair that makes quickstart Scenario 2 executable (FR-060). **Implemented 2026-08-07, not yet closed**:
+      `forge-http`, `forge-error`, `forge-retry`, `forge-repository`, 227 tests in `src/delivery`. Idempotency
+      proved against a stateful fake host across four paths including the lost-response 502 and two independent
+      clients. `branchHead` maps **only** 404 to `undefined`, because `pull-request.ts` renders `undefined` to
+      the engineer as "your work never left the instance". **Closed 2026-08-07** together with T229, which
+      gave it a credential, and T230, which gave it the entry list it delivers over
+- [x] T229 [US1] Give the forge a credential and an API base — **discovered by T195, and the reason T194 + T195
+      alone do not reach Scenario 2**. `createHttpForge` takes `apiBaseUrl` and a `credential` accessor and
+      neither exists in the executor. The credential is **not** `envelope.scopedCredential`: that one is
+      workflow-scoped and machine-surface-only (FR-037) and is listed in `ENVELOPE_ONLY_KEYS`. FR-075 delivers
+      it by setup bundle, and `contracts/setup-bundle.md` says `credentials/` holds "whatever setup.sh needs" —
+      **deliberately unnamed**, so nothing can read it by path and naming a file would be a bundle-contract
+      change every existing client bundle would have to satisfy. Read it from git instead: the bundle has
+      already had to make git able to clone and push, so `git credential fill` knows it whatever form the
+      bundle chose. Lives in `src/run/`, never in `src/delivery/`, so `git.ts`'s read-only allowlist is not
+      weakened by a credential-bearing subcommand. Resolve lazily — it does not exist until bootstrap phase 5.
+      Adds `SISYPHUS_FORGE_API_URL`, which must also be set at **every** site that builds the instance
+      environment; `jobs/start-workflow.ts` documents `SISYPHUS_MACHINE_SURFACE_URL` as "the only URL the
+      instance is told about" and that comment stops being true (FR-072, FR-075). **Done 2026-08-07**, with
+      **two caveats that outlive the task**. (1) `SISYPHUS_FORGE_API_URL` has no home in this repository — the
+      executor's deploy-time config is loaded from an SSM blob an operator populates and that is deliberately
+      not committed (FR-202) — so **an operator must add it to the stage parameter and to the launch unit, or
+      the first real run fails at boot naming the variable**. This is the single manual step between here and
+      T213. (2) The credential is registered as a `KnownSecret` on the forge's own redactor, but **not** on the
+      run-wide one: `runExecutor` snapshots `options.secrets` at step 1, before bootstrap, and a phase-5
+      credential structurally cannot be in an array taken at phase 0. Closing that needs `secrets` to become a
+      provider function. Pre-existing and wider than the forge — `assembleRun` passes no `secrets` at all
+      today, so no bundle-installed credential reaches the run-wide redactor (see T231)
+- [x] T230 [US1] Build the delivery entry list — the other half of the wiring T194 and T195 cannot supply.
+      `DelegatedPorts.entries` is `readonly PullRequestSetEntry[]` and nothing constructs it, so the delegated
+      workflow has both ports and still cannot deliver. Two fields make it more than a mapping:
+      `preExecutionRemoteSha` must be probed from the forge **before** the agent runs (a value reconstructed
+      afterwards is what `staleness.ts` exists to catch), and `wasChanged` must be a real observation of the
+      working tree — `false` opens no pull request at all under FR-115, so a false negative silently discards
+      the agent's work. Per-entry `baseBranch` is that repository's, never the primary's (FR-109). **Done
+      2026-08-07.** `wasChanged` is true if the tree is dirty **or** `HEAD` has moved off the checked-out
+      commit — a tree-only test reads a properly-committed pass as "did nothing", which is the false negative
+      that throws the work away — and unreadable git counts as changed, deliberately asymmetric because a
+      wrong `true` fails loudly in the delivery step while a wrong `false` is never mentioned again. It is a
+      getter that throws until the after-step has run, so a caller who forgets the wrap gets a named failure
+      rather than a silent discard. **`preExecutionRemoteSha` is `undefined` on every run today and that is
+      correct**: the shared work-branch name comes from the agent applying `sisyphus-dev`'s prose rule during
+      the pass, so it does not exist beforehand, and probing afterwards would return the sha the agent just
+      pushed — `noPushedWorkError` would then discard every successful run's pull request claiming it pushed
+      nothing. The forge's other two checks do the verification
+- [ ] T231 Make the known-secret list a provider rather than a snapshot (FR-072, FR-089). **Found while
+      closing T229, pre-existing and wider than the forge.** `runExecutor` reads `options.secrets` once at
+      step 1 — before bootstrap — and hands it to the segment writer, the summary sanitiser and the park
+      report. Credentials the setup bundle installs arrive at **phase 5**, so they structurally cannot be in
+      an array taken at phase 0. Worse in practice: `assembleRun` passes **no** `secrets` at all, so
+      `secrets = []` on every real run and **only pattern matching in `output/secret-patterns.ts` stands
+      between a bundle-installed credential and the log the panel streams**. Known-value redaction is what
+      catches a credential no pattern anticipates, which is exactly the case a client-supplied bundle
+      presents. Make `secrets` a `() => readonly KnownSecret[]` resolved at each redaction site, register the
+      forge credential and every other bundle-installed value through it, and verify with a planted secret
+      that reaches a log segment (rule 4)
+- [ ] T196 [P] [US5] `FindingsPublisher` implementation, and [US4] `TicketPort` / `IntegrationPlanner` — the
+      same absence for the review and autonomous paths. `runReviewWorkflow` and `runAutonomousWorkflow` are
+      tested and dispatched and both halt at their port
+- [ ] T197 [P] `InstanceMetadataReader` against IMDS — the interruption watch is wired and tested end to end
+      through a fake reader, but the real notice source is assumed, not read. Spike S2 recorded the notice
+      format as unobserved. Until this lands, `watchForInterruption` runs against
+      `createQuietMetadataReader()` and no reclamation is ever detected (FR-054)
+
+### Surfaces a caller needs and no package publishes
+
+- [ ] T198 Package the FR-163 prompt redactor. It lives at `apps/sisyphus-executor/src/output/redact.ts` and
+      no package exports it, so `apps/sisyphus-control-plane/src/context.ts` defaults to
+      `createRefusingPromptRedactor()` and **every integration tick fails loudly in production**. Move the
+      standard into a shared package and wire the one-line override (FR-163, FR-019)
+- [x] T199 Connect `/admin/integrations` to the router. **Corrected on investigation:** the router was already
+      mounted at `appRouter.admin.integrations` and all nine resolvers existed — the "not mounted in this
+      deployment" message the screen displayed was false, and the three source comments asserting it were
+      stale. The real gap was app-side: a placeholder client and empty picker data. Two resolvers were also
+      reachable from nothing — `runs`, which FR-105 requires so a silently-failing connector is detectable, and
+      `delete`, which FR-097 names among the six admin actions (FR-094..FR-108)
+- [x] T206 Promote `apps/sisyphus-control-plane/src/notify/` into `packages/sisyphus-notify`, and inject the
+      notifier into `apps/sisyphus-admin/src/server/machine-dependencies.ts`. Both halves of the notification
+      path now exist and cannot reach each other: delivery lives inside the control-plane **app**, while the
+      machine surface that emits five of the nine events is mounted by **sisyphus-admin**. An app must not
+      depend on another app, so the shared half becomes a package. Until this lands, `SisyphusDependencies`
+      leaves `notifier` absent and those five events are a silent no-op — the correct default, not a working
+      system (FR-136, FR-141)
+- [ ] T200 [P] Give validation runs a way to authenticate (FR-147). The `validation_runs` table, the outcome
+      enum, the admin surface and the control-plane job all exist; what is missing is **authentication, not a
+      procedure**. `scoped_credentials.workflow_id` is `not null`, `workflowIdFromSubject` deliberately returns
+      `undefined` for `validation:<id>`, and `credential-verification.ts` documents refusing that subject on
+      purpose — so a validation-mode executor cannot reach the machine surface at all and halts with a named
+      error. Needs: a credential path for validation subjects (nullable `workflow_id` plus a rework of the
+      `scoped_credentials_live_key` partial index, or a separate store); a `validationProcedure` builder; a
+      `VALIDATION_OUTCOMES` tuple in `src/enums/` — `validation_outcome` is the only pgEnum with no mirroring
+      tuple, which breaks that module's own stated invariant; and a report input schema
+- [ ] T201 [P] Brand `skillReferences.unavailableReason` as `SanitisedText` — every other free-text field on
+      the machine surface is branded, and this one can embed a raw `readFile` error message. Touches the
+      `SkillReferenceReporter` signature across the executor's workflow files (FR-045, FR-089)
+- [ ] T202 [P] Carry `bundleId` and `name` on the job envelope's setup-bundle reference — the control plane
+      sends `{s3Key, contentDigest, version}` and the executor bridges the gap with the s3Key, so an FR-088
+      bundle failure names a key rather than the bundle an administrator would recognise (FR-088)
+- [ ] T203 [P] Wire `.github/workflows/deploy.yml` to `getDeployRoleName` — the deploy workflow runs
+      `nx run <app>:deploy` with no role assumption, so the bootstrap role and `assumeDeployRole` exist with no
+      CI caller. The single-constant discipline T167 established only pays off once CI uses it (FR-200)
+
+### Built, tested, and mounted nowhere — found by the assembly gate the moment it first ran
+
+- [x] T207 [US1] Mount the log viewer. `apps/sisyphus-admin/src/components/log-viewer/` is nine files —
+      SSE consumption, sequence reconciliation, segment store, the lot — with **zero importers**.
+      `components/workflows/log-viewer-slot.tsx` is the named slot it belongs in, and its own doc comment says
+      "when T077 lands, the detail panel passes `<LogViewer workflowId={id} />` as children". T077 is checked:
+      it built the viewer. Nothing mounted it, and no task said to. Live output is US1's core promise, so
+      SC-002 is currently unmet on the screen even though the transport, the viewer and the slot all exist
+      (FR-046, SC-002)
+- [x] T208 [US2] Mount the supervision controls. `apps/sisyphus-admin/src/components/supervision/` —
+      `controls.tsx`, `correction-list.tsx`, `supervision-status.ts` — has zero importers.
+      `components/workflows/supervision-slot.tsx` renders "not mounted" and states that the detail panel will
+      pass the controls as children when Phase 7 lands. Phase 7 landed and built them. Pause, resume, stop and
+      mid-run correction are therefore unreachable from the panel (FR-015, FR-049, SC-003)
+
+_Both slots are honest — each says "not mounted" rather than rendering a blank region — so this was never
+concealed. It was simply never anybody's task. That is the same defect as T172–T180, at the other end of the
+system, and it is why T192 belongs in the gate rather than in a review._
+
+### Coverage the panel convention cannot currently reach
+
+- [ ] T204 [P] Panel-level query-state coverage for `UsersPanel`, `ProfilesPanel`, `WorkspacesPanel`,
+      `IntegrationsPanel` and `ProfileAccessPanel`. These five hold their own queries, and per the existing
+      convention their tests assert only "is a component" — so their loading, empty and error states are
+      covered at the primitive and presentational-card level but never as the panel renders them.
+      `NotificationPreferencesPanel` stubs the hooks and renders; extend that pattern (FR-201)
+- [ ] T205 [P] Surface read failures on `/workflows/new`'s admin-only ad-hoc path — a failed `adHocWorkspaces`
+      or `bundles` read currently returns empty selects, which is the same "empty claim on a failed query"
+      defect T155 fixed everywhere else (FR-201)
+
+### Loose ends the implementation reports named and no task yet owns
+
+- [ ] T209 [P] Add a pending-supervision-command field to the workflow read path. `workflow.byId` reports the
+      recorded state, so the window between issuing Pause and the executor acknowledging it is visible **only
+      to the tab that issued it** — a second operator watching the same run sees `RUNNING` where the first sees
+      `PAUSE REQUESTED`. Honest, but less informative than FR-015 intends. This rides on `workflow.byId`
+      alongside `watching`, `storagePark` and `launchConfiguration`, which is the same argument all three used
+      (FR-015)
+- [ ] T210 [P] Give the pause idle ceiling one home. `PAUSE_IDLE_CEILING_MS` is 30 minutes in **both**
+      `apps/sisyphus-executor/src/session/idle-ceiling.ts` and
+      `apps/sisyphus-control-plane/src/jobs/reconcile.ts` — the executor arms the timer, the control plane
+      backstops it, and the two agree only by inspection. Both files document the duplication. Its shared home
+      is `packages/sisyphus-api`, which neither task was permitted to edit at the time (FR-049)
+- [ ] T211 [P] Fix the stale reference in `apps/sisyphus-control-plane/src/dispatch.ts` (~line 28) naming
+      `buildControlPlaneTickSpecification`, which no longer exists — the tick payload is built inline in
+      `createScheduler` from the exported `CONTROL_PLANE_TICK_JOB`. Also correct
+      `packages/sisyphus-infra/src/scheduler.ts` (~line 126), which still lists admin bootstrap among the tick's
+      responsibilities; T172 deliberately excluded it, because running it every minute would reinstate a
+      deactivated bootstrap admin within the minute
+- [ ] T212 **Out of scope for this feature — do not do it here.** cspell is configured (`cspell.json`, ~140
+      words) and wired to nothing: no devDependency, no script, no CI step, so the config and every
+      `cspell:ignore` directive in source are editor-only. That contradicts the constitution's "Knip and cspell
+      configurations are workspace-level", and the contradiction is real — but **gating cspell is a
+      workspace-wide change, not a Sisyphus one**, and it must not ride in on this feature. A trial wiring on
+      2026-08-07 proved why and was reverted: 91 distinct unknown words across ~40 hand-written files, and the
+      large majority sit outside these seven members entirely — third-party package names in
+      `pnpm-workspace.yaml`, shell locals under `tooling/`, generic ignore-list fragments in a skill document.
+      Turning the gate green would have meant editing unrelated tooling in a Sisyphus change. Findings kept so
+      the real piece of work does not rediscover them: the categories above want **file-scoped
+      `cspell:ignore`**, not global dictionary words (particularly the deliberate fake-secret fixtures in
+      `apps/sisyphus-executor/src/output/secret-patterns.ts`, where a global entry would legitimise a token
+      shape repo-wide); cspell's **bundled dictionaries should be enabled before a single word is added by
+      hand**; and `"useGitignore": true` beats a hand-listed `ignorePaths`, because one untracked
+      `tsconfig.tsbuildinfo` contributed 3,240 of the first run's 3,402 hits. Two defects found and **left
+      unfixed** with the revert: `scripts/audit-cspell.mjs` `JSON.parse`s a file that is JSONC, so it has
+      thrown `SyntaxError` on every invocation since `cspell.json` gained its first comment and has therefore
+      never run — a fourth check in this repository that looks present and measures nothing — and its file walk
+      scans `*.tsbuildinfo`, counting words kept alive only by build output as live. Its real dead-word count is
+      **28, not the 32 recorded earlier**, plus a `PgBouncer`/`pgbouncer` case-duplicate
+
+### Assembly tasks — one per story whose path does not yet run (rule 1)
+
+_Each of these IS its story's checkpoint. None may be satisfied by its components passing._
+
+_**Completed 2026-08-07.** This subsection first shipped with two tasks against thirteen stories — the phase
+written to enforce rule 1 reproduced the defect it was written to prevent. The set below is now complete: every
+user story US1–US13 has exactly one assembly task naming the quickstart scenario that runs its path, and the
+prose checkpoints at lines 230, 339, 367, 393, 431, 462, 490, 540, 563, 581 and 601 are superseded by them —
+none of those eleven sentences ever had a task behind it. The mapping, in scenario order: Scenario 1 → T226
+(US7 + US12 + US13, which plan.md ships as one slice and quickstart covers as one scenario), Scenario 2 → T213
+(US1), Scenario 3 → T223 (US9), Scenario 4 → T225 (US11), Scenario 5 → T218 (US2), Scenario 6 → T219 (US3),
+Scenario 7 → T224 (US10), Scenario 8 → T214 (US8), Scenario 9 → T220 (US4) and T221 (US5) — one scenario, two
+halves, two verdicts — Scenario 10 → T222 (US6). No story was left without a task: not one of the thirteen has
+a checked task that proves its path today, so there was no ceremonial duplicate to avoid. **T140 stays** — it is
+the full-suite sweep over all thirteen scenarios in one sitting, and these eleven are the per-story verdicts it
+cannot give. All eleven need a deployed stage and none is a CI target — each says so in its own words, because a
+recorded manual run is the honest verdict here and a green tick would be a fabricated one._
+
+- [ ] T213 [US1] **Run quickstart Scenario 2 end to end** on a personal stage and record the result against all
+      ten of its checks. This is the Phase 4 checkpoint that has never been executable, now written as the task
+      it always needed to be. Requires T194 and T195. It provisions a real instance and opens a real draft pull
+      request, so it cannot run in CI and deliberately has no `e2e` target — the verdict is a recorded run, not
+      a green tick (SC-001, SC-002, SC-007, SC-009, SC-037, SC-040)
+- [ ] T214 [US8] **Run quickstart Scenario 8 end to end** — a labelled ticket discovered by a scheduled poll,
+      claimed exactly once, driven to a draft PR and written back. Requires T196 (`TicketPort`,
+      `IntegrationPlanner`) and T198 (the prompt redactor, without which every integration tick refuses). The
+      integration's components are all built and tested; no tick has ever run end to end. Label corrected from
+      `[US4]` on 2026-08-07: Scenario 8 is the Jira integration, Phase 10 is US8, and SC-023..SC-026 are US8's
+      criteria — two of the three signals agreed and the label was the outlier. It needs a stage and a real
+      Jira project, so like T213 it cannot run in CI (SC-023..SC-026)
+- [ ] T218 [P] [US2] **Run quickstart Scenario 5 end to end** — pause a long-running prompt mid-execution,
+      correct it, resume, and record all seven steps. What running it proves is the thing no unit suite can:
+      that the pause is observed by a live agent process rather than by a fixture — paused inside 10s, no
+      further output, the process still alive, the snapshot registered **before** the acknowledgement, and the
+      `supervision_commands` row moving `pending` → `acknowledged`. Requires T194 (without `DeveloperPort`
+      there is no agent to pause) and the spike S1 turn-injection path closed by T011. Step 6's idle-ceiling
+      park exercises T181 and step 7's concurrent pause/resume exercises T208's mounted controls, both of which
+      are checked and neither of which has been run against a real instance. Supersedes the prose checkpoint at
+      line 431. Not a CI target: it holds a real instance open for minutes and measures wall-clock latency, so
+      the verdict is a recorded run with its timings, not a green tick (SC-003, SC-004)
+- [ ] T219 [P] [US3] **Run quickstart Scenario 6 end to end** — force-terminate an instance mid-run, resume on
+      a fresh one, and prove the conversation and the uncommitted working tree both survive. Requires T194 and
+      T195 (Scenario 6's own note says it requires Scenario 2 to run first), and step 2 additionally requires
+      **T197**: until the real `InstanceMetadataReader` lands, `watchForInterruption` runs against
+      `createQuietMetadataReader()` and no spot reclamation is ever detected, so that step tests nothing. Must
+      be run on interruptible capacity with a genuine reclamation, not a simulated signal. Step 3's successor
+      chain reads back through T188's resolver change. Supersedes the prose checkpoint at line 462. Not a CI
+      target — it destroys and re-provisions real compute (SC-005, SC-008, SC-019, SC-039)
+- [ ] T220 [P] [US4] **Run quickstart Scenario 9's autonomous half end to end** — the develop → review →
+      integrate loop against `sisyphus-scratch-a` with a deliberately review-failing ticket, plus step 1's
+      missing-skill halt. Running it proves the two things the loop's 908 executor tests cannot: that it stops
+      at **exactly three** iterations against a real reviewer rather than a stubbed verdict, and that branch
+      naming, PR creation and ticket transitions come from `sisyphus-dev` in the repository rather than from a
+      Sisyphus default — which is the whole of SC-016. Requires T196 (`TicketPort` and `IntegrationPlanner`,
+      both of which `runAutonomousWorkflow` halts at today), T194 and T195. T178 already calls the workflow
+      from the entry point; nothing has ever let it finish. Supersedes the prose checkpoint at line 563. Not a
+      CI target: it opens a real PR and moves a real ticket three times (SC-010, SC-016)
+- [ ] T221 [P] [US5] **Run quickstart Scenario 9's review half end to end** — steps 2, 3 and 4: a review
+      against a PR with a known defect, a review against an already-merged PR, and a forced retry on an
+      external action. Running it proves findings land anchored to entry + file + line on the real PR, that the
+      merged-PR case exits as a recorded no-op with zero comments and zero transitions, and that the retry
+      produces no duplicate — the last of which is the **durable** idempotency T180 built and which no test has
+      ever exercised through a real host API. Requires T196 (`FindingsPublisher`) and T195. Independent of T220
+      once T196 lands: a standalone review needs no autonomous run to have happened. Supersedes the prose
+      checkpoint at line 581. Not a CI target — it comments on a real pull request (SC-018, SC-016)
+- [ ] T222 [US6] **Run quickstart Scenario 10 end to end** against a stage that already carries the history the
+      other assembly tasks left behind — filter across every dimension and compose them, open a workflow whose
+      instance was released, and read the spend view. This one is deliberately **not** `[P]`: oversight over an
+      empty fleet proves nothing, so it runs last, after T213, T218–T221, T223 and T226 have produced runs
+      across several profiles, users and states. It is also the only end-to-end read of T188's changed resolver
+      against real archived data. Supersedes the prose checkpoint at line 601. Not a CI target: its subject is
+      a stage's accumulated history, which no fixture reproduces (SC-011, SC-012, SC-013, SC-014, SC-026)
+- [ ] T223 [P] [US9] **Run quickstart Scenario 3 end to end** — create a profile, launch supplying only a
+      prompt, and time it. Steps 4, 5 and 6 (locked-field override, disabled-bundle and unreachable-repository
+      refusals, the non-admin ad hoc refusal) are already covered by `sisyphus-api`'s database-backed suites;
+      what only a stage can prove is steps 2 and 3 — that the run **actually used** every profile value on the
+      instance, that the workflow records profile and version, that the override and its originating profile
+      are both recorded, and that the whole interaction fits inside 30 seconds. Requires T194 and T195, since a
+      run that halts at the missing port carries no evidence it used the profile's model, caps or bundle.
+      Supersedes the prose checkpoint at line 367. Not a CI target — the 30-second bound is a human
+      interaction measured on a deployed panel (SC-027, SC-028, SC-029, SC-030)
+- [ ] T224 [P] [US10] **Run quickstart Scenario 7 end to end** — a two-entry workspace over
+      `sisyphus-scratch-a` and `sisyphus-scratch-b` with a prompt requiring a change in both, then its four
+      failure probes. Requires T195 above all: one PR per **changed** entry, sharing a branch name and
+      cross-referencing each other, is three `Forge` calls that nothing can make today, and SC-031 is
+      unmeasurable without them. Also requires T194. Step 4's branch-lock refusal is the only end-to-end
+      exercise of the advisory lock that CI now runs headlessly, and step 5 proves the snapshot covers the
+      whole `/workspace` root rather than one entry. Supersedes the prose checkpoint at line 490. Not a CI
+      target — two real repositories, two real pull requests (SC-031, SC-032, SC-033)
+- [ ] T225 [P] [US11] **Run quickstart Scenario 4 end to end** — launch, close the panel, and confirm the Slack
+      DM arrives within 2 minutes of terminal carrying workflow, ticket, workspace, state, reason and
+      consumption. T177 wired the delivery call and T206 promoted `sisyphus-notify` and injected the notifier,
+      so both halves of the path now exist; **no notification has ever been delivered to a real Slack
+      workspace**. Requires T194 and T195 for runs that reach a terminal state at all. Step 3 is the one that
+      must not be skipped — an address with no Slack identity has to leave the run's outcome untouched, which
+      is the whole of SC-042 — and step 5 exercises Phase 16's preferences and watching against live delivery.
+      Supersedes the prose checkpoint at line 393. Not a CI target: it needs a real Slack workspace and
+      measures a 2-minute wall-clock window (SC-034, SC-035, SC-036, SC-042)
+- [ ] T226 [US7] [US12] [US13] **Run quickstart Scenario 1 end to end** — all seven parts, on a stage deployed
+      fresh with `SISYPHUS_BOOTSTRAP_ADMIN_EMAILS` set to an address that has never signed in. One task for
+      three stories because plan.md ships them as one slice and quickstart covers them as one scenario; the
+      "Story independence" note below already records why. Requires **T200**: 1b's validation run and 1d's
+      redaction check are both unreachable until validation subjects can authenticate, and a validation-mode
+      executor halts with a named error today. 1f and 1g additionally need workflows on two profiles to exist,
+      so they follow T213 and T223 — with an empty `workflows` table there is nothing for FR-190 to leak, and
+      the leak test passes vacuously. Not `[P]` for that reason. Not a CI target: 1a-bis is a fresh stage
+      deploy, a redeploy and a third deploy with the address removed, and 1b provisions a real instance
+      (SC-022, SC-029, SC-038, SC-046, SC-047, SC-048, SC-049, SC-050, SC-051, SC-052, SC-053, SC-054)
+
+### Gate verification — plant the failure, watch the gate fail (rule 4)
+
+_Three gates in this feature passed while measuring nothing. Each of these takes minutes and is the only thing
+that distinguishes a working gate from a decorative one._
+
+- [ ] T215 [P] Verify the assembly gate detects what it claims. Plant a module with a colocated test and no
+      production caller, confirm `pnpm knip:orphans` reports it; separately remove the only production caller
+      of a real module, leaving its barrel export and tests intact, and confirm it is reported. Revert both.
+      Record the two outputs in the quickstart's quality-gates section. **The specific failure this guards
+      against is the one already found: `knip --production` honours only entry patterns carrying a trailing
+      `!`, and without one it analyses zero files and exits clean** (SC-063)
+- [ ] T216 [P] Verify the database gate. With `CI` set and `SISYPHUS_TEST_DATABASE_URL` unset, confirm the
+      guarded suites **fail** rather than skip; with neither set, confirm they skip. Record the passing and
+      skipped counts both ways — the figures that matter are `sisyphus-api`'s 1,519/0 with a database against
+      951/568 without (FR-204, SC-064)
+- [ ] T217 [P] Verify each measured latency test fails when its budget is breached. Inflate the operation past
+      its bound, confirm red, revert. This is what separates the new tests from the constant-arithmetic ones
+      they replaced — and measuring found three real defects those could not see: the 50s-not-80s notification
+      window, the snapshot budget admitting 10.5s against SC-003's 10s ceiling, and `QUIESCE_BUDGET_MS` being
+      passed to an adapter rather than enforced (FR-205, SC-003, SC-034)
+- [ ] T227 [P] Fix the flaky executor suite — a gate that intermittently lies is the fourth instance of this
+      phase's theme. `apps/sisyphus-executor/src/delivery/git.test.ts`, `delivery/staleness.test.ts`,
+      `delivery/pull-request.test.ts` and `run/bootstrap.test.ts` spawn a real `git` and intermittently exceed
+      vitest's default 5,000 ms, failing with `Test timed out in 5000ms` under load. Reproduced on 2026-08-07:
+      four files failed on one run and 937/937 passed on the next with no code change, and **Nx's own flaky-task
+      detector flagged `sisyphus-executor:test`**. Give the process-spawning tests an explicit timeout sized to
+      what they actually do, or a fake `git`, rather than raising the suite-wide default — a global raise hides
+      the next genuinely slow test. It is pre-existing and unrelated to any single task, but it makes the test
+      gate non-deterministic, so a red CI run cannot presently be trusted to mean a real failure (Constitution
+      III, SC-064)
+- [ ] T228 Mechanise Constitution III. Add a CI check that fails when a shipped source file has no colocated
+      `<name>.test.ts` sibling, alongside the assembly gate and outside the `nx affected` set for the same
+      reason. **The pre-commit hook cannot catch this and never could**: it runs the colocated test of every
+      staged source file, which by construction does nothing when there is no such test, so a file with no test
+      is invisible to the gate that requires one. That is how T173's `main.ts` shipped untested under the
+      workspace's one NON-NEGOTIABLE principle. The check needs exactly one recorded exemption list —
+      `sisyphus-infra`'s resource-creating primitives per FR-200 — written as named files with reasons, never a
+      glob, so that widening it is a reviewable diff. Verify it against a planted failure per rule 4: delete a
+      colocated test, confirm the check fails, restore (Constitution III, FR-004)
+
+**Checkpoint**: **T213**. Not the sentence above it, and not this phase's other tasks passing — quickstart
+Scenario 2, run on a stage, with its ten checks recorded. Until T194 and T195 land it cannot run, whatever the
+gate says.
 
 ---
 
@@ -951,26 +1348,34 @@ Scenario 2, which has never been executable.
 
 ### Phase dependencies
 
-| Phase              | Depends on                | Notes                                                                                                                                                                                                       |
-| ------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 Setup            | —                         | T001 (zod pin) blocks everything else                                                                                                                                                                       |
-| 2 Foundational     | Phase 1                   | Spikes T011–T013 gate Phases 4, 7, 8                                                                                                                                                                        |
-| 3 US7+US12+US13    | Phase 2                   | **T038 first** — no admin means no configuration at all                                                                                                                                                     |
-| 4 US1              | Phase 3, T013             | Live output needs the transport spike closed. Carries T041/T042 (after T064), T046 (before T055) and T047 (after T066) — all four need provisioning or existing workflows                                   |
-| 5 US9              | Phase 4                   | Profiles prefill the launch form T064a builds                                                                                                                                                               |
-| 6 US11             | Phase 4                   | Notifications need workflows that reach outcomes                                                                                                                                                            |
-| 7 US2              | Phase 4, **T011 (S1)**    | Correction injection is what S1 proves                                                                                                                                                                      |
-| 8 US3              | Phase 7, **T012 (S2)**    | Shares `suspend()` with US2                                                                                                                                                                                 |
-| 9 US10             | Phase 4                   | Extends single-entry checkout                                                                                                                                                                               |
-| 10 US8             | Phase 5                   | Mappings resolve to profiles, so profiles must exist                                                                                                                                                        |
-| 11 US4             | Phase 10                  | Autonomous runs are integration-fed                                                                                                                                                                         |
-| 12 US5             | Phase 11                  | Reuses review machinery                                                                                                                                                                                     |
-| 13 US6             | Phase 6                   | Aggregates over completed runs                                                                                                                                                                              |
-| 14 Polish          | All desired stories       |                                                                                                                                                                                                             |
-| 15 Shell & entry   | Phase 3 (roles exist)     | **T146 first** — the auth layer already points at a route that 404s, so this is a break being fixed, not a gap being filled. T149/T150 need the session role from Phase 3                                   |
-| 16 Notify settings | Phase 15, Phase 6         | The screen has nowhere to be reached from until the shell exists; the procedures it calls landed with T086                                                                                                  |
-| 17 Infra re-shape  | Phase 1                   | Independent of 15 and 16 — touches no application code. **T161 before T162–T166**: extract the pure assertions before deleting the tests that hold them                                                     |
-| 18 Assembly        | Phases 3–14 (parts exist) | **Runs before 15, 16 and 17.** T190 first — until CI executes the database suites, no verdict on anything else is trustworthy. Then T172 and T173, the two entry points, which unblock T174–T180. T193 last |
+| Phase              | Depends on                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 Setup            | —                         | T001 (zod pin) blocks everything else                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 2 Foundational     | Phase 1                   | Spikes T011–T013 gate Phases 4, 7, 8                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 3 US7+US12+US13    | Phase 2                   | **T038 first** — no admin means no configuration at all                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 4 US1              | Phase 3, T013             | Live output needs the transport spike closed. Carries T041/T042 (after T064), T046 (before T055) and T047 (after T066) — all four need provisioning or existing workflows                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 5 US9              | Phase 4                   | Profiles prefill the launch form T064a builds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 6 US11             | Phase 4                   | Notifications need workflows that reach outcomes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 7 US2              | Phase 4, **T011 (S1)**    | Correction injection is what S1 proves                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 8 US3              | Phase 7, **T012 (S2)**    | Shares `suspend()` with US2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| 9 US10             | Phase 4                   | Extends single-entry checkout                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 10 US8             | Phase 5                   | Mappings resolve to profiles, so profiles must exist                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 11 US4             | Phase 10                  | Autonomous runs are integration-fed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| 12 US5             | Phase 11                  | Reuses review machinery                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 13 US6             | Phase 6                   | Aggregates over completed runs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| 14 Polish          | All desired stories       |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 15 Shell & entry   | Phase 3 (roles exist)     | **T146 first** — the auth layer already points at a route that 404s, so this is a break being fixed, not a gap being filled. T149/T150 need the session role from Phase 3                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 16 Notify settings | Phase 15, Phase 6         | The screen has nowhere to be reached from until the shell exists; the procedures it calls landed with T086                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 17 Infra re-shape  | Phase 1                   | Independent of 15 and 16 — touches no application code. **T161 before T162–T166**: extract the pure assertions before deleting the tests that hold them                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 18 Assembly        | Phases 3–14 (parts exist) | **Runs before 15, 16 and 17.** T190 first — until CI executes the database suites, no verdict on anything else is trustworthy. Then T172 and T173, the two entry points, which unblock T174–T180. T193 last                                                                                                                                                                                                                                                                                                                                                                |
+| 19 Ports           | Phase 18                  | **T194 and T195 first, in parallel** — together they are the whole distance to Scenario 2, and T213 cannot start without both. Then the ports gate the assembly tasks: T194+T195 gate T213, T219, T223, T224 and T225; T194 alone gates T218; T196 gates T214, T220 and T221; T197 gates T219's reclamation step; T198 gates T214, since integration ticks refuse until the redactor is packaged; T200 gates T226. T222 runs last of all — fleet oversight over an empty fleet proves nothing. T215–T217 depend on nothing and should run first of all, being minutes each |
+
+_Phases 12–18 are complete as of 2026-08-07. Phase 19's remaining tasks are the only open work in this feature
+other than the four original polish tasks (T140–T143). Phase 19's open range is T194–T198, T200–T205,
+T209–T228 — T199, T206, T207 and T208 are checked. Of those, T213, T214 and T218–T226 are the eleven assembly
+tasks: one per story, each a recorded run on a stage rather than a CI target, and together the only evidence
+this feature will ever have that its thirteen stories work. The phases marked complete above are complete in
+their components; their paths are proven by those eleven and by nothing that has run yet._
 
 ### Story independence
 
@@ -995,6 +1400,15 @@ story is independently testable once its phase dependency is met.
 - **Phase 18**: T182, T184, T185, T186, T187, T188, T191, T192 all carry [P] and can run concurrently once the
   entry points land. T172 and T173 are concurrent with each other — different apps — but almost nothing else
   in the phase is, because T174–T180 all wire into one of the two
+- **Phase 19**: T215–T217 concurrently with everything, first, being minutes each; T194 and T195 concurrently
+  with each other; T196, T197, T200–T205 and T209–T212 all carry [P] and collide with nothing. The assembly
+  tasks T218–T221 and T223–T225 carry [P] **only in the sense that different engineers can run them on their
+  own stages** — they are eight recorded manual runs, not eight parallel builds, and two engineers cannot share
+  one stage for them because Scenario 5's pause and Scenario 10's fleet view both read state the other
+  perturbs. **T213, T214, T222 and T226 are not parallel**: T213 is the phase checkpoint and comes first of the
+  eleven; T222 needs the history the others leave behind and comes last; T226 needs T213's and T223's workflows
+  before its leak test means anything; T214 needs its own Jira project and integration schedule, which is a
+  stage configuration the others do not want
 
 ---
 
@@ -1034,6 +1448,32 @@ been executable, and no task in Phases 1–14 was responsible for making it so. 
 Phase 4 + Phase 18's trunk tasks (T172–T178).** This is a genuine gap in the original decomposition, not a
 regression: the task list was built story-by-story, each story's components were tasked, and the assembly of
 them was tasked nowhere.
+
+**Second correction, 2026-08-07 — the boundary moved once more, and this position is measured rather than
+assumed.** Phase 18's trunk landed and the gate is green across 14 projects (5,695 passing). Building it
+revealed that some of the parts Phase 4 "completed" are types with no implementation: a delegated run now
+composes correctly, halts at dispatch **before the agent starts**, and reports terminal `failed` naming the
+missing port.
+
+| Boundary | Contents                                                      | Status                                                |
+| -------- | ------------------------------------------------------------- | ----------------------------------------------------- |
+| Planned  | Phases 1–4                                                    | Reached on paper; its checkpoint was never executable |
+| Revised  | + Phase 18 trunk (T172–T178)                                  | **Reached**, 2026-08-07                               |
+| Actual   | + **T194 (`DeveloperPort`) + T195 (`Forge`)**, proven by T213 | Open — these two are the whole distance to Scenario 2 |
+
+Worth stating so the remaining distance is not overestimated: `Forge` is three methods over a host API, and
+`DeveloperPort` is one function returning a five-field proposal on top of a frame stream that already works
+(spike S1, closed). Everything structurally hard — provisioning, cross-instance snapshot and restore, the
+supervision protocol, live log transport, profile-scoped access, spend accounting — is built and tested.
+
+**What is shippable today**: the administration surface. Sign-in, the shell and every screen, roles and
+profile-scoped access, setup bundles, workspaces, execution profiles, integration configuration, users, audit,
+notification preferences — all database-backed and tested, and the panel builds. What is not shippable is a
+run: a launch provisions an instance, bootstraps it, halts at the missing port, reports failed, and tears down
+cleanly. Safe, and pointless. Two further caveats belong with any deploy decision: the infrastructure was
+rewritten in this feature and **has never been deployed** — per FR-200 its constructs are deploy-verified by
+design and carry no unit tests, so the first deploy is the first exercise of that code — and integration ticks
+refuse outright until T198.
 
 ### Incremental delivery
 

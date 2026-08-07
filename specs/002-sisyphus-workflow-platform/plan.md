@@ -4,13 +4,30 @@
 
 **Input**: Feature specification from `/specs/002-sisyphus-workflow-platform/spec.md`
 
+**Status, 2026-08-07**: Phases 1–18 implemented (T001–T193). Full gate green across 14 projects — **5,695
+passing, 7 skipped**, the 7 being the S3 spike harness, which needs a PgBouncer rather than a plain Postgres.
+`knip:orphans` clean, `qlty:diff` within thresholds (0 issues, 1.2% duplication). **Phase 19 (T194–T231) is
+open and the product is not yet functional**: see _What implementing this plan proved_ below. The system
+deploys and administers; it cannot yet complete a run.
+
+Phase 19 grew twice after it was written, both times because a rule in _How this feature's work must be cut_
+was applied to the phase that introduced it. It reached T208 on 2026-08-06; T209–T217 added the loose ends and
+the gate-verification tasks; T218–T226 added the missing per-story assembly tasks, because rule 1 asks for one
+per story and the phase enforcing rule 1 had shipped two against thirteen. T227 and T228 followed from closing
+the Gate III breach described under the Constitution Check; T229–T231 followed from building T194 and T195.
+**34 tasks are open**: T140–T143 from the original polish phase, and 30 here. Eleven of the 30 are recorded
+manual runs on a stage rather than anything CI can turn green. **T194, T195, T229 and T230 are closed** —
+`assembleRun` defaults to the real ports and `knip:orphans` is clean, so rule 3's production caller is
+mechanically proven rather than asserted.
+
 ## Summary
 
 Sisyphus runs Claude Code on isolated, per-run EC2 instances on behalf of Bluetel engineers, and makes those
-runs **supervisable, resumable and auditable**. Six workspace projects deliver it: one shared contract package
-owning the database and the entire typed API surface, one shared infrastructure package, one standalone
-integration package per connector type (Jira only), and three deployables — a network-facing admin panel, a
-non-network-facing control plane, and the executor that runs on the instance.
+runs **supervisable, resumable and auditable**. Seven workspace projects deliver it: one shared contract package
+owning the database and the entire typed API surface, one shared infrastructure package, one notification
+package, one standalone integration package per connector type (Jira only), and three deployables — a
+network-facing admin panel, a non-network-facing control plane, and the executor that runs on the instance.
+_(Six at design time; `packages/sisyphus-notify` was extracted 2026-08-07 by T206 — see Structure Decision.)_
 
 The technical approach rests on five decisions, all detailed in [research.md](./research.md):
 
@@ -30,6 +47,52 @@ The technical approach rests on five decisions, all detailed in [research.md](./
 
 Delivery follows the spec's priority order, with US7 + US12 + US13 as one foundational slice.
 
+A sixth decision was forced by implementation and belongs beside the other five, because it governs how the
+work is cut rather than how the system is built:
+
+6. **A story is done when its path runs.** Not when its parts pass. Every story therefore gets an explicit
+   assembly task, and the phase checkpoint **is** that task rather than a sentence above it. A task that
+   creates a port, a slot or an interface must name the task that fills it, and both must exist before the
+   phase closes. This is recorded as a decision because its absence cost this feature two rounds of
+   remediation — see below.
+
+## What implementing this plan proved
+
+_Added 2026-08-07, after building Phases 15–18._ Three findings change how the rest of the work should be
+planned, and one of them invalidates an assumption this document made from the beginning.
+
+**The decomposition, not the specification, was the defect.** Every capability found missing was already
+required: FR-060 mandates the draft pull request, FR-046 the streamed output, FR-015 the supervision controls
+"without requiring a manual reload", FR-136 the Slack notification. The spec asked for all of it. What went
+wrong is that `tasks.md` mapped each requirement to a **module** and never to a **path**, so "build the log
+viewer" and "mount the log viewer" were the same task — and only the first half happened. Phase checkpoints
+recorded the intent in prose ("A delegated run completes end to end", at `tasks.md:339`) with no task behind
+them, which made them assertions nobody owned. Only two of 205 requirements were themselves wrong (FR-193 and
+FR-195, both amended in place: each demanded something FR-190 forbids).
+
+**Absence has two layers, and the second is invisible.** Phase 18's premise was that the stories built the
+parts and left out the trunk. True, and incomplete: **some of the parts are types.** `DeveloperPort`, `Forge`,
+`FindingsPublisher` and `TicketPort` have no implementation, so a delegated run now composes correctly, halts
+at dispatch before the agent starts, and reports terminal `failed` naming the missing port. That is the right
+behaviour — the alternative was stubbing a proposal that reports success having done nothing — but it moves the
+MVP boundary a second time, to Phase 18 plus T194 and T195. A port with a type, a barrel entry and a passing
+fake is indistinguishable from a working one, to a reader and to the gate. Three separate audits of the built
+tree missed this; composing the system found it in one pass.
+
+**Verification that is not executed is not verification.** Three instances, each a different disguise. CI ran
+no Postgres, so a third of `sisyphus-api`'s assertions never executed while the pipeline reported green — 951
+passing without the database against 1,519 with it. The latency criteria were asserted by summing constants,
+which hid three real defects: notification coalescing's true worst case is 50s rather than the declared 80s
+(two waits overlap rather than add), the snapshot budget covered two sequential operations under one heading
+and so admits 10.5s against SC-003's 10s ceiling, and `QUIESCE_BUDGET_MS` was passed to an adapter and trusted
+rather than enforced. And the orphan check **had never run at all**: `knip --production` only honours entry
+patterns carrying a trailing `!`, none did, so it resolved an empty entry set, analysed zero files and exited
+clean. Fixed, it immediately found the log viewer and the supervision controls — two complete features, built,
+tested, and mounted nowhere.
+
+The generalisation worth carrying to the next feature: **every gate should be tested against a known failure
+before it is trusted.** Each of the three above passed convincingly while measuring nothing.
+
 ## Technical Context
 
 **Language/Version**: TypeScript 5.x, `strict` (inherited from `tsconfig.base.json`, must not be relaxed).
@@ -43,9 +106,18 @@ becomes `tsc --noEmit | loose-ts-check`, driven by two committed files per proje
 and `loosely-type-checked-files.json`. Ignored codes apply **only within** the listed globs; everything else
 stays strict. `.sst/**/*.ts` appears in three places and needs all three: `tsconfig.json` `include` (so the
 globals resolve), the loose-glob list (so its errors don't fail the gate), and `eslint.config.mjs` `ignores`.
-`sisyphus-infra`'s ignored set is narrow — the codes its own use of the ambient globals raises — where an app's
-also covers the generated tree. `sisyphus-api` and `sisyphus-integration-jira` keep plain `tsc --noEmit` and
-carry neither file, so neither gains a suppression channel it has no use for.
+`sisyphus-api` and `sisyphus-integration-jira` keep plain `tsc --noEmit` and carry neither file, so neither
+gains a suppression channel it has no use for.
+
+_Outcome, 2026-08-06._ **All four `ignored-error-codes.json` files are empty.** The mechanism is in place and
+filters nothing: the generated tree is confined to the loose globs, and no hand-written file needs a code
+ignored. `sisyphus-infra` initially needed `TS2550` because its `lib` was `ES2020` while the generated tree
+uses `String.replaceAll`; raising it to `ES2023` — which the three deployables already used — removed the last
+one. Note `loose-ts-check` **fails on an ignored code that does not occur**, so these lists cannot silently rot
+into a standing suppression: an entry that stops being needed breaks the build. One boundary declaration was
+required and is not a suppression — the generated platform tree imports `bun` types, which redeclare the global
+`Headers`, `Response` and `fetch` and broke our own Node source in hand-written files; those could only have
+been filtered by putting application source into the loose globs, which SC-061 forbids.
 
 **Primary Dependencies**: tRPC v11 + Zod (contract), Drizzle ORM + `postgres` driver, Next.js 16 via OpenNext
 on SST v3 (panel), Auth.js (Google OAuth), AWS SDK v3 (EC2/S3/SSM/Secrets Manager/EventBridge Scheduler),
@@ -105,7 +177,9 @@ minutes (SC-007). Zero literal design values in components (SC-015). Setup bundl
 registered (FR-090).
 
 **Scale/Scope**: Tens of concurrent workflows, tens of thousands of historical workflows; single-tenant
-internal platform, not multi-tenant SaaS. 192 functional requirements, 55 success criteria, 13 user stories.
+internal platform, not multi-tenant SaaS. 205 functional requirements, 65 success criteria, 13 user stories.
+_(Corrected 2026-08-07: the figures above were the counts at the time this plan was first written. The
+2026-08-06 clarifications added FR-193..FR-205 and SC-056..SC-065; the spec has carried 205/65 since.)_
 
 ## Constitution Check
 
@@ -125,9 +199,10 @@ entry in Complexity Tracking below.
 
 **Notes on how each gate is met:**
 
-- **I** — Six new members, all carrying the codename per FR-001: `packages/sisyphus-api`, `packages/sisyphus-infra`,
-  `packages/sisyphus-integration-jira`, `apps/sisyphus-admin`, `apps/sisyphus-control-plane`,
-  `apps/sisyphus-executor`. Each owns `project.json`, `eslint.config.mjs`, `tsconfig.json`, `vitest.config.ts`
+- **I** — Seven new members, all carrying the codename per FR-001: `packages/sisyphus-api`, `packages/sisyphus-infra`,
+  `packages/sisyphus-integration-jira`, `packages/sisyphus-notify`, `apps/sisyphus-admin`,
+  `apps/sisyphus-control-plane`, `apps/sisyphus-executor`. Six were planned; the seventh was extracted during
+  implementation (T206) once the notification path acquired a second caller. Each owns `project.json`, `eslint.config.mjs`, `tsconfig.json`, `vitest.config.ts`
   and is runnable from its own directory. A new cached `design-lint` target joins the affected-graph run
   alongside `lint`, `test` and `typecheck`.
 - **II** — Every directory exposes an `index.ts` barrel; consumers import from the barrel. The largest risk is
@@ -169,6 +244,42 @@ entry in Complexity Tracking below.
 bounded exception recorded in Complexity Tracking. Neither lowers a threshold — one narrows what is unit-tested
 to what is worth asserting, the other filters generated code the gate was never meant to judge. The remaining
 four gates are unchanged.
+
+**Re-check after implementing Phases 15–18 (2026-08-07)**: PASS on all six as recorded — **but the III entry
+was wrong when it was written**, see below. Gate IV's exception turned out to be **narrower than planned**.
+
+- **IV, measured rather than predicted.** All four `ignored-error-codes.json` files are **empty**. The
+  suppression channel exists and suppresses nothing: confining the generated tree to the loose globs was
+  sufficient, and raising `sisyphus-infra`'s `lib` from `ES2020` to `ES2023` — matching the three deployables —
+  removed the last code. The exception stands recorded because the channel exists, but nothing currently
+  travels through it. One property makes it self-policing and is worth stating: `loose-ts-check` **fails on an
+  ignored code that does not occur**, so a list cannot rot into a standing suppression — an entry that stops
+  being needed breaks the build.
+- **III was recorded PASS and was in breach.** The infrastructure half of the claim holds: the rewrite deleted
+  five construct test files and lost no assertion — each was accounted for individually before deletion, moved
+  onto `retention.ts` / `policies.ts` / `schedule-name.ts`, or recorded as deliberately dropped provider-fake
+  wiring, and a mutation check confirms the survivors bite (corrupting one action string in `buildRunnerPolicy`
+  fails its test). What the re-check missed is that **`apps/sisyphus-executor/src/main.ts` shipped under a
+  checked T173 with no colocated test**, while its exact structural sibling
+  `apps/sisyphus-control-plane/src/main.ts` had one. That is a breach of the one principle the constitution
+  marks NON-NEGOTIABLE, on the highest-consequence file in the app, and it is outside the recorded
+  `sisyphus-infra` exception, which covers only resource-instantiating primitives. A cross-artifact analysis
+  found it on 2026-08-07 and it is now closed: 29 tests over the envelope-reading paths, the validation-mode
+  refusal, the exit-code contract across all six terminal outcomes, the signal registration and the
+  reporting-failure callback — `main.ts` itself needed no change to become testable.
+
+  The reason it survived is worth naming, because it is the same reason the missing entry points survived: a
+  self-assessed gate reports what the assessor expected to find. Colocation is mechanically checkable and is
+  not mechanically checked — the pre-commit hook runs the colocated test of a staged source file, which by
+  construction does nothing when there is no such test. **A source file with no colocated test is invisible to
+  the gate that requires one.** T228 mechanises it: a CI check that fails on a source file with no sibling
+  test, with one named exemption list rather than a glob. Rule 4 applies to it like any other new gate — plant
+  the failure first.
+
+- **A gate the constitution does not name now exists.** `pnpm knip:orphans` fails when a shipped module has no
+  production caller (SC-063), and runs in CI outside the `nx affected` set, because knip is not nx-aware and a
+  missing caller usually lives in a project the diff never touched. This is the gate whose absence allowed
+  everything Phase 18 and Phase 19 exist to fix. It is additive: no existing gate was relaxed to make room.
 
 ## Project Structure
 
@@ -381,7 +492,10 @@ by CSS: a link an engineer cannot follow is not rendered, so the nav never adver
 answer `NOT_FOUND` (FR-190). `not-found.tsx` and `error.tsx` sit at the root so they also catch the
 `notFound()` that `requireAdminPage()` throws, which today lands on the framework's unstyled default.
 
-**Structure Decision**: Six workspace members as above. `sisyphus-api` is the only member that touches the
+**Structure Decision**: Seven workspace members as above — six planned, plus `packages/sisyphus-notify`,
+extracted from the control plane by T206 on 2026-08-07. The extraction is forced rather than tidy: five of the
+nine notifiable events are raised on the machine surface, which `sisyphus-admin` mounts, so two apps need one
+delivery path, and an app must not depend on another app. `sisyphus-api` is the only member that touches the
 database, which is what makes FR-005's surface split and FR-190's scoping enforceable in one place rather than
 audited across three apps. The executor depends on `sisyphus-api` for **types only** — no resolver code and no
 database driver reaches the instance, so a compromised setup bundle cannot read the database.
@@ -427,6 +541,102 @@ optional and one closes a live defect.
 Slice 12 before 13: the settings screen has nowhere to be reached from until the shell exists. Slice 14 is
 independent of both and can run in parallel — it touches no application code.
 
+**Slices 15 and 16, added after the post-implementation audit and after implementing it.**
+
+| Order | Slice                               | Lands with                                                                                                                                                                                                                                                                        |
+| ----- | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 15    | Assembly (FR-203..FR-205)           | Both entry points, the delegated orchestrator, the supervision and heartbeat loops, the notification path, the two orphaned machine-surface report procedures, and the CI database — **runs before slices 12–14**, because until it lands nothing the panel points at can execute |
+| 16    | The ports behind the trunk (FR-203) | The agent-frame → proposal bridge, `Forge`, `FindingsPublisher`, `TicketPort`, the IMDS reader, and the surfaces no package publishes                                                                                                                                             |
+
+Slice 16 exists because implementing slice 15 made a second layer of absence visible, as described under
+_What implementing this plan proved_.
+
+**Delivered order, 2026-08-07** — slices 15, 12, 13 and 14 all landed, in that priority. Slice 15 ran first, as
+its row states it must: until the deployables had entry points, nothing the panel pointed at could execute, and
+until CI ran a database no verdict about any of it was trustworthy. Slices 12 and 14 ran concurrently
+throughout — the largest genuine parallel opportunity in the plan, one stream on the panel and one on
+infrastructure, with no shared file between them. Three items were added mid-flight and completed, each because
+work in slice 15 or 12 could not otherwise function:
+
+| Added      | Why it could not wait                                                                                                                                                                          |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T199       | The integrations screen displayed "not mounted in this deployment", which was false — the router was mounted and two of its nine resolvers (`runs`, `delete`) were reachable from nothing      |
+| T206       | The notification path's two halves could not reach each other: delivery lived inside the control-plane **app**, while the machine surface emitting five of nine events is mounted by the panel |
+| T207, T208 | The assembly gate's first genuine run found the live log viewer and the supervision controls built, tested, and imported by nothing                                                            |
+
+**The MVP boundary has now moved twice, and the current position is:**
+
+| Boundary        | Contents                                                | Status                                                        |
+| --------------- | ------------------------------------------------------- | ------------------------------------------------------------- |
+| As planned      | Phases 1–4                                              | Reached on paper; the Phase 4 checkpoint was never executable |
+| After the audit | Phases 1–4 + the Phase 18 trunk (T172–T178)             | **Reached** — 2026-08-07                                      |
+| 2026-08-07      | the above **+ T194 (`DeveloperPort`) + T195 (`Forge`)** | **Reached** — and it took four tasks, not two                 |
+| Now             | the above + one operator action                         | `SISYPHUS_FORGE_API_URL` on the stage, then T213              |
+
+**What building the last two blockers proved, 2026-08-07.** The estimate above — "`Forge` is three methods and
+`DeveloperPort` is one function" — was right about both and still understated the work by half, because
+**neither port could be reached from the composition root without two things nobody had tasked**:
+
+- **The forge had no credential and no API base** (T229). Not an oversight in the port: the credential is
+  emphatically not the envelope's `scopedCredential`, which is machine-surface-only under FR-037, and FR-075
+  puts it in the setup bundle — whose contract deliberately names no file (`credentials/` holds "whatever
+  setup.sh needs"). So nothing could read it by path, and inventing a filename would have been a contract
+  change every existing client bundle had to satisfy. It is read from `git credential fill` instead, which
+  every bundle that can clone already satisfies, lazily, because it does not exist until bootstrap phase 5.
+- **`DelegatedPorts.entries` had no builder** (T230), so both ports could exist and still deliver nothing.
+
+The lesson generalises and is the reason rule 2 exists: a port task is not the same size as the port. Each of
+these was invisible in the task list precisely because it was nobody's port — it was the wiring _between_ two
+ports, and the decomposition had a task per component and none per join.
+
+Two findings from that work are recorded rather than fixed. **`preExecutionRemoteSha` is `undefined` on every
+run and must be**: the work-branch name comes from the agent applying the skill's prose rule during the pass,
+so probing beforehand is impossible and probing afterwards would return the sha the agent just pushed, making
+`noPushedWorkError` discard the very work it verified. And **no bundle-installed credential currently reaches
+the run-wide redactor** (T231) — `runExecutor` snapshots `secrets` before bootstrap and `assembleRun` passes
+none, so only pattern matching stands between a client bundle's credential and the streamed log.
+
+Everything structurally difficult (provisioning, cross-instance snapshot and restore, the supervision protocol,
+live log transport, profile-scoped access, spend accounting) was already built and tested, and that held.
+
+**One manual step now stands between this repository and Scenario 2**, and it cannot be closed by a commit:
+`SISYPHUS_FORGE_API_URL` has no home here, because the executor's deploy-time configuration is loaded from an
+SSM parameter an operator populates and that is deliberately not committed (FR-202). It must be set on the
+stage and in the launch unit, or the first run fails at boot naming the variable.
+
+## How this feature's work must be cut
+
+_Added 2026-08-07. This section is the corrective for the defect described under **What implementing this plan
+proved**, and it binds Phase 19 and any later slice of this feature._
+
+Four rules. Each one, applied earlier, would have prevented a specific failure that actually occurred here.
+
+1. **Every user story gets an explicit assembly task, and the phase checkpoint is that task.** A checkpoint
+   written as prose above a task list is an assertion nobody owns — `tasks.md:339` claimed "A delegated run
+   completes end to end" for eleven months of work with no task behind it. If a checkpoint cannot be written
+   as a task with a file path, it is not a checkpoint.
+
+   _Rule 1 was under-applied on the day it was written, which is worth recording because it shows how weak the
+   pull towards it is._ Phase 19 was cut to enforce these four rules and shipped **two** assembly tasks against
+   thirteen stories; a cross-artifact analysis on 2026-08-07 found the gap, and T218–T226 close it. Eleven of
+   the thirteen stories had no task that would ever run their path, and the eleven story-phase checkpoints
+   still written as prose in `tasks.md` are exactly the assertions those nine tasks now replace. Writing the
+   rule down did not produce compliance with it; auditing against it did.
+
+2. **A task that creates a port, a slot, an interface or a placeholder must name the task that fills it, and
+   both must exist before the phase closes.** `log-viewer-slot.tsx` names the task that would mount it; that
+   task is checked, and it built the component instead. Splitting "build X" from "connect X" is correct — but
+   only if both are written down.
+3. **A task is not complete while its subject has no production caller.** This is now mechanical rather than
+   cultural: `pnpm knip:orphans` fails on the condition (SC-063). A module legitimately without one gets a
+   `knip.json` entry with a written reason, never a blanket pattern.
+4. **A new gate must be tested against a known failure before it is trusted.** Plant the defect, watch the
+   gate fail, remove it. Three gates in this feature passed while measuring nothing — the orphan check
+   analysing zero files, CI running no database, latency asserted by arithmetic. All three looked healthy.
+
+Rules 1 and 2 are properties of the task list rather than of this feature, and belong upstream in
+`.agents/skills/speckit-tasks/SKILL.md` so the next feature inherits them rather than rediscovering them.
+
 ## Complexity Tracking
 
 > **Fill ONLY if Constitution Check has violations that must be justified**
@@ -435,14 +645,14 @@ No threshold is relaxed, no shared config forked, no Nx graph bypassed. **Two ga
 exception**, added 2026-08-06. Both are narrow, both are visible in a diff, and both are recorded here rather
 than argued per-review, which is what the constitution's Review clause asks for.
 
-| Gate                       | Exception                                                                                                                     | Bound                                                                                                                                                                                                                   | Alternative rejected because                                                                                                                                                                               |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| III. Colocated Tests       | `sisyphus-infra`'s six resource-creating primitives ship without a colocated `.test.ts`; they are verified by the deploy      | Only functions whose body is resource instantiation. Every pure decision they consume — naming, stage derivation, retention per class, policy document content, the CI trusted subject — stays a tested module (FR-200) | A Pulumi mock harness asserts that the constructor we called is the constructor we called: it restates the implementation, breaks on rename, and would not have caught a single real infrastructure defect |
-| IV. Blocking Quality Gates | The typecheck target for the three deployables and `sisyphus-infra` filters named error codes inside committed globs (FR-198) | `strict` unchanged, no compiler option touched, no inline suppression comment. Globs contain only generated files. Both lists are committed, so widening them is a reviewable diff                                      | Excluding the generated tree from `include` makes the deployment tool's ambient globals unresolvable, so the config files stop compiling — the gate would pass by no longer checking the code that matters |
+| Gate                       | Exception                                                                                                                                                                                                                                                                                   | Bound                                                                                                                                                                                                                                                                                        | Alternative rejected because                                                                                                                                                                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| III. Colocated Tests       | `sisyphus-infra`'s six resource-creating primitives ship without a colocated `.test.ts`; they are verified by the deploy                                                                                                                                                                    | Only functions whose body is resource instantiation. Every pure decision they consume — naming, stage derivation, retention per class, policy document content, the CI trusted subject — stays a tested module (FR-200)                                                                      | A Pulumi mock harness asserts that the constructor we called is the constructor we called: it restates the implementation, breaks on rename, and would not have caught a single real infrastructure defect |
+| IV. Blocking Quality Gates | The typecheck target for the three deployables and `sisyphus-infra` filters named error codes inside committed globs (FR-198). **In force but empty as of 2026-08-07**: all four `ignored-error-codes.json` files filter zero codes, so the channel exists and currently suppresses nothing | `strict` unchanged, no compiler option touched, no inline suppression comment. Globs contain only generated files. Both lists are committed, so widening them is a reviewable diff. `loose-ts-check` fails on an ignored code that does not occur, so an emptied list cannot silently refill | Excluding the generated tree from `include` makes the deployment tool's ambient globals unresolvable, so the config files stop compiling — the gate would pass by no longer checking the code that matters |
 
 Two further design choices are worth recording as deliberate, though neither breaches a gate:
 
-| Choice                                               | Why                                                                                                                                          | Simpler alternative rejected because                                                                                                          |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| Six workspace members rather than four               | FR-035's no-ingress control plane and FR-192's per-type integration packages are both structural requirements, not organisational preference | Merging the control plane into the panel would give the network-facing app the provisioning role, which is the boundary FR-035 exists to draw |
-| Access scoping in the tRPC context, not per resolver | FR-190 forbids disclosing a workflow's _existence_, so counts and aggregates must be scoped too                                              | Per-resolver checks leak through any aggregate someone forgets to guard, and the failure is silent                                            |
+| Choice                                               | Why                                                                                                                                                                                                                                                              | Simpler alternative rejected because                                                                                                                                                                                                    |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Seven workspace members rather than four             | FR-035's no-ingress control plane and FR-192's per-type integration packages are both structural requirements, not organisational preference. The seventh, `sisyphus-notify`, was forced by a second caller appearing during implementation, not chosen up front | Merging the control plane into the panel would give the network-facing app the provisioning role, which is the boundary FR-035 exists to draw. Leaving the notification path inside the control plane would make one app import another |
+| Access scoping in the tRPC context, not per resolver | FR-190 forbids disclosing a workflow's _existence_, so counts and aggregates must be scoped too                                                                                                                                                                  | Per-resolver checks leak through any aggregate someone forgets to guard, and the failure is silent                                                                                                                                      |

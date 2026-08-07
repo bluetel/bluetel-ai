@@ -1,25 +1,31 @@
 /**
- * Naming, secret and IAM-policy helpers shared by every primitive in this
- * package.
+ * Naming and secret helpers shared by every construct in this package, plus the
+ * plain-data shape of an IAM policy document.
  *
- * Nothing here reaches for a Pulumi or SST global. `getResourceIdentifier`
- * takes the project/stack pair it formats and `getEnvSecret` takes the wrapping
- * function it applies, so both are ordinary functions that can be exercised
- * without an SST-generated `.sst/platform/config.d.ts` and without cloud
- * access. See the note at the top of `index.ts` for why that matters.
+ * Nothing here reaches for a Pulumi or SST global, and nothing here creates a
+ * resource. These are the decisions FR-200 keeps directly assertable: what a
+ * resource is called, which parameter path a stage publishes to, and the shape
+ * a policy document must take. A construct reads a value from here and hands it
+ * to a constructor; the constructor is the deploy's problem, the value is not.
  */
+
+import { getPlainStage } from './get-plain-stage'
+import type { ObjectClass } from './retention'
 
 /** The project and stack a set of resources is being named under. */
 export interface ResourceScope {
-  /** Pulumi project name — `$app.name` / `pulumi.getProject()` at the call site. */
+  /** Project component, identical across the three deployables. */
   readonly project: string
-  /** SST stage name including any suffix — `$app.stage` / `pulumi.getStack()`. */
+  /** Plain stage name — the stack every deployable shares for that stage. */
   readonly stack: string
 }
 
 /**
  * Formats a resource name in the standard `{project}-{stack}-{name}` shape, so
  * every stage is isolated inside a single AWS account by naming alone.
+ *
+ * The same string is used as both the Pulumi logical id and the physical
+ * resource name, so the two can never drift apart.
  *
  * @example
  * getResourceIdentifier({ project: 'sisyphus', stack: 'staging' }, 'logs')
@@ -28,10 +34,82 @@ export interface ResourceScope {
 export const getResourceIdentifier = (scope: ResourceScope, name: string): string =>
   `${scope.project}-${scope.stack}-${name}`
 
+// ---------------------------------------------------------------------------
+// The scope every Sisyphus stack resolves resources under
+// ---------------------------------------------------------------------------
+
 /**
- * The single function `getEnvSecret` needs from Pulumi — `pulumi.secret`.
- * Declared structurally so this package never imports `@pulumi/pulumi`; the
- * real function is handed in from `sst.config.ts`.
+ * Project component of every resource name, identical across the three apps.
+ *
+ * Three separate SST apps deploy into one stage — the panel, the control plane
+ * and the executor — and they must agree on the name of every resource they
+ * share. `$app.name` cannot be that agreement: it differs per deployable by
+ * definition.
+ */
+export const SISYPHUS_PROJECT = 'sisyphus'
+
+/**
+ * The scope a resource name is built under for an SST stage.
+ *
+ * The stack component is the **plain** stage, which is why `getPlainStage`
+ * exists: `production`, `production-bootstrap` and `production-website` all name
+ * the same buckets and the same database. The practical consequence is that only
+ * one app creates a shared resource and the others derive its name from the same
+ * helper, rather than each declaring its own.
+ *
+ * @example
+ * getStackScope('production-bootstrap') // → { project: 'sisyphus', stack: 'production' }
+ */
+export const getStackScope = (sstStage: string): ResourceScope => {
+  const stack = getPlainStage(sstStage)
+
+  if (stack.trim() === '') {
+    throw new Error('Cannot build a resource scope from an empty stage name')
+  }
+
+  return { project: SISYPHUS_PROJECT, stack }
+}
+
+// ---------------------------------------------------------------------------
+// Names three stacks must agree on
+// ---------------------------------------------------------------------------
+
+/**
+ * The bucket a class of object is stored in. The panel's stack creates them; the
+ * control plane and the executor derive the same names from here, so no stack
+ * can disagree with another about which bucket a workflow's logs are in.
+ */
+export const getBucketName = (scope: ResourceScope, objectClass: ObjectClass): string =>
+  getResourceIdentifier(scope, objectClass)
+
+/** Every bucket name for a stage, for a caller populating an environment. */
+export const getBucketNames = (scope: ResourceScope): Readonly<Record<ObjectClass, string>> => ({
+  artifacts: getBucketName(scope, 'artifacts'),
+  bundles: getBucketName(scope, 'bundles'),
+  logs: getBucketName(scope, 'logs'),
+  snapshots: getBucketName(scope, 'snapshots'),
+})
+
+/**
+ * The Parameter Store path a stage's database connection URL is published to.
+ *
+ * Built from the plain stage so `<stage>-bootstrap` and `<stage>-website` read
+ * and write the same entry. Publishing the URL to a parameter rather than
+ * threading it through stack outputs is what keeps `sisyphus-api` the only
+ * member that ever holds a database credential.
+ */
+export const getConnectionUrlParameterName = (stage: string): string =>
+  `/sisyphus/${getPlainStage(stage)}/database/connection-url`
+
+// ---------------------------------------------------------------------------
+// Deploy-time environment values
+// ---------------------------------------------------------------------------
+
+/**
+ * The single function `getEnvSecret` needs in order to wrap a value: `$util.secret`
+ * at a deploy-time call site, and the identity function where a value must stay
+ * legible. It is a formatting choice about one string, not a stand-in for a
+ * resource constructor.
  */
 export interface SecretWrapper<TSecret> {
   (value: string): TSecret
@@ -89,11 +167,16 @@ export const getEnvSecret = <TSecret, TSecrets extends Record<string, string>>(
   return options.dangerousClearText === true ? value : wrapSecret(value)
 }
 
+// ---------------------------------------------------------------------------
+// IAM policy documents, as plain data
+// ---------------------------------------------------------------------------
+
 /**
  * IAM policy documents are expressed as plain, serialisable data with AWS's own
- * PascalCase keys. Every identifier is a plain `string`: a Pulumi caller holding
- * an `Output<string>` resolves it with `.apply()` before calling a builder, which
- * keeps these types free of any Pulumi generic and keeps the builders pure.
+ * PascalCase keys. Every identifier is a plain `string`: a caller holding an
+ * unresolved output resolves it with `.apply()` before calling a builder, which
+ * keeps these types free of any provider generic and keeps the builders in
+ * `policies.ts` pure and directly assertable.
  */
 export interface PolicyPrincipal {
   readonly Federated?: readonly string[]

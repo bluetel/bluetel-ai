@@ -70,4 +70,32 @@ describe('RoleChangeHistory', () => {
       /#[0-9a-fA-F]{3,8}|\d+(?:px|rem)/,
     )
   })
+
+  it('reports a refused read with a code and a next action (FR-031, FR-201)', () => {
+    const markup = renderToStaticMarkup(
+      <RoleChangeHistory
+        entries={[]}
+        error={{ code: 'E_ADMIN_REQUIRED', action: 'Ask an active admin to read this.' }}
+      />,
+    )
+
+    expect(markup).toContain('E_ADMIN_REQUIRED')
+    expect(markup).toContain('Ask an active admin to read this.')
+  })
+
+  it('never claims nothing was recorded on a trail it could not read', () => {
+    const markup = renderToStaticMarkup(
+      <RoleChangeHistory entries={[]} error={{ code: 'E_UNEXPECTED', action: 'Retry once.' }} />,
+    )
+
+    expect(markup).not.toContain('no changes recorded yet')
+    expect(markup).not.toContain('data-note="empty"')
+  })
+
+  it('keeps reading and empty apart as two distinct notes', () => {
+    expect(renderToStaticMarkup(<RoleChangeHistory entries={[]} loading />)).toContain(
+      'data-note="loading"',
+    )
+    expect(renderToStaticMarkup(<RoleChangeHistory entries={[]} />)).toContain('data-note="empty"')
+  })
 })

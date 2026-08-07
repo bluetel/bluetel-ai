@@ -28,6 +28,7 @@ import {
 } from './start'
 import type { TwoProfileFixture, TwoProfileIds } from './test-support'
 import {
+  createGate,
   createTwoProfileFixture,
   LOCKED_FIELD_A,
   readTestDatabaseUrl,
@@ -47,17 +48,6 @@ import {
  */
 
 const connectionString = readTestDatabaseUrl()
-
-/** A promise plus its resolver, for holding a transaction open at a chosen moment. */
-const createGate = (): { readonly opened: Promise<void>; readonly open: () => void } => {
-  let open = (): void => undefined
-  const opened = new Promise<void>((resolve) => {
-    open = () => {
-      resolve()
-    }
-  })
-  return { opened, open }
-}
 
 const sleep = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, milliseconds))

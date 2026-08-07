@@ -1,5 +1,12 @@
 import { DataReadout } from '@sisyphus-admin/components/admin'
-import { Card, CardBody, CardHeader, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 
 import type { TimelineReadouts } from './workflow-detail-readouts'
 
@@ -26,8 +33,10 @@ export const WorkflowTimeline = ({ entries, loading = false }: WorkflowTimelineP
       <StateChip>{loading ? 'reading' : `events ${String(entries.length)}`}</StateChip>
     </CardHeader>
     <CardBody className="gap-close flex flex-col">
+      {loading ? <LoadingState>reading the lifecycle record</LoadingState> : null}
+
       {loading || entries.length > 0 ? null : (
-        <p className="type-data-mono text-graphite">no lifecycle events recorded yet</p>
+        <EmptyState>no lifecycle events recorded yet</EmptyState>
       )}
 
       <ol className="gap-close flex flex-col">

@@ -1,7 +1,15 @@
 'use client'
 
 import { describeTrpcError } from '@sisyphus-admin/components/admin'
-import { Card, CardBody, CardHeader, FieldError, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  FieldError,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 import { WorkflowList, toWorkflowRowReadouts } from '@sisyphus-admin/components/workflows'
 import type { LaunchOption } from '@sisyphus-admin/components/workflows/new'
 import { api } from '@sisyphus-admin/trpc'
@@ -122,10 +130,10 @@ export const NeedsAttentionPanel = ({ viewerUserId, canReassign }: NeedsAttentio
 
               {users.error === null ? null : <FieldError {...describeTrpcError(users.error)} />}
 
-              {users.isPending || owners.length > 0 ? null : (
-                <p className="type-data-mono text-graphite">
-                  every run in flight has an active owner
-                </p>
+              {users.isPending ? <LoadingState>reading the owner list</LoadingState> : null}
+
+              {users.isPending || users.error !== null || owners.length > 0 ? null : (
+                <EmptyState>every run in flight has an active owner</EmptyState>
               )}
             </CardBody>
           </Card>

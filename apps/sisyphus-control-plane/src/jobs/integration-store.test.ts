@@ -1,5 +1,6 @@
 import {
   integrationRuns,
+  integrations,
   ticketClaims,
   workflowEvents,
   workflows,
@@ -7,16 +8,21 @@ import {
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
-import { createIntegrationFixtures, readTestDatabaseUrl } from './integration-fixtures'
+import {
+  createIntegrationFixtures,
+  FIXTURE_SPEND_CAP,
+  FIXTURE_TURN_CAP,
+  readTestDatabaseUrl,
+} from './integration-fixtures'
 import type { ClaimAndStartInput, ProfileLaunch } from './integration-store'
 import {
   claimAndStart,
   closeRun,
   countStartedSince,
-  findCompetingClaim,
   findIntegration,
   findLastCompletedRun,
   findOpenRun,
+  findTicketOwner,
   listIntegrations,
   listMappings,
   openRun,
@@ -336,55 +342,103 @@ describeWithDatabase('the integration store (T117)', () => {
     })
   })
 
-  describe('findCompetingClaim (FR-104)', () => {
-    it('finds a claim held by another integration on the same board', async () => {
-      const first = await fixtures.seedIntegration({ name: `a-${fixtures.suffix}` })
-      const second = await fixtures.seedIntegration({ name: `b-${fixtures.suffix}` })
-      await claimAndStart(fixtures.db(), await claimInput(first.id))
+  /**
+   * FR-104 asks for a winner that is **deterministic and independent of tick timing**, so every
+   * test here fixes the two rows and asks the question from both sides. A guard that answered
+   * "whoever claimed first" would pass the claim cases and fail the two below them.
+   */
+  describe('findTicketOwner (FR-104)', () => {
+    /** The two seeded integrations, sorted by the rule so a test never depends on uuid luck. */
+    const twoOnOneBoard = async (
+      options: { readonly baseUrls?: readonly [string, string] } = {},
+    ) => {
+      const a = await fixtures.seedIntegration({
+        name: `a-${fixtures.suffix}`,
+        ...(options.baseUrls === undefined ? {} : { baseUrl: options.baseUrls[0] }),
+      })
+      const b = await fixtures.seedIntegration({
+        name: `b-${fixtures.suffix}`,
+        ...(options.baseUrls === undefined ? {} : { baseUrl: options.baseUrls[1] }),
+      })
 
-      expect(
-        await findCompetingClaim(fixtures.db(), {
-          integrationId: second.id,
-          externalId: 'FIX-1',
-          baseUrl: second.baseUrl,
-          projectPrefix: second.projectPrefix,
-        }),
-      ).toMatchObject({ integrationId: first.id })
+      return a.id < b.id ? { lower: a, higher: b } : { lower: b, higher: a }
+    }
+
+    const ownerFor = (integration: { id: string; baseUrl: string; projectPrefix: string }) =>
+      findTicketOwner(fixtures.db(), {
+        integrationId: integration.id,
+        externalId: 'FIX-1',
+        baseUrl: integration.baseUrl,
+        projectPrefix: integration.projectPrefix,
+      })
+
+    it('awards the ticket to the lowest-id enabled integration before anyone has claimed', async () => {
+      // The branch the old guard had no answer for: nothing is claimed, so a claim lookup finds
+      // nothing and the higher-id integration would have gone ahead — making the winner whichever
+      // schedule fired first.
+      const { higher, lower } = await twoOnOneBoard()
+
+      expect(await ownerFor(higher)).toStrictEqual({
+        integrationId: lower.id,
+        workflowId: null,
+        reason: 'lower_integration_id',
+      })
     })
 
-    it('ignores a claim on a different board with the same ticket key', async () => {
-      const first = await fixtures.seedIntegration({
-        name: `a-${fixtures.suffix}`,
-        baseUrl: 'https://one.invalid',
-      })
-      const second = await fixtures.seedIntegration({
-        name: `b-${fixtures.suffix}`,
-        baseUrl: 'https://two.invalid',
-      })
-      await claimAndStart(fixtures.db(), await claimInput(first.id))
+    it('lets the lowest-id integration through, whichever of them asks first', async () => {
+      const { lower } = await twoOnOneBoard()
 
-      expect(
-        await findCompetingClaim(fixtures.db(), {
-          integrationId: second.id,
-          externalId: 'FIX-1',
-          baseUrl: second.baseUrl,
-          projectPrefix: second.projectPrefix,
-        }),
-      ).toBeUndefined()
+      expect(await ownerFor(lower)).toBeUndefined()
+    })
+
+    it('still refuses the lower-id integration once a run exists, rather than double-spending', async () => {
+      // The other branch, and the reason the claim lookup stays first: a run started by the
+      // higher-id integration — before this rule existed, say — cannot be un-started by a rule.
+      const { higher, lower } = await twoOnOneBoard()
+      await claimAndStart(fixtures.db(), await claimInput(higher.id))
+
+      const owner = await ownerFor(lower)
+
+      expect(owner?.integrationId).toBe(higher.id)
+      expect(owner?.reason).toBe('already_started')
+      // Named, so the record can point at the run rather than merely at the integration.
+      expect(typeof owner?.workflowId).toBe('string')
+    })
+
+    it('names the claimant when the lowest-id integration is the one that already started it', async () => {
+      const { higher, lower } = await twoOnOneBoard()
+      await claimAndStart(fixtures.db(), await claimInput(lower.id))
+
+      expect(await ownerFor(higher)).toMatchObject({
+        integrationId: lower.id,
+        reason: 'already_started',
+      })
+    })
+
+    it('ignores a disabled sibling, because FR-104 is about two enabled integrations', async () => {
+      const { higher, lower } = await twoOnOneBoard()
+      await fixtures
+        .db()
+        .update(integrations)
+        .set({ enabled: false })
+        .where(eq(integrations.id, lower.id))
+
+      expect(await ownerFor(higher)).toBeUndefined()
+    })
+
+    it('ignores an integration on a different board with the same ticket key', async () => {
+      const { higher } = await twoOnOneBoard({
+        baseUrls: ['https://one.invalid', 'https://two.invalid'],
+      })
+
+      expect(await ownerFor(higher)).toBeUndefined()
     })
 
     it('never reports the caller as its own competitor', async () => {
       const integration = await fixtures.seedIntegration()
       await claimAndStart(fixtures.db(), await claimInput(integration.id))
 
-      expect(
-        await findCompetingClaim(fixtures.db(), {
-          integrationId: integration.id,
-          externalId: 'FIX-1',
-          baseUrl: integration.baseUrl,
-          projectPrefix: integration.projectPrefix,
-        }),
-      ).toBeUndefined()
+      expect(await ownerFor(integration)).toBeUndefined()
     })
   })
 
@@ -404,6 +458,47 @@ describeWithDatabase('the integration store (T117)', () => {
       expect(row.initiatedByUserId).toBeNull()
       expect(row.executionProfileVersionId).toBe((await launchFor()).executionProfileVersionId)
       expect(row.ticketReference).toBe('https://boards.invalid/browse/FIX-1')
+    })
+
+    it('carry every launch value the resolved profile version specifies (FR-101, T186)', async () => {
+      // FR-101: the run **inherits** its workspace, setup bundle, model, instance size and caps.
+      // All seven are asserted together rather than the interesting-looking three, because the two
+      // nullable ones — `turn_cap` and `spend_cap` — are the ones a dropped column leaves silently
+      // null. Delete either from `claimAndStart`'s insert and this is the test that goes red; the
+      // other five are `not null` and would take the whole suite down with a constraint violation.
+      const integration = await fixtures.seedIntegration()
+      const profile = await launchFor()
+      const outcome = await claimAndStart(fixtures.db(), await claimInput(integration.id))
+      if (outcome.outcome !== 'started') throw new Error('the claim was refused')
+
+      const [row] = await fixtures
+        .db()
+        .select({
+          workspaceVersionId: workflows.workspaceVersionId,
+          setupBundleVersionId: workflows.setupBundleVersionId,
+          model: workflows.model,
+          instanceType: workflows.instanceType,
+          purchaseMode: workflows.purchaseMode,
+          turnCap: workflows.turnCap,
+          spendCap: workflows.spendCap,
+        })
+        .from(workflows)
+        .where(eq(workflows.id, outcome.workflowId))
+
+      expect(row).toStrictEqual({
+        workspaceVersionId: profile.workspaceVersionId,
+        setupBundleVersionId: profile.setupBundleVersionId,
+        model: profile.model,
+        instanceType: profile.instanceType,
+        purchaseMode: profile.purchaseMode,
+        turnCap: profile.turnCap,
+        spendCap: profile.spendCap,
+      })
+
+      // And the caps are genuinely present, so the assertion above is comparing two values rather
+      // than two nulls — which is how a missing column would have slipped through it.
+      expect(row.turnCap).toBe(FIXTURE_TURN_CAP)
+      expect(row.spendCap).toBe(FIXTURE_SPEND_CAP)
     })
   })
 })

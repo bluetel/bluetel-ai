@@ -12,13 +12,15 @@ import {
   workflows,
   workspaceEntries,
   workspaces,
+  workspaceVersions,
 } from '../../db'
 import type { UserRole } from '../../enums'
 import type { AuthorisationDenial, SisyphusContext, SisyphusSession } from '../context'
 import { createCallerFactory } from '../procedures'
 import { memoiseScope } from '../scope'
 
-import { createUserFixtures, readTestDatabaseUrl } from './test-database'
+import { createGate, createUserFixtures, readTestDatabaseUrl } from './test-database'
+import { readVersionEntries } from './workspace-store'
 import { duplicateWorkspaceNameError, workspaceNotFoundError, workspacesRouter } from './workspaces'
 
 const createCaller = createCallerFactory(workspacesRouter)
@@ -396,6 +398,115 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.workspaces against a live 
     expect(trail.map((row) => row.action).sort()).toStrictEqual(['registered', 'replaced'])
     expect(trail.find((row) => row.action === 'replaced')).toMatchObject({ entityVersion: 2 })
   })
+
+  /**
+   * **FR-125's actual claim: "an in-flight workflow MUST be unaffected by an edit."**
+   *
+   * The test above is sequential — seed, edit, assert — and so proves only that versioning is
+   * append-only. Append-only is a *weaker* property than the requirement: an implementation with no
+   * concurrency safety whatsoever passes it, because nothing in it ever has two transactions open
+   * at once. "In-flight" is a claim about overlap, and the only way to test overlap is to create it.
+   *
+   * So this holds the run's transaction open on the same `readVersionEntries` its checkout resolves
+   * through, lands the edit **inside** that window, and only then lets the run continue. Three
+   * things make the result mean something:
+   *
+   * 1. Postgres — not an unresolved promise — confirms the run's backend is `idle in transaction`
+   *    while the edit runs. A promise that has not settled would also describe a transaction that
+   *    never opened.
+   * 2. The run is still unsettled when the edit returns, so the edit demonstrably landed *during*
+   *    it rather than after it.
+   * 3. The run's second read **sees** the edit — version 2 exists to it — and its own pinned entries
+   *    are nevertheless the identical rows. Without that, a pass would be equally well explained by
+   *    a snapshot that simply hid the edit, which is not the guarantee FR-125 makes.
+   */
+  it('is unaffected by an edit that lands while the run is in flight (FR-125)', async () => {
+    const created = await asAdmin().create({
+      name: `mid-run-${fixtures.suffix}`,
+      entries: [
+        entry({ repositoryUrl: 'github.com/acme/api', subdirectory: 'api', position: 1 }),
+        entry({
+          repositoryUrl: 'github.com/acme/legacy',
+          subdirectory: 'legacy',
+          isPrimary: false,
+          position: 2,
+        }),
+      ],
+    })
+
+    const pinnedVersionId = created.published.version.id
+    const workflowId = await seedWorkflowPinnedTo(pinnedVersionId)
+
+    const running = createGate()
+    const editLanded = createGate()
+    let runSettled = false
+
+    // The run: one transaction, open across the edit, resolving its checkout through the pinned
+    // version exactly as the detail view and the executor do.
+    const run = fixtures
+      .db()
+      .transaction(async (tx) => {
+        const atLaunch = await readVersionEntries(tx, pinnedVersionId)
+        running.open()
+        await editLanded.opened
+
+        const afterEdit = await readVersionEntries(tx, pinnedVersionId)
+        const versionsVisible = await tx
+          .select({ id: workspaceVersions.id })
+          .from(workspaceVersions)
+          .where(eq(workspaceVersions.workspaceId, created.workspace.id))
+
+        return { atLaunch, afterEdit, versionsVisible: versionsVisible.length }
+      })
+      .finally(() => {
+        runSettled = true
+      })
+
+    await running.opened
+    expect(await fixtures.backendsInTransaction()).toBeGreaterThan(0)
+
+    const edited = await asAdmin().update({
+      workspaceId: created.workspace.id,
+      entries: [
+        entry({ repositoryUrl: 'github.com/acme/api', subdirectory: 'api', position: 1 }),
+        entry({
+          repositoryUrl: 'github.com/acme/web',
+          subdirectory: 'web',
+          isPrimary: false,
+          position: 2,
+        }),
+      ],
+    })
+
+    expect(edited.published.version.version).toBe(2)
+    // The edit committed while the run was still inside its transaction — this is the overlap.
+    expect(runSettled).toBe(false)
+
+    editLanded.open()
+    const observed = await run
+
+    // The run can see the edit, so nothing below is explained by an isolated snapshot…
+    expect(observed.versionsVisible).toBe(2)
+    // …and its own entries are the same rows regardless: same ids, same repositories, same order.
+    expect(observed.afterEdit).toStrictEqual(observed.atLaunch)
+    expect(observed.afterEdit.map((row) => row.repositoryUrl)).toStrictEqual([
+      'github.com/acme/api',
+      'github.com/acme/legacy',
+    ])
+
+    // The pin itself did not move, and resolving through it still yields the removed repository.
+    const [workflow] = await fixtures
+      .db()
+      .select({ workspaceVersionId: workflows.workspaceVersionId })
+      .from(workflows)
+      .where(eq(workflows.id, workflowId))
+    expect(workflow.workspaceVersionId).toBe(pinnedVersionId)
+    expect(
+      (await readVersionEntries(fixtures.db(), workflow.workspaceVersionId)).map(
+        (row) => row.repositoryUrl,
+      ),
+    ).toContain('github.com/acme/legacy')
+  }, 30_000)
 
   it('lists the current version and its entries, not the newest version number', async () => {
     const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })

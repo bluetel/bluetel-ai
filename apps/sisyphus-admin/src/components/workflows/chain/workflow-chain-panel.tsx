@@ -1,5 +1,12 @@
 import { DataReadout, NotFoundCard } from '@sisyphus-admin/components/admin'
-import { Card, CardBody, CardHeader, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 import Link from 'next/link'
 
 import type { ChainMember } from './chain-model'
@@ -145,9 +152,9 @@ export const WorkflowChainPanel = ({
           <StateChip>{loading ? 'reading' : `runs ${String(readouts.length)}`}</StateChip>
         </CardHeader>
         <CardBody className="gap-close flex flex-col">
-          {loading || readouts.length > 0 ? null : (
-            <p className="type-data-mono text-graphite">no runs in this chain</p>
-          )}
+          {loading ? <LoadingState>reading this chain</LoadingState> : null}
+
+          {loading || readouts.length > 0 ? null : <EmptyState>no runs in this chain</EmptyState>}
 
           <ol className="gap-close flex flex-col">
             {readouts.map((member) => (

@@ -7,7 +7,9 @@ import {
   Card,
   CardBody,
   CardHeader,
+  EmptyState,
   FieldError,
+  LoadingState,
   StateChip,
 } from '@sisyphus-admin/components/ui'
 import type { LaunchOption } from '@sisyphus-admin/components/workflows/new'
@@ -174,8 +176,10 @@ export const ProfilesPanel = () => {
 
           {profiles.error === null ? null : <FieldError {...describeTrpcError(profiles.error)} />}
 
-          {profiles.isPending || items.length > 0 ? null : (
-            <p className="type-data-mono text-graphite">no execution profiles have been created</p>
+          {profiles.isPending ? <LoadingState>reading the execution profiles</LoadingState> : null}
+
+          {profiles.isPending || profiles.error !== null || items.length > 0 ? null : (
+            <EmptyState>no execution profiles have been created</EmptyState>
           )}
 
           {target === undefined ? (

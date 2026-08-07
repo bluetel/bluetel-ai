@@ -1,6 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { POLICY_VERSION, getEnvSecret, getResourceIdentifier, readEnvRecord } from './lib'
+import { getPlainStage } from './get-plain-stage'
+import {
+  POLICY_VERSION,
+  SISYPHUS_PROJECT,
+  getBucketName,
+  getBucketNames,
+  getConnectionUrlParameterName,
+  getEnvSecret,
+  getResourceIdentifier,
+  getStackScope,
+  readEnvRecord,
+} from './lib'
 
 describe('getResourceIdentifier', () => {
   it('formats as {project}-{stack}-{name}', () => {
@@ -23,6 +34,77 @@ describe('getResourceIdentifier', () => {
     )
 
     expect(staging).not.toBe(production)
+  })
+})
+
+describe('getStackScope', () => {
+  it('names resources under the shared project rather than the deployable', () => {
+    expect(getStackScope('staging')).toEqual({ project: SISYPHUS_PROJECT, stack: 'staging' })
+  })
+
+  it('collapses every auxiliary stage onto its plain stage', () => {
+    expect(getStackScope('production-bootstrap').stack).toBe('production')
+    expect(getStackScope('production-website').stack).toBe('production')
+    expect(getStackScope('production').stack).toBe('production')
+  })
+
+  it('gives the three deployables the same name for a shared resource', () => {
+    const fromPanel = getResourceIdentifier(getStackScope('production-website'), 'artifacts')
+    const fromControlPlane = getResourceIdentifier(getStackScope('production'), 'artifacts')
+
+    expect(fromPanel).toBe('sisyphus-production-artifacts')
+    expect(fromControlPlane).toBe(fromPanel)
+  })
+
+  it('refuses an empty stage rather than naming resources "sisyphus--artifacts"', () => {
+    expect(() => getStackScope('')).toThrow('empty stage name')
+    expect(() => getStackScope('   ')).toThrow('empty stage name')
+  })
+})
+
+describe('getBucketName', () => {
+  it('names each class of object under the stage', () => {
+    const scope = getStackScope('staging')
+
+    expect(getBucketName(scope, 'logs')).toBe('sisyphus-staging-logs')
+    expect(getBucketName(scope, 'snapshots')).toBe('sisyphus-staging-snapshots')
+  })
+
+  it('gives the creating stack and the deriving stacks the same name', () => {
+    expect(getBucketName(getStackScope('production-website'), 'bundles')).toBe(
+      getBucketName(getStackScope('production'), 'bundles'),
+    )
+  })
+})
+
+describe('getBucketNames', () => {
+  it('answers for all four classes, each distinct', () => {
+    const names = getBucketNames(getStackScope('staging'))
+
+    expect(names).toEqual({
+      artifacts: 'sisyphus-staging-artifacts',
+      bundles: 'sisyphus-staging-bundles',
+      logs: 'sisyphus-staging-logs',
+      snapshots: 'sisyphus-staging-snapshots',
+    })
+    expect(new Set(Object.values(names)).size).toBe(4)
+  })
+})
+
+describe('getConnectionUrlParameterName', () => {
+  it('namespaces the parameter under the stage', () => {
+    expect(getConnectionUrlParameterName('staging')).toBe(
+      '/sisyphus/staging/database/connection-url',
+    )
+  })
+
+  it('resolves to the same path from every auxiliary stage', () => {
+    expect(getConnectionUrlParameterName('staging-website')).toBe(
+      getConnectionUrlParameterName('staging-bootstrap'),
+    )
+    expect(getConnectionUrlParameterName(getPlainStage('staging-website'))).toBe(
+      getConnectionUrlParameterName('staging'),
+    )
   })
 })
 

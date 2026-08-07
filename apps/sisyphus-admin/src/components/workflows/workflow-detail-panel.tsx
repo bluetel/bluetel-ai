@@ -1,7 +1,16 @@
 'use client'
 
 import { describeTrpcError, isNotFoundError, NotFoundCard } from '@sisyphus-admin/components/admin'
-import { Card, CardBody, CardHeader, FieldError, StateChip } from '@sisyphus-admin/components/ui'
+import { LogViewer } from '@sisyphus-admin/components/log-viewer'
+import { supervisionStatus, WorkflowSupervision } from '@sisyphus-admin/components/supervision'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  FieldError,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 import { api } from '@sisyphus-admin/trpc'
 
 import { EntryResultsCard, toEntryResultsReadouts } from './entry-results'
@@ -13,6 +22,7 @@ import {
 import { LogViewerSlot } from './log-viewer-slot'
 import { SupervisionSlot } from './supervision-slot'
 import { useNow } from './use-now'
+import { WatchToggle } from './watch-toggle'
 import { WorkflowArtifactsCard } from './workflow-artifacts-card'
 import {
   toArtifactReadouts,
@@ -42,18 +52,69 @@ import { WorkflowTimeline } from './workflow-timeline'
  * identically, so a caller who cannot see the run cannot see one byte of its log or one row of its
  * artifacts, and cannot tell whether it exists.
  *
- * ## The two slots
+ * ## The watch control is mounted from the *resolved* run, not from the URL
  *
- * `LogViewerSlot` and `SupervisionSlot` are where T077's log viewer and Phase 7's controls mount.
- * Neither is built here. Both render an honest "not mounted" state rather than an empty region or
- * a disabled control, for the reason stated in each.
+ * `WatchToggle` is passed `detail.data.workflow.id` — the id the server returned — and is rendered
+ * only inside the branch where that exists. `workflowId`, the caller's guess from the URL, is
+ * deliberately not used for it. `watch` and `unwatch` are scoped and refuse an out-of-scope run
+ * with the same `NOT_FOUND` a nonexistent one gets, and this is what stops the panel undoing that
+ * from the outside: for a run the caller may not see there is no id to hand the control, so there
+ * is no control to press and no refusal to read a fact out of (FR-138, FR-190). Rendering it
+ * eagerly beside the not-found card, or while the read was still in flight, would turn a button
+ * into a lookup anyone could run over the whole id space.
+ *
+ * ## The two slots, now filled (T207, T208)
+ *
+ * `LogViewerSlot` and `SupervisionSlot` are where the log viewer and the supervision controls
+ * mount, and each now receives the real component as `children`. Neither slot changed to take one:
+ * both were written to hold a space and hand it over, and that is all that happened.
+ *
+ * The two are mounted differently, and the difference is deliberate.
+ *
+ * - **The log viewer takes the id from the URL**, like `timeline` and `artifacts` do. Its reads are
+ *   the scoped `workflow.logSegments` query and the `/api/stream/{id}` route, both of which answer
+ *   a run the caller may not see with the same `404` a nonexistent one gets — so there is nothing
+ *   for the panel to leak by starting them early, and starting them early is the point: SC-002 is
+ *   measured in seconds, and holding the stream behind `byId` would spend them.
+ * - **The supervision controls take the id `byId` returned**, like `WatchToggle` does, and are not
+ *   rendered until it exists. They are four *mutations*, and a button rendered against a guessed id
+ *   is a refusal an operator can read a fact out of (FR-190). They also cannot render honestly
+ *   without the run's state — a card that could not say what the run is doing has no business
+ *   offering to pause it — so until the read lands the slot holds a reading state instead.
+ *
+ * ## Why the run is re-read on a cadence
+ *
+ * `workflow.byId` polls while the run is unfinished. FR-015 requires the panel to reflect a
+ * transition without a manual reload, and FR-049 means the *only* honest source for "paused" is the
+ * state the executor's acknowledgement wrote — a pause mutation resolving proves a queue row was
+ * written and nothing else. Without the poll the card would say "pause requested" until somebody
+ * pressed refresh. A finished run is re-read no further: nothing about it will change again.
  */
 interface WorkflowDetailPanelProps {
   readonly workflowId: string
 }
 
+/**
+ * How often an unfinished run is re-read.
+ *
+ * Short enough that an acknowledged pause appears well inside SC-003's ten seconds, long enough
+ * that a detail view left open all afternoon is not a load test.
+ */
+export const WORKFLOW_DETAIL_POLL_MS = 5_000
+
 export const WorkflowDetailPanel = ({ workflowId }: WorkflowDetailPanelProps) => {
-  const detail = api.workflow.byId.useQuery({ workflowId })
+  const detail = api.workflow.byId.useQuery(
+    { workflowId },
+    {
+      refetchInterval: (query) => {
+        const state = query.state.data?.workflow.state
+
+        return state !== undefined && supervisionStatus({ workflowState: state }) === 'finished'
+          ? false
+          : WORKFLOW_DETAIL_POLL_MS
+      },
+    },
+  )
   const timeline = api.workflow.timeline.useQuery({ workflowId })
   const artifacts = api.workflow.artifacts.useQuery({ workflowId })
   const iterations = api.workflow.iterations.useQuery({ workflowId })
@@ -92,7 +153,7 @@ export const WorkflowDetailPanel = ({ workflowId }: WorkflowDetailPanelProps) =>
             <StateChip>reading</StateChip>
           </CardHeader>
           <CardBody>
-            <p className="type-data-mono text-graphite">reading this run</p>
+            <LoadingState>reading this run</LoadingState>
           </CardBody>
         </Card>
       ) : (
@@ -110,12 +171,25 @@ export const WorkflowDetailPanel = ({ workflowId }: WorkflowDetailPanelProps) =>
         </Card>
       )}
 
+      {detail.data === undefined ? null : <WatchToggle workflowId={detail.data.workflow.id} />}
+
       <SupervisionSlot
         workflowId={workflowId}
         live={readouts === undefined ? false : isLiveWorkflow(readouts.state)}
-      />
+      >
+        {detail.data === undefined ? (
+          <LoadingState>reading this run</LoadingState>
+        ) : (
+          <WorkflowSupervision
+            workflowId={detail.data.workflow.id}
+            workflowState={detail.data.workflow.state}
+          />
+        )}
+      </SupervisionSlot>
 
-      <LogViewerSlot workflowId={workflowId} />
+      <LogViewerSlot workflowId={workflowId}>
+        <LogViewer workflowId={workflowId} />
+      </LogViewerSlot>
 
       {entryResults === undefined ? null : <EntryResultsCard results={entryResults} />}
 

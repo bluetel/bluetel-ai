@@ -207,7 +207,11 @@ export const AuditPanel = ({ initialScope, initialConfigurationScope }: AuditPan
         <NotFoundCard message="No such user." />
       ) : (
         <>
-          <RoleChangeHistory entries={entries} loading={roleChanges.isPending} />
+          <RoleChangeHistory
+            entries={entries}
+            loading={roleChanges.isPending}
+            error={roleChanges.error === null ? undefined : describeTrpcError(roleChanges.error)}
+          />
 
           {roleChanges.hasNextPage ? (
             <div className="gap-close flex items-center">

@@ -1,4 +1,5 @@
 #!/bin/bash
+# cspell:ignore nvmfile
 
 # Script to load environment variables from .env.local and execute a command
 # Usage: ./populate-env-local.sh <command> [args...]

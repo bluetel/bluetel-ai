@@ -54,6 +54,30 @@ export const serverSchemas = {
   SISYPHUS_WEBHOOK_SIGNING_SECRET: z.string().min(1).optional(),
 
   /**
+   * Slack bot token for owner direct messages — the only notification channel in
+   * scope (FR-136).
+   *
+   * The panel needs it because the panel mounts the **machine surface**: four of
+   * FR-136's events plus `review_iteration_failed` are set by `sisyphus-api` when
+   * an executor reports in, and `SisyphusDependencies.notifier` is how they leave
+   * the package. The control plane reads the same variable for the two events its
+   * own sweep writes, so one Slack app serves both hosts.
+   */
+  SISYPHUS_SLACK_BOT_TOKEN: z.string().min(1),
+
+  /**
+   * Where the panel is served, so a notification can link to the run it is about
+   * (FR-137).
+   *
+   * Deliberately a separate variable from `NEXT_PUBLIC_SITE_URL` rather than
+   * derived from it: this one is the *link target written into a Slack message*,
+   * it is read only on the server, and it must be the same string the control
+   * plane composes its messages against — two hosts writing links to two
+   * different origins for the same run is the failure this avoids.
+   */
+  SISYPHUS_PANEL_URL: z.string().url(),
+
+  /**
    * Object storage the panel reads through presigned URLs. Snapshots are
    * deliberately absent: the panel never serves session state.
    */

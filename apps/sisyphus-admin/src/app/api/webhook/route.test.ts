@@ -26,6 +26,8 @@ const environment: Readonly<Record<string, string>> = {
   SISYPHUS_PERMITTED_EMAIL_DOMAINS: 'bluetel.co.uk',
   SISYPHUS_MACHINE_CREDENTIAL_SECRET: 'machine-secret',
   SISYPHUS_WEBHOOK_SIGNING_SECRET: DEPLOYMENT_SECRET,
+  SISYPHUS_SLACK_BOT_TOKEN: 'slack-bot-token-fixture',
+  SISYPHUS_PANEL_URL: 'https://sisyphus.example.com',
   SISYPHUS_LOGS_BUCKET: 'logs',
   SISYPHUS_BUNDLES_BUCKET: 'bundles',
   SISYPHUS_ARTIFACTS_BUCKET: 'artifacts',

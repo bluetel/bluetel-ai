@@ -5,7 +5,6 @@ import * as admin from './index'
 describe('the shared admin barrel', () => {
   it('publishes the behaviour the two screens share', () => {
     expect(Object.keys(admin).sort()).toStrictEqual([
-      'AdminShell',
       'ChangeNotice',
       'DataReadout',
       'ElapsedReadout',
@@ -20,6 +19,12 @@ describe('the shared admin barrel', () => {
       'isNotFoundError',
       'readTrpcErrorCode',
     ])
+  })
+
+  it('publishes no shell of its own — the layout owns the framing now (T156)', () => {
+    for (const shellPiece of ['AdminShell', 'PageHeader', 'Sidebar', 'TopBar']) {
+      expect(Object.keys(admin)).not.toContain(shellPiece)
+    }
   })
 
   it('publishes no primitive of its own, because there is exactly one primitive set', () => {

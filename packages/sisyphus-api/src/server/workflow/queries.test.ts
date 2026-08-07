@@ -2,9 +2,11 @@
 import { randomUUID } from 'node:crypto'
 
 import { TRPCError } from '@trpc/server'
+import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import type { SisyphusDatabase } from '../../db'
+import { workflowWatchers } from '../../db'
 import { listWorkflowsInput, spendSummaryInput } from '../../schemas'
 import type { SisyphusContext } from '../context'
 import { createCallerFactory } from '../procedures'
@@ -28,6 +30,7 @@ import {
   SPEND_A,
   SPEND_B,
 } from './test-support'
+import { unwatchWorkflow, watchWorkflow } from './watch'
 
 /**
  * **The leak contract (T042).** Quickstart scenario 1f, expressed as a test.
@@ -331,6 +334,93 @@ describe.skipIf(connectionString === undefined)('workflow read paths are scoped 
       )
 
       expect(refusal.code).toBe('NOT_FOUND')
+    })
+  })
+
+  /**
+   * `watching` on the detail read (FR-138, FR-190).
+   *
+   * The Watch/Unwatch control lives on the workflow detail view, and until this field existed the
+   * panel had no way to know which of the two to render. It rides on `byId` rather than on a
+   * procedure of its own so that the answer is only ever computed for an id
+   * `requireWorkflowInScope` has already admitted — the argument is in `./queries.ts`, and these
+   * are the assertions behind it.
+   */
+  describe('whether the caller is watching (FR-138)', () => {
+    it('is false for a run the caller may see but does not follow', async () => {
+      const detail = await readWorkflowDetail({
+        db,
+        scope: aliceScope,
+        workflowId: ids.a.workflowId,
+      })
+
+      expect(detail.watching).toBe(false)
+    })
+
+    it('becomes true once the caller watches it, and stays scoped to them', async () => {
+      await watchWorkflow({
+        db,
+        scope: aliceScope,
+        userId: ids.alice,
+        workflowId: ids.a.workflowId,
+      })
+
+      const mine = await readWorkflowDetail({ db, scope: aliceScope, workflowId: ids.a.workflowId })
+      expect(mine.watching).toBe(true)
+
+      // The admin can see the same run and is not watching it. A field that reported "somebody is
+      // watching this" rather than "you are" would be a different — and wrong — sentence.
+      const theirs = await readWorkflowDetail({
+        db,
+        scope: adminScope,
+        workflowId: ids.a.workflowId,
+      })
+      expect(theirs.watching).toBe(false)
+    })
+
+    it('goes back to false on unwatch', async () => {
+      await unwatchWorkflow({
+        db,
+        scope: aliceScope,
+        userId: ids.alice,
+        workflowId: ids.a.workflowId,
+      })
+
+      const detail = await readWorkflowDetail({
+        db,
+        scope: aliceScope,
+        workflowId: ids.a.workflowId,
+      })
+      expect(detail.watching).toBe(false)
+    })
+
+    it('cannot be used to confirm an out-of-scope run exists — even watched (FR-190)', async () => {
+      // The strongest case for putting this on `byId`: the watcher row is inserted behind the
+      // scope check's back, so if the field were served by an unscoped read it would answer `true`
+      // for a run the caller may not see, which is the disclosure FR-190 forbids.
+      await db
+        .insert(workflowWatchers)
+        .values({ workflowId: ids.b.workflowId, userId: ids.alice })
+        .onConflictDoNothing()
+
+      const outOfScope = await refusalOf(() =>
+        readWorkflowDetail({ db, scope: aliceScope, workflowId: ids.b.workflowId }),
+      )
+      const missing = await refusalOf(() =>
+        readWorkflowDetail({ db, scope: aliceScope, workflowId: randomUUID() }),
+      )
+
+      expect(outOfScope.code).toBe('NOT_FOUND')
+      expect(outOfScope.message).toBe(missing.message)
+
+      await db
+        .delete(workflowWatchers)
+        .where(
+          and(
+            eq(workflowWatchers.workflowId, ids.b.workflowId),
+            eq(workflowWatchers.userId, ids.alice),
+          ),
+        )
     })
   })
 

@@ -40,30 +40,94 @@ import type { UserRole, WorkflowState } from '../../enums'
  * {@link UserFixtures.close} drops it. Nothing outside it is read, written or deleted — which is
  * also what makes these suites safe to run against a server somebody else is using.
  *
- * ## Why it skips rather than fails
+ * ## Why it skips locally and fails in CI
  *
- * With `SISYPHUS_TEST_DATABASE_URL` unset, {@link readTestDatabaseUrl} returns `undefined` and the
- * caller turns its suite into `describe.skip`, so a plain `vitest run` on a machine with no
- * Postgres passes rather than erroring on connect.
+ * With `SISYPHUS_TEST_DATABASE_URL` unset on a developer machine, {@link readTestDatabaseUrl}
+ * returns `undefined` and the caller turns its suite into `describe.skip`, so a plain `vitest run`
+ * on a machine with no Postgres passes rather than erroring on connect.
+ *
+ * In CI that same silence is the failure mode this helper exists to prevent (FR-204, SC-064). A
+ * database-backed test must not pass by not running: roughly a third of this feature's assertions
+ * — the exactly-once unique index, the branch-lock advisory lock, the iteration `CHECK`, spend
+ * scoping, the skill-digest readback — only execute against a real server, and a green pipeline
+ * that skipped all of them is worse than a red one. So when `CI` is set and the variable is not,
+ * {@link readTestDatabaseUrl} throws at module scope and the suite is reported as failed.
  */
 
 /** The environment variable holding the live test database connection string. */
 export const TEST_DATABASE_URL_VARIABLE = 'SISYPHUS_TEST_DATABASE_URL'
 
+/** A promise and the call that settles it. See {@link createGate}. */
+export interface Gate {
+  /** Resolves once {@link Gate.open} has been called. */
+  readonly opened: Promise<void>
+  readonly open: () => void
+}
+
 /**
- * The connection string, or `undefined` when the suite should skip.
+ * A promise plus its resolver, for holding a transaction open at a chosen moment.
+ *
+ * The one piece of machinery every concurrency test in this package needs: a transaction cannot be
+ * paused from outside, so the test parks it on `await gate.opened` at the instant it cares about,
+ * lets a second transaction commit, and only then releases it. Shared from here — rather than
+ * redefined per suite — so "hold A open, land B, release A" is one idiom with one meaning.
+ */
+export const createGate = (): Gate => {
+  let open = (): void => undefined
+  const opened = new Promise<void>((resolve) => {
+    open = () => {
+      resolve()
+    }
+  })
+  return { opened, open }
+}
+
+/** The environment variable every CI provider sets, and the local shell does not. */
+export const CI_VARIABLE = 'CI'
+
+/**
+ * Whether this process is a CI run.
+ *
+ * `CI=false` and `CI=0` count as *not* CI: some tools export the variable unconditionally and
+ * signal with its value, and reading those as CI would break `vitest run` for anyone whose shell
+ * happens to have one of them set.
+ */
+const isContinuousIntegration = (
+  environment: Readonly<Record<string, string | undefined>>,
+): boolean => {
+  const value = environment[CI_VARIABLE]?.trim().toLowerCase()
+  return value !== undefined && value !== '' && value !== 'false' && value !== '0'
+}
+
+/** What a CI run without a database is told. Exported so the message itself can be asserted on. */
+export const MISSING_TEST_DATABASE_MESSAGE =
+  `${TEST_DATABASE_URL_VARIABLE} is not set, but ${CI_VARIABLE} is. ` +
+  'The database-backed suites skip only on developer machines; in CI they are the point, and a ' +
+  'suite that skips there reports success without having proved anything. Start a Postgres for ' +
+  `the job and export ${TEST_DATABASE_URL_VARIABLE} — see the \`services:\` block in ` +
+  '`.github/workflows/ci.yml`.'
+
+/**
+ * The connection string, `undefined` when the suite should skip, or a throw when it must not.
  *
  * A blank or whitespace-only value counts as absent: a variable exported as `''` in CI is a
  * misconfiguration, and connecting to `''` fails with an error about the URL rather than a message
  * saying the database was not configured.
  *
  * @param environment - Defaults to the process environment; injectable so this is testable.
+ * @throws When the variable is absent and `CI` is set — see the module note above.
  */
 export const readTestDatabaseUrl = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): string | undefined => {
   const value = environment[TEST_DATABASE_URL_VARIABLE]?.trim()
-  return value === undefined || value === '' ? undefined : value
+  if (value === undefined || value === '') {
+    if (isContinuousIntegration(environment)) {
+      throw new Error(MISSING_TEST_DATABASE_MESSAGE)
+    }
+    return undefined
+  }
+  return value
 }
 
 /**
@@ -116,6 +180,16 @@ export interface UserFixtures {
   readonly removeAll: () => Promise<void>
   /** Backends parked on a lock, for proving that a racing transaction really did wait. */
   readonly backendsWaitingOnLocks: () => Promise<number>
+  /**
+   * Backends sitting inside an open transaction, for proving that a gated one really is open.
+   *
+   * Asked of `pg_stat_activity` rather than inferred from an unsettled promise: a promise that has
+   * not resolved says only that JavaScript has not continued, which a transaction that never began
+   * would satisfy just as well. `idle in transaction` is Postgres itself confirming that a backend
+   * holds an open transaction and is waiting on the client — which is precisely the state a
+   * mid-run test needs its first transaction to be in while the second one commits.
+   */
+  readonly backendsInTransaction: () => Promise<number>
 }
 
 interface CreatedIds {
@@ -363,6 +437,15 @@ export const createUserFixtures = (connectionString: string): UserFixtures => {
            and wait_event_type = 'Lock'
            and state = 'active'`
       return firstRow(rows)?.blocked ?? 0
+    },
+
+    backendsInTransaction: async () => {
+      const rows = await requireClient().sql<{ held: number }[]>`
+        select count(*)::int as held
+          from pg_stat_activity
+         where datname = current_database()
+           and state = 'idle in transaction'`
+      return firstRow(rows)?.held ?? 0
     },
   }
 }

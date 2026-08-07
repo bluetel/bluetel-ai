@@ -51,6 +51,8 @@ describe('WorkflowArtifactsCard', () => {
     const markup = renderToStaticMarkup(<WorkflowArtifactsCard artifacts={[]} loading />)
 
     expect(markup).toContain('reading')
+    expect(markup).toContain('data-note="loading"')
+    expect(markup).toContain('reading what this run produced')
     expect(markup).not.toContain('nothing has been recorded for this run')
   })
 

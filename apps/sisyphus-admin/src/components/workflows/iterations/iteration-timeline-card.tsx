@@ -1,5 +1,12 @@
 import { DataReadout } from '@sisyphus-admin/components/admin'
-import { Card, CardBody, CardHeader, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 
 import type { IterationTimelineReadouts } from './iteration-readouts'
 
@@ -50,7 +57,7 @@ export const IterationTimelineCard = ({
     </CardHeader>
     <CardBody className="gap-default flex flex-col">
       {loading ? (
-        <p className="type-data-mono text-graphite">reading this run</p>
+        <LoadingState>reading this run</LoadingState>
       ) : (
         <div role="status" className="gap-hair flex flex-col">
           <p className="type-body text-ink measure-prose">{timeline.statement}</p>
@@ -105,7 +112,7 @@ export const IterationTimelineCard = ({
       </ol>
 
       {loading || timeline.iterations.length > 0 ? null : (
-        <p className="type-data-mono text-graphite">no development iterations recorded</p>
+        <EmptyState>no development iterations recorded</EmptyState>
       )}
     </CardBody>
   </Card>

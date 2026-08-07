@@ -17,8 +17,14 @@ export {
   PULL_ROUND_TRIP_MS,
   QUIESCE_BUDGET_MS,
   SNAPSHOT_BUDGET_MS,
+  SNAPSHOT_CAPTURE_BUDGET_MS,
+  SNAPSHOT_REGISTER_BUDGET_MS,
+  SNAPSHOT_RETRY_BUDGET_MS,
 } from './budget'
 export type { LatencyTerm, PauseLatencyBudget } from './budget'
+
+export { DeadlineExceededError, isDeadlineExceeded, withDeadline } from './deadline'
+export type { DeadlineOptions } from './deadline'
 
 export {
   createCorrectionDeliverer,

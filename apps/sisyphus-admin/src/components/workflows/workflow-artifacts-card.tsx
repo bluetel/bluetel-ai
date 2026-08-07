@@ -1,5 +1,12 @@
 import { DataReadout } from '@sisyphus-admin/components/admin'
-import { Card, CardBody, CardHeader, StateChip } from '@sisyphus-admin/components/ui'
+import {
+  Card,
+  CardBody,
+  CardHeader,
+  EmptyState,
+  LoadingState,
+  StateChip,
+} from '@sisyphus-admin/components/ui'
 
 import type { ArtifactReadouts } from './workflow-detail-readouts'
 
@@ -30,8 +37,10 @@ export const WorkflowArtifactsCard = ({
       <StateChip>{loading ? 'reading' : `recorded ${String(artifacts.length)}`}</StateChip>
     </CardHeader>
     <CardBody className="gap-default flex flex-col">
+      {loading ? <LoadingState>reading what this run produced</LoadingState> : null}
+
       {loading || artifacts.length > 0 ? null : (
-        <p className="type-data-mono text-graphite">nothing has been recorded for this run</p>
+        <EmptyState>nothing has been recorded for this run</EmptyState>
       )}
 
       {artifacts.map((artifact) => (

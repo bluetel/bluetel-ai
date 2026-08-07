@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { iterations, reviewFindings } from '../../db'
 import { reportIterationInput } from '../../schemas'
 import type { MachineCredential } from '../context'
+import type { WorkflowEventNotification } from '../notify'
+import { createFailingEmitter, createRecordingEmitter } from '../notify/test-support'
 
 import {
   fourthIterationError,
@@ -282,5 +284,98 @@ describe.skipIf(connectionString === undefined)('reportIteration', () => {
       .db()
       .delete(iterations)
       .where(eq(iterations.workflowId, fixture.ids().b.workflowId))
+  })
+
+  /**
+   * `review_iteration_failed` (FR-136, FR-141).
+   *
+   * This event is on FR-136's list and is set nowhere else in the platform, so these are the only
+   * assertions standing between it and never firing at all.
+   */
+  describe('announcing a failed pass', () => {
+    it('emits review_iteration_failed for a failing verdict', async () => {
+      await clear()
+      const emitter = createRecordingEmitter()
+      const { ctx } = fixture.contextFor(credential, emitter)
+
+      await reportIteration(ctx, { ordinal: 1, verdict: 'fail', findings: [] })
+
+      expect(emitter.calls).toStrictEqual([
+        { workflowId: fixture.ids().a.workflowId, event: 'review_iteration_failed' },
+      ])
+    })
+
+    it('says nothing about a passing one (FR-139)', async () => {
+      await clear()
+      const emitter = createRecordingEmitter()
+      const { ctx } = fixture.contextFor(credential, emitter)
+
+      await reportIteration(ctx, { ordinal: 1, verdict: 'pass', findings: [] })
+
+      expect(emitter.calls).toStrictEqual([])
+    })
+
+    it('emits once per pass, not once per retry of it (FR-047)', async () => {
+      await clear()
+      const emitter = createRecordingEmitter()
+      const { ctx } = fixture.contextFor(credential, emitter)
+
+      await reportIteration(ctx, { ordinal: 1, verdict: 'fail', findings: [] })
+      const retry = await reportIteration(ctx, { ordinal: 1, verdict: 'fail', findings: [] })
+
+      // The retry kept the first verdict and wrote nothing, so there is nothing new to announce.
+      expect(retry.recorded).toBe(false)
+      expect(emitter.calls).toHaveLength(1)
+    })
+
+    it('emits only after the iteration is committed and readable', async () => {
+      await clear()
+      let verdictAtEmission: string | null | undefined
+      const emitter = createRecordingEmitter(async () => {
+        // A second, independent handle would be needed to prove isolation properly; reading
+        // through the pool outside the transaction is enough to show the row is durable, because
+        // an uncommitted insert is invisible to this select.
+        const rows = await fixture
+          .db()
+          .select({ verdict: iterations.reviewVerdict })
+          .from(iterations)
+          .where(eq(iterations.workflowId, fixture.ids().a.workflowId))
+        verdictAtEmission = rows.at(0)?.verdict
+      })
+      const { ctx } = fixture.contextFor(credential, emitter)
+
+      await reportIteration(ctx, { ordinal: 2, verdict: 'fail', findings: [] })
+
+      expect(verdictAtEmission).toBe('fail')
+    })
+
+    it('records the pass even when the notifier fails (FR-141)', async () => {
+      await clear()
+      const attempts: WorkflowEventNotification[] = []
+      const { ctx } = fixture.contextFor(credential, createFailingEmitter(attempts))
+
+      const report = await reportIteration(ctx, { ordinal: 1, verdict: 'fail', findings: [] })
+
+      expect(report.recorded).toBe(true)
+      expect(attempts).toHaveLength(1)
+
+      // And the verdict is still on record afterwards, which is the half a resolved promise alone
+      // would not prove.
+      const rows = await fixture
+        .db()
+        .select({ verdict: iterations.reviewVerdict })
+        .from(iterations)
+        .where(eq(iterations.workflowId, fixture.ids().a.workflowId))
+      expect(rows.at(0)?.verdict).toBe('fail')
+    })
+
+    it('records the pass when the deployment has wired no notifier at all', async () => {
+      await clear()
+      const { ctx } = fixture.contextFor(credential)
+
+      await expect(
+        reportIteration(ctx, { ordinal: 1, verdict: 'fail', findings: [] }),
+      ).resolves.toMatchObject({ recorded: true })
+    })
   })
 })

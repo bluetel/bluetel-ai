@@ -130,4 +130,37 @@ describe('refusals', () => {
     expect(markup).toContain('E_PROFILE_CATALOGUE_UNAVAILABLE')
     expect(markup).not.toContain('permission')
   })
+
+  it('says it is reading rather than claiming the caller has no profile (FR-201)', () => {
+    const markup = render({ profiles: [], loading: true })
+
+    expect(markup).toContain('data-note="loading"')
+    expect(markup).toContain('reading the profiles you may launch on')
+    expect(markup).not.toContain('no execution profile has been granted to you')
+  })
+
+  it('reads as reading in the chip and in the picker, not as “profiles 0”', () => {
+    const markup = render({ profiles: [], loading: true })
+
+    expect(markup).toContain('reading')
+    expect(markup).not.toContain('profiles 0')
+    expect(markup).not.toContain('No execution profile is available to you')
+  })
+
+  it('states the empty case only once the read has settled', () => {
+    const markup = render({ profiles: [] })
+
+    expect(markup).toContain('data-note="empty"')
+    expect(markup).toContain('no execution profile has been granted to you')
+  })
+
+  it('withholds the empty case when the catalogue read was refused', () => {
+    const markup = render({
+      profiles: [],
+      catalogueError: { code: 'E_PROFILE_CATALOGUE_UNAVAILABLE', action: 'Ask an admin.' },
+    })
+
+    expect(markup).toContain('E_PROFILE_CATALOGUE_UNAVAILABLE')
+    expect(markup).not.toContain('no execution profile has been granted to you')
+  })
 })

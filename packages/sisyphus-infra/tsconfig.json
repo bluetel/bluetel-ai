@@ -2,9 +2,12 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "lib": ["ES2020"],
-    "types": ["node"]
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "paths": {
+      "bun": ["./sst-platform-bun.d.ts"]
+    }
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "include": ["src/**/*", "sst-install.config.ts", ".sst/**/*.ts"],
+  "exclude": ["node_modules", "**/node_modules", "dist"]
 }

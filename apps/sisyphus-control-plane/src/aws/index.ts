@@ -1,11 +1,11 @@
 /**
- * The control plane's AWS layer — four narrow interfaces and their adapters (T054).
+ * The control plane's AWS layer — five narrow interfaces and their adapters (T054).
  *
  * Each seam states what the control plane *does* with a service, not what the service offers:
- * compute is launch/terminate/list, storage is head/list/remove, parameters are write/read/remove
- * and schedules are upsert/remove/list. Twelve methods in total, against four SDKs that expose
- * several hundred — which is the point. A seam the width of the SDK is a re-export, and the
- * control plane would be untestable without provisioning real compute.
+ * compute is launch/terminate/list, storage is head/list/remove, parameters are write/read/remove,
+ * schedules are upsert/remove/list and a secret is read. Thirteen methods in total, against five
+ * SDKs that expose several hundred — which is the point. A seam the width of the SDK is a
+ * re-export, and the control plane would be untestable without provisioning real compute.
  *
  * Every interface ships with a recording fake in this directory, exported here so other jobs'
  * tests take the same one rather than inventing a stub apiece. **No module in this directory
@@ -50,3 +50,9 @@ export type {
 
 export { createFakeScheduleRegistry } from './schedules-fake'
 export type { FakeScheduleRegistry } from './schedules-fake'
+
+export { createSecretsManagerReader } from './secrets'
+export type { SecretReader, SecretsCommandSender } from './secrets'
+
+export { createFakeSecretReader } from './secrets-fake'
+export type { FakeSecretReader } from './secrets-fake'

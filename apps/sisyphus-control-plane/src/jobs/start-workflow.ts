@@ -65,7 +65,15 @@ export const START_WORKFLOW_JOB_NAME = 'start-workflow'
 export interface StartWorkflowDependencies {
   readonly db: SisyphusDatabase
   readonly compute: ComputeProvisioner
-  /** `SISYPHUS_MACHINE_SURFACE_URL` — the only URL the instance is told about. */
+  /**
+   * `SISYPHUS_MACHINE_SURFACE_URL` — the only URL the **envelope** carries.
+   *
+   * It was once the only URL the instance was told about at all. It no longer is: the executor
+   * also reads `SISYPHUS_FORGE_API_URL`, the base of the code host's REST API. That one is
+   * instance configuration rather than job configuration — it is identical for every run on a
+   * stage — so it reaches the instance through its own environment and not through here, and
+   * provisioning neither knows nor needs to know it.
+   */
   readonly machineSurfaceUrl: string
   /** `SISYPHUS_MACHINE_CREDENTIAL_SECRET`. Never in the envelope; only what it signs is. */
   readonly credentialSecret: string
