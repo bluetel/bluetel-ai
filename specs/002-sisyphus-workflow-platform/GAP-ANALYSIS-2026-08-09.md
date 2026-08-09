@@ -12,6 +12,10 @@ base: analysis/spec2-gap @ 467e088 (branched from feature/sisyphus-4)
 Where `tasks.md` and the source disagree, the source wins and the disagreement is called out. No source file
 was modified.
 
+> **Companion**: [SPEC-003-004-IMPACT-2026-08-09.md](./SPEC-003-004-IMPACT-2026-08-09.md) assesses how specs
+> 003 and 004 change this list, and revises the ordering in §8. It **corrects the A6 ranking below** and folds
+> T210 into spec 003's work. Read both before planning from this one.
+
 **Scoreboard**: 232 tasks. **198 checked, 34 open.** The requirements checklist
 (`checklists/requirements.md`) has zero open items and the spec carries no `NEEDS CLARIFICATION` markers, so
 the open set below is the whole of the tracked work.
@@ -146,9 +150,13 @@ S2 recorded the real notice format as *unobserved*.
 
 Consequence: **on interruptible capacity, a reclaimed instance loses its work silently.** The entire
 snapshot-and-restore machinery (US3, FR-054) exists and is correct; the trigger that fires it in the one case
-it was built for is not connected. Whether this is blocking depends on a business decision the spec does not
-make for you: if you launch on on-demand capacity only, it is deferrable; if `purchase_mode` is ever `spot`,
-it is a data-loss bug.
+it was built for is not connected.
+
+> **Corrected 2026-08-09.** This item originally qualified the severity as depending on whether
+> `purchase_mode` would ever be `spot`. That qualification was wrong: spot **is** the default —
+> `packages/sisyphus-api/src/enums/purchase-mode.ts:17` sets `DEFAULT_PURCHASE_MODE = 'spot'`, and spec
+> 003/FR-039 states it as the platform default. So this is a data-loss bug in the default configuration, not a
+> conditional one, and it belongs beside A1 rather than at the bottom of Tier A. See the companion document, §4.
 
 Blocks T219 step 2.
 
