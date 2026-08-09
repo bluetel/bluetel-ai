@@ -12,19 +12,29 @@ pnpm install --frozen-lockfile
 ```
 
 **A database is required for the enable suites to mean anything.** `packages/sisyphus-api`'s profile tests are
-database-backed and **skip rather than fail** without `DATABASE_URL` — a green run without one proves nothing
-about this feature. This is the exact trap recorded in `specs/002`'s plan ("CI ran no Postgres, so a third of
-`sisyphus-api`'s assertions never executed while the pipeline reported green").
+database-backed and **skip rather than fail** without `SISYPHUS_TEST_DATABASE_URL` — a green run without one
+proves nothing about this feature. This is the exact trap recorded in `specs/002`'s plan ("CI ran no Postgres,
+so a third of `sisyphus-api`'s assertions never executed while the pipeline reported green").
+
+Note the two variables are **different**, and neither is `DATABASE_URL`: migrations read
+`SISYPHUS_DATABASE_URL` (`src/db/migrations/cli.ts`, which refuses to guess a default), and the suites read
+`SISYPHUS_TEST_DATABASE_URL` (`src/server/admin/test-database.ts`). Exporting the wrong name is indistinguishable
+from exporting nothing — the suites simply skip.
+
+The drizzle client connects with `ssl: 'require'`, so a stock local Postgres is not enough; the server must be
+started with SSL enabled or every database-backed assertion silently skips.
 
 ```bash
-export DATABASE_URL='postgres://…'
+export SISYPHUS_DATABASE_URL='postgres://…'
+export SISYPHUS_TEST_DATABASE_URL="$SISYPHUS_DATABASE_URL"
 pnpm nx run sisyphus-api:migrate
 ```
 
-Confirm the suites are actually running before trusting any result below:
+Confirm the suites are actually running before trusting any result below — expect the live-database describe
+block to report its tests as run, not skipped:
 
 ```bash
-pnpm nx test sisyphus-api -- profiles --reporter=verbose | grep -ci skipped
+pnpm nx test sisyphus-api -- profiles --reporter=verbose
 ```
 
 ## Scenario 1 — A profile can be enabled at all (SC-001, US1)
@@ -129,10 +139,22 @@ what should be observed failing.)
 
   ```bash
   grep -rni "reachability\|workspace_entry\|createProfilesRouter\|ProfilesRouterOptions" \
-    --include="*.ts" --include="*.tsx" apps packages knip.json
+    --include="*.ts" --include="*.tsx" apps packages knip.json | grep -v "sisyphus-infra/.sst"
   ```
 
-  Expect **no output**. `-i` catches every casing, including the `Reachability` in type names.
+  `-i` catches every casing, including the `Reachability` in type names. Four families of match are
+  **expected and correct** — check them off rather than removing them:
+
+  | Surviving match                                             | Why it stays                                                                     |
+  | ----------------------------------------------------------- | -------------------------------------------------------------------------------- |
+  | `E_WORKSPACE_ENTRY` in `components/admin/workspaces/`       | A different code entirely — workspace-editor row validation, not the enable gate |
+  | `workspace_entry_id` in `db/schema/workflow.ts`             | A column name on `workflow_entries`; untouched by this feature                   |
+  | `specs/004-remove-reachability-gate` in `profile-gate.ts`   | The new header citing this spec for why the check is gone                        |
+  | Anything under `packages/sisyphus-infra/.sst/node_modules/` | Vendored provider typings                                                        |
+
+  Anything else is a survivor and must be removed. In particular `admin/integration-connectors.ts` and
+  `admin/integration-connectors-fake.ts` both cited the deleted files as precedent and had to be rewritten —
+  the plan named only `notify/emitter.ts` and `jobs/prompt-redact.ts`, so do not trust that list over the sweep.
 
 ## Scenario 5 — The safety net is real (US3, FR-012)
 

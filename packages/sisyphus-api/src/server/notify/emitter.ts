@@ -76,9 +76,11 @@ export interface WorkflowEventEmission {
  *
  * @param emitter - The wired notifier, or `undefined` in a deployment that has none. Absent is a
  *   silent no-op rather than an error: a platform whose Slack app has not been installed yet must
- *   still be able to finish a workflow. Contrast `admin/reachability.ts`, whose absent probe
- *   *refuses* — an unchecked gate reports a check that did not happen, whereas an unsent
- *   notification withholds nothing and breaks nothing.
+ *   still be able to finish a workflow. Refusing by default is the right shape only where the
+ *   refusal is *survivable* — an unwired notifier withholds one message and breaks nothing
+ *   downstream, which is exactly why silence is the safe choice here. A gate on the one path an
+ *   operator needs in order to run anything at all does not get that luxury: refuse by default
+ *   there and "safe default" and "product inoperable" are the same state.
  * @param notification - The workflow and the event.
  * @returns What happened. Callers may ignore it; none of them may throw on it.
  */

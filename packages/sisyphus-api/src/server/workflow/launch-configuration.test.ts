@@ -6,8 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { SisyphusDatabase, Workflow } from '../../db'
 import { workflows } from '../../db'
 import { listWorkflowsInput } from '../../schemas'
-import { createProfilesRouter } from '../admin/profiles'
-import { createFakeReachabilityProbe } from '../admin/reachability-fake'
+import { profilesRouter } from '../admin/profiles'
 import type { SisyphusContext } from '../context'
 import { createCallerFactory } from '../procedures'
 import type { ResolvedScope } from '../scope'
@@ -212,9 +211,7 @@ describe.skipIf(connectionString === undefined)(
         .where(eq(workflows.id, ids.a.workflowId))
 
       // 2. And then somebody edits the profile it launched from, through the real admin path.
-      const profiles = createCallerFactory(
-        createProfilesRouter({ reachability: createFakeReachabilityProbe() }),
-      )(adminContext())
+      const profiles = createCallerFactory(profilesRouter)(adminContext())
 
       await profiles.update({
         executionProfileId: ids.a.executionProfileId,

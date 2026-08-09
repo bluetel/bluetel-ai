@@ -9,8 +9,13 @@ import {
   unreadableSubjectCheck,
 } from './profile-gate'
 import type { ProfileEnableSubject } from './profile-store'
-import { createRefusingReachabilityProbe } from './reachability'
-import { createFakeReachabilityProbe } from './reachability-fake'
+
+/**
+ * Every retained refusal is asserted against a **known failure** — a subject constructed to violate
+ * exactly that condition — rather than inferred from a passing case. A gate is only trusted once it
+ * has been seen to bite, and this gate previously shipped with a half that refused everything
+ * unconditionally without any suite noticing that the product had become unusable.
+ */
 
 const workspaceEntry = (repositoryUrl: string, position: number): WorkspaceEntry => ({
   id: `entry-${String(position)}`,
@@ -36,27 +41,28 @@ const subject = (overrides: Partial<ProfileEnableSubject> = {}): ProfileEnableSu
 })
 
 describe('checkProfileCanBeEnabled', () => {
-  it('passes when the bundle is enabled and every entry is reachable (FR-124)', async () => {
-    const probe = createFakeReachabilityProbe()
-
-    await expect(checkProfileCanBeEnabled(subject(), probe)).resolves.toStrictEqual({
-      passed: true,
-      failures: [],
-    })
-
-    // Both halves of the requirement were actually exercised: the branch is probed with the
-    // repository, not just the repository.
-    expect(probe.calls).toStrictEqual([
-      { repositoryUrl: 'github.com/acme/api', baseBranch: 'main' },
-      { repositoryUrl: 'github.com/acme/web', baseBranch: 'main' },
-    ])
+  it('passes a profile pinning an enabled bundle and a non-empty workspace (FR-124)', () => {
+    expect(checkProfileCanBeEnabled(subject())).toStrictEqual({ passed: true, failures: [] })
   })
 
-  it('refuses a disabled setup bundle, naming it (FR-124)', async () => {
-    const check = await checkProfileCanBeEnabled(
-      subject({ setupBundleEnabled: false }),
-      createFakeReachabilityProbe(),
+  it('does not inspect the repositories themselves', () => {
+    // The entries are counted, never verified. Whether these repositories or branches exist is
+    // settled at checkout by the credential that will do the cloning — the platform never holds
+    // that credential, so a gate here could only ever guess.
+    const check = checkProfileCanBeEnabled(
+      subject({
+        entries: [
+          workspaceEntry('github.com/acme/does-not-exist', 1),
+          workspaceEntry('not-even-a-url', 2),
+        ],
+      }),
     )
+
+    expect(check).toStrictEqual({ passed: true, failures: [] })
+  })
+
+  it('refuses a disabled setup bundle, naming it (FR-124)', () => {
+    const check = checkProfileCanBeEnabled(subject({ setupBundleEnabled: false }))
 
     expect(check.passed).toBe(false)
     expect(check.failures).toStrictEqual([
@@ -68,105 +74,59 @@ describe('checkProfileCanBeEnabled', () => {
     ])
   })
 
-  it('says an archived bundle is archived rather than merely disabled', async () => {
-    const check = await checkProfileCanBeEnabled(
+  it('says an archived bundle is archived rather than merely disabled', () => {
+    const check = checkProfileCanBeEnabled(
       subject({ setupBundleEnabled: false, setupBundleArchived: true }),
-      createFakeReachabilityProbe(),
     )
 
     // One problem, stated once. An archived bundle is always disabled too, so reporting both
     // would send the admin to enable something that cannot be enabled.
     expect(check.failures).toHaveLength(1)
     expect(check.failures[0]?.detail).toContain('has been archived')
+    expect(check.failures[0]?.detail).not.toContain('is disabled')
   })
 
-  it('names the failing workspace entry, its repository and its branch (FR-124)', async () => {
-    const probe = createFakeReachabilityProbe()
-    probe.setOutcome('github.com/acme/web', {
-      reachable: false,
-      reason: 'the credential cannot read this repository',
-    })
-
-    const check = await checkProfileCanBeEnabled(subject(), probe)
-
-    // "The profile cannot be enabled" would leave an admin comparing a dozen repositories by eye.
-    expect(check.failures).toStrictEqual([
-      {
-        element: 'workspace_entry',
-        detail:
-          'workspace entry 2 (github.com/acme/web on main) is unreachable: the credential cannot read this repository',
-      },
-    ])
-  })
-
-  it('reports every failing entry rather than stopping at the first', async () => {
-    const probe = createFakeReachabilityProbe({
-      defaultOutcome: { reachable: false, reason: 'branch not found' },
-    })
-
-    const check = await checkProfileCanBeEnabled(subject(), probe)
-
-    expect(check.failures).toHaveLength(2)
-    expect(check.failures.map((failure) => failure.detail)).toStrictEqual([
-      'workspace entry 1 (github.com/acme/api on main) is unreachable: branch not found',
-      'workspace entry 2 (github.com/acme/web on main) is unreachable: branch not found',
-    ])
-  })
-
-  it('reports a disabled bundle and an unreachable entry together', async () => {
-    const probe = createFakeReachabilityProbe()
-    probe.setOutcome('github.com/acme/api', { reachable: false, reason: 'host did not resolve' })
-
-    const check = await checkProfileCanBeEnabled(subject({ setupBundleEnabled: false }), probe)
-
-    expect(check.failures.map((failure) => failure.element)).toStrictEqual([
-      'setup_bundle',
-      'workspace_entry',
-    ])
-  })
-
-  it('refuses a workspace version with no repositories, and probes nothing', async () => {
-    const probe = createFakeReachabilityProbe()
-
-    const check = await checkProfileCanBeEnabled(subject({ entries: [] }), probe)
-
-    expect(check.failures).toHaveLength(1)
-    expect(check.failures[0]).toMatchObject({ element: 'workspace_version' })
-    expect(check.failures[0]?.detail).toContain('contains no repositories')
-    expect(probe.calls).toStrictEqual([])
-  })
-
-  it('refuses an archived workspace', async () => {
-    const check = await checkProfileCanBeEnabled(
-      subject({ workspaceArchived: true }),
-      createFakeReachabilityProbe(),
-    )
+  it('refuses an archived workspace, naming it', () => {
+    const check = checkProfileCanBeEnabled(subject({ workspaceArchived: true }))
 
     expect(check.failures.map((failure) => failure.element)).toStrictEqual(['workspace_version'])
     expect(check.failures[0]?.detail).toContain('platform')
   })
 
-  it('refuses everything when no probe is configured, rather than passing unchecked', async () => {
-    const check = await checkProfileCanBeEnabled(subject(), createRefusingReachabilityProbe())
+  it('refuses a workspace version with no repositories', () => {
+    // Not a formality: a run launched from this profile would provision a paid instance and reach
+    // bootstrap phase 6 with nothing to check out.
+    const check = checkProfileCanBeEnabled(subject({ entries: [] }))
 
-    expect(check.passed).toBe(false)
-    expect(check.failures).toHaveLength(2)
-    expect(check.failures[0]?.detail).toContain('no repository reachability checker')
+    expect(check.failures).toHaveLength(1)
+    expect(check.failures[0]).toMatchObject({ element: 'workspace_version' })
+    expect(check.failures[0]?.detail).toContain('contains no repositories')
   })
 
-  it('treats a probe that throws as unreachable, naming the entry it happened on', async () => {
-    const probe = createFakeReachabilityProbe()
-    probe.failWith('github.com/acme/api', new Error('the connection timed out'))
+  it('reports every failure together rather than stopping at the first', () => {
+    // An admin fixing two broken things should not have to discover them one attempt at a time.
+    const check = checkProfileCanBeEnabled(subject({ setupBundleEnabled: false, entries: [] }))
 
-    const check = await checkProfileCanBeEnabled(subject(), probe)
-
-    expect(check.failures).toStrictEqual([
-      {
-        element: 'workspace_entry',
-        detail:
-          'workspace entry 1 (github.com/acme/api on main) is unreachable: the connection timed out',
-      },
+    expect(check.failures.map((failure) => failure.element)).toStrictEqual([
+      'setup_bundle',
+      'workspace_version',
     ])
+  })
+
+  it('reports an archived bundle and an archived workspace together', () => {
+    const check = checkProfileCanBeEnabled(
+      subject({ setupBundleEnabled: false, setupBundleArchived: true, workspaceArchived: true }),
+    )
+
+    expect(check.failures.map((failure) => failure.element)).toStrictEqual([
+      'setup_bundle',
+      'workspace_version',
+    ])
+  })
+
+  it('keeps `passed` in step with `failures` in both directions', () => {
+    expect(checkProfileCanBeEnabled(subject()).passed).toBe(true)
+    expect(checkProfileCanBeEnabled(subject({ workspaceArchived: true })).passed).toBe(false)
   })
 })
 
@@ -179,32 +139,29 @@ describe('the pre-gate verdicts', () => {
   })
 
   it('refuses a version whose pinned rows cannot be read', () => {
-    expect(unreadableSubjectCheck().failures[0]?.detail).toContain('could not be read')
+    const check = unreadableSubjectCheck()
+
+    expect(check.passed).toBe(false)
+    expect(check.failures[0]).toMatchObject({ element: 'profile_version' })
+    expect(check.failures[0]?.detail).toContain('could not be read')
   })
 })
 
 describe('profileCannotBeEnabledError', () => {
-  it('is CONFLICT — the admin may act, the target’s state is wrong', async () => {
-    const check = await checkProfileCanBeEnabled(
-      subject({ setupBundleEnabled: false }),
-      createFakeReachabilityProbe(),
-    )
+  it('is CONFLICT — the admin may act, the target’s state is wrong', () => {
+    const check = checkProfileCanBeEnabled(subject({ setupBundleEnabled: false }))
 
     expect(profileCannotBeEnabledError(check).code).toBe('CONFLICT')
   })
 
-  it('lists every failure, one per line, so three broken entries take one attempt', async () => {
-    const probe = createFakeReachabilityProbe({
-      defaultOutcome: { reachable: false, reason: 'branch not found' },
-    })
-    const check = await checkProfileCanBeEnabled(subject({ setupBundleEnabled: false }), probe)
+  it('lists every failure, one per line, so two broken things take one attempt', () => {
+    const check = checkProfileCanBeEnabled(subject({ setupBundleEnabled: false, entries: [] }))
 
     const lines = profileCannotBeEnabledError(check).message.split('\n')
 
     expect(lines[0]).toBe('This execution profile cannot be enabled yet:')
-    expect(lines).toHaveLength(4)
+    expect(lines).toHaveLength(3)
     expect(lines[1]).toContain('acme-base')
-    expect(lines[2]).toContain('workspace entry 1 (github.com/acme/api on main)')
-    expect(lines[3]).toContain('workspace entry 2 (github.com/acme/web on main)')
+    expect(lines[2]).toContain('contains no repositories')
   })
 })
