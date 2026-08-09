@@ -126,7 +126,7 @@ This specification **changes** the following, which the platform specification s
 | ------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- |
 | `002/FR-043`, `002/FR-075`      | `setup.sh` installs the agent CLI **and its credentials** | Installs the agent CLI and non-agent credentials only; agent credential is leased |
 | `002/FR-072`                    | Credentials reinstalled from the bundle on every boot     | Agent credential fetched from its lease on every boot                             |
-| `002/FR-049`                    | Pause holds the agent process alive on a running instance | Pause stops the instance; session persists on its disk                            |
+| `002/FR-049`                    | Pause holds the agent process alive on a running instance | Pause stops the instance (on-demand); session persists on its disk. Spot degrades to 002's snapshot path |
 | `002/US2 §4` (pause idle limit) | Paused too long → snapshot, release instance              | Unchanged; the seat is **retained**, since parking is not the workflow ending     |
 
 Execution profiles are **extended**, not changed: they gain an ordered attachment to credential groups
@@ -600,7 +600,10 @@ re-login, and confirm it returns to the pool.
 
 - **FR-039**: Pausing a workflow MUST bring the agent to a turn boundary, capture a durable snapshot, and then
   **stop** its instance while preserving its disk — superseding the "hold the process alive" behaviour of
-  `002/FR-049`.
+  `002/FR-049`. This applies to **on-demand instances only**. A one-time spot instance cannot be stopped by the
+  user at all, and spot is the platform default, so a spot pause MUST degrade to snapshot-and-terminate —
+  routed through the FR-043 recovery path rather than implemented as a second one. Neither mode releases the
+  credential lease (FR-040).
 - **FR-040**: A paused workflow MUST retain its agent credential lease.
 - **FR-041**: Resuming a paused workflow MUST start its existing instance and continue the same session against
   the same working tree, without re-provisioning, re-cloning or restoring from snapshot.
@@ -687,8 +690,10 @@ re-login, and confirm it returns to the pool.
 - **SC-005**: A workflow waiting for a credential starts within 30 seconds of one becoming available.
 - **SC-006**: An engineer can tell, from the workflow view alone and without assistance, that a run is waiting
   for an agent credential and how long it has waited.
-- **SC-007**: Resuming a paused workflow reaches its first agent turn at least 5× faster than starting an
-  equivalent workflow from scratch.
+- **SC-007**: Resuming a paused **on-demand** workflow reaches its first agent turn at least 5× faster than
+  starting an equivalent workflow from scratch. Spot runs resume from snapshot and are held to 002's resume
+  performance instead; the two MUST be measured and reported as separate figures, because a single blended
+  number would misrepresent both (FR-039).
 - **SC-008**: A paused workflow's compute cost is zero for the duration of the pause.
 - **SC-009**: No agent credential becomes unusable through disuse — zero expiry-through-idleness events over a
   30-day period in which at least one credential receives no workflow traffic.
@@ -734,8 +739,11 @@ re-login, and confirm it returns to the pool.
   The cost is accepted deliberately: a metered API key that could serve many workflows at once serves exactly
   one, and concurrency on such a key is bought by registering it as several credentials rather than by relaxing
   the rule.
-- **Pausing uses instance stop with disk retention.** A paused workflow's session stays on that disk. Durable
-  snapshots remain the recovery path, not the resume path.
+- **Pausing uses instance stop with disk retention — on on-demand instances.** A paused workflow's session
+  stays on that disk. Durable snapshots remain the recovery path, not the resume path. **This assumption does
+  not hold for spot**, which cannot be stopped and is the current platform default: those pauses snapshot and
+  terminate, and snapshots remain both recovery and resume path for them. Changing the default purchase mode is
+  a cost decision belonging to whoever owns the spend, and is deliberately out of scope here.
 - Existing platform mechanisms are reused rather than rebuilt: the workflow-scoped credential for fetching, the
   output redaction pipeline, the reconciliation sweep and heartbeat, the append-only configuration audit, the
   notification system, and the administrator role.

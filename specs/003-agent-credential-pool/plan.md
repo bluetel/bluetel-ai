@@ -10,7 +10,9 @@ Move the agent's credential out of the setup bundle and into a pooled, leased en
 login rotates its own refresh credential and a bundle-carried copy is stale the moment the agent uses it. One
 workflow holds exactly one credential from admission to terminal state; rotations are written through to a
 secret store as they happen; a fencing value stops a partitioned instance overwriting newer material. Pause
-becomes an instance **stop** with disk retained rather than a process held alive, so resume is a start.
+becomes an instance **stop** with disk retained rather than a process held alive, so resume is a start — on
+on-demand instances. Spot cannot be stopped and is the current default, so spot pauses keep 002's
+snapshot-and-terminate behaviour (research R6, FR-039).
 
 The work extends four existing projects and creates none. No new dependencies: every AWS client this needs
 (`client-ec2`, `client-secrets-manager`, `client-ssm`) is already a dependency of `apps/sisyphus-control-plane`.
@@ -40,7 +42,8 @@ is testable without an AWS account.
 **Project Type**: pnpm/Nx monorepo. Four existing members change; none is added.
 
 **Performance Goals**: a released credential reaches a waiting workflow within 30s (SC-005); resume from pause
-reaches first agent turn ≥5× faster than a cold start (SC-007).
+reaches first agent turn ≥5× faster than a cold start (SC-007), **on on-demand only** — spot resumes from
+snapshot at 002's performance and is reported as a separate figure.
 
 **Constraints**: exactly one live holder per credential, enforced against partition and race (SC-003, FR-020);
 zero credential material in logs, snapshots, envelopes, bundles or admin-visible surfaces (SC-014).

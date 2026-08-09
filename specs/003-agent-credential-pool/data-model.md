@@ -69,6 +69,7 @@ backend stays swappable, and encoding a vendor in the schema would spend it.
 | `fence`               | bigint not null default 0 | Monotonic; incremented on every lease acquisition (FR-020, R9)      |
 | `last_used_at`        | timestamptz null          | Drives least-recently-used selection (FR-034)                       |
 | `last_exercised_at`   | timestamptz null          | Set by a workflow **or** by keep-alive (FR-035)                     |
+| `held_by`             | text null                 | `workflow` \| `keep_alive` while `state = 'held'`; null otherwise   |
 | `cooling_off_until`   | timestamptz null          | Provider's stated retry time where given (FR-078)                   |
 | `last_login_at`       | timestamptz null          |                                                                     |
 | `last_failure_reason` | text null                 | Why it is unhealthy — shown to admins, never contains material      |
@@ -88,6 +89,12 @@ backend stays swappable, and encoding a vendor in the schema would spend it.
   credential still be retried rather than left cooling off forever.
 - `fence` is on the credential, not the lease, because it must survive the lease that raised it — that is what
   makes a superseded holder's write rejectable after its lease row is gone.
+- `held_by` exists because **keep-alive and a workflow reservation contend for the same idle row** (FR-038, and
+  the edge case that names it). Both claim through the same conditional
+  `UPDATE … WHERE id = :id AND state = 'available'`, so one wins and the other sees zero rows — a read-then-act
+  check would let both observe `available` and proceed. Keep-alive cannot take a `credential_leases` row to
+  express its claim, because `workflow_id` is not null and there is no workflow, so the discriminator lives
+  here. It also gives the pool view its fourth holder kind (FR-074).
 
 ### `credential_leases`
 

@@ -9,7 +9,12 @@ description: 'Task list for Agent Credential Pool'
 **Prerequisites**: [plan.md](./plan.md), [spec.md](./spec.md), [research.md](./research.md),
 [data-model.md](./data-model.md), [contracts/](./contracts/), [quickstart.md](./quickstart.md)
 
-**Tests**: **Required, not optional**, per Constitution Principle III (NON-NEGOTIABLE) and FR-004/FR-058's audit
+**Tests**: **Required, not optional**, including for `index.ts` barrels — Principle III says *every* module
+file, and this plan applies it uniformly rather than inheriting the repo's split habit (`enums/index.ts` and
+`db/schema/index.ts` have colocated tests; `bootstrap/index.ts` and `session/index.ts` do not). That existing
+inconsistency is a governance question worth settling separately — the constitution's own wording says a
+document/tool disagreement is a defect one of the two must fix — but it is not settled by leaving new barrels
+untested. Per Constitution Principle III (NON-NEGOTIABLE) and FR-004/FR-058's audit
 requirements. A colocated `<name>.test.ts` is written **as part of the task that creates each module** — it is
 not a separate line item, the same way T004 "create the enum" is understood to include the enum's guard test.
 `.husky/pre-commit` runs the colocated test of every staged source file, so a module without one blocks its own
@@ -125,8 +130,10 @@ three AWS clients (`client-ec2`, `client-secrets-manager`, `client-ssm`) are alr
       tables — `credentialGroups`, `agentCredentials`, `credentialLeases`, `profileCredentialGroups`,
       `keepAliveRuns` — per [data-model.md → New tables](./data-model.md#new-tables). `agentCredentials.fence` is
       `bigint not null default 0` and lives on the **credential, not the lease**, because it must outlive the
-      lease that raised it. No column anywhere holds credential material — assert that against the table
-      definitions, not just by eye.
+      lease that raised it; `agentCredentials.held_by` discriminates `workflow` from `keep_alive` while held,
+      which is what lets the two contend for the same row under one conditional update (FR-038 — see
+      [data-model.md](./data-model.md#agent_credentials)). No column anywhere holds credential material —
+      assert that against the table definitions, not just by eye.
 - [ ] T011 Add the indexes to `credential.ts`, extending `credential.test.ts` to prove the partial unique index
       on `(agent_credential_id) WHERE released_at IS NULL` rejects a second live lease at the database level —
       per [data-model.md → Indexes](./data-model.md#indexes), this single index is the whole of FR-017 and
@@ -198,8 +205,12 @@ before a credential can. Grouping is upstream of everything.
       with a colocated test: saving a profile with no attached group is refused **at configuration time**,
       naming the missing attachment. Failing at launch instead is the outcome this requirement exists to
       prevent.
-- [ ] T024 [US2] Write every group mutation and attachment change to the existing append-only audit trail via
-      `packages/sisyphus-api/src/server/admin/audit.ts`, attributed to the acting administrator (FR-067, SC-013)
+- [ ] T024 [US2] Widen the audit vocabulary in `packages/sisyphus-api/src/server/admin/audit-log.ts` and write
+      every group mutation and attachment change through `recordConfigurationChange`, attributed to the acting
+      administrator (FR-067, SC-013), extending `audit-log.test.ts`. `AUDITED_ENTITY_TYPES` gains
+      `agent_credential` and `credential_group`; `AUDITED_ACTIONS` gains `leased`, `released`, `force_released`
+      and `state_changed` — the vocabulary FR-058 needs in Phase 5, landed once here before its first writer
+      exists. **No migration**: `configuration_audit.entity_type` and `.action` are `text`, not Postgres enums.
 - [ ] T025 [US2] Mount `credentialGroupsRouter` on `adminRouter` in
       `packages/sisyphus-api/src/server/admin/index.ts`
 - [ ] T026 [P] [US2] Add the group management page at
@@ -287,7 +298,8 @@ SC-002, SC-003, SC-014 and SC-016, and they are written first in this phase for 
 - [ ] T038 [US3] The exclusivity race suite in
       `apps/sisyphus-control-plane/src/credentials/lease/acquire.test.ts`: 2N concurrent acquisitions against N
       credentials, asserting exactly N succeed and **no credential ever appears on two live leases** — a
-      violation here is a schema defect (T011's index), not a timing one (SC-003)
+      violation here is a schema defect (T011's index), not a timing one (SC-003). Assert too that exactly N
+      `leased` audit entries exist and that a rolled-back acquisition leaves none (FR-058, SC-013).
 - [ ] T039 [P] [US3] Contract test for the machine surface in
       `packages/sisyphus-api/src/server/machine/agent-credential.test.ts`: `fetchAgentCredential` returns
       material only for the credential the calling workflow's **live lease** names, with no parameter by which
@@ -302,20 +314,25 @@ SC-002, SC-003, SC-014 and SC-016, and they are written first in this phase for 
       in `position` order, `state = 'available'` and both credential and group `enabled`, LRU within the chosen
       group. Candidates are drawn **only** from the workflow's own profile's attachments — that restriction
       living in this one function is what makes SC-016 an invariant rather than an audit.
-- [ ] T041 [US3] Add `apps/sisyphus-control-plane/src/credentials/allocate/index.ts` barrel
+- [ ] T041 [US3] Add `apps/sisyphus-control-plane/src/credentials/allocate/index.ts` barrel and
+      `index.test.ts` asserting its public surface is reachable and that nothing internal leaks through it
 - [ ] T042 [US3] Create `apps/sisyphus-control-plane/src/credentials/lease/acquire.ts` as the **single
       transaction** in [allocation-protocol.md → Acquire](./contracts/allocation-protocol.md#acquire),
       satisfying T038: conditional `UPDATE … WHERE id = :selected AND state = 'available'` with
       `fence = fence + 1`, zero rows ⇒ rollback and re-select, then insert the lease and set
       `workflows.agent_credential_id`. Two racing acquisitions cannot both commit — one loses on the
-      conditional, the other on the T011 index.
-- [ ] T043 [US3] Create `apps/sisyphus-control-plane/src/credentials/lease/release.ts`. A credential that was
+      conditional, the other on the T011 index. Record a `leased` audit entry **inside the same transaction**
+      (FR-058, SC-013): an audit write outside it would survive a rolled-back acquisition and record a lease
+      that never existed.
+- [ ] T043 [US3] Create `apps/sisyphus-control-plane/src/credentials/lease/release.ts`, recording a `released`
+      audit entry with its `release_reason` in the same transaction (FR-058). A credential that was
       `cooling_off` or `unhealthy` while held returns to **that** state, not to `available` — release does not
       repair.
 - [ ] T044 [US3] Create `apps/sisyphus-control-plane/src/credentials/lease/fence.ts` satisfying T037 — the
       comparison that rejects any write whose fence is below the credential's current value (FR-020, research
       R9)
-- [ ] T045 [US3] Add `apps/sisyphus-control-plane/src/credentials/lease/index.ts` barrel
+- [ ] T045 [US3] Add `apps/sisyphus-control-plane/src/credentials/lease/index.ts` barrel and `index.test.ts`
+      asserting its public surface
 - [ ] T046 [US3] Wire reservation into `apps/sisyphus-control-plane/src/jobs/admit-workflow.ts` **before any
       compute is provisioned** — inside the existing admission lock, ahead of the
       `state: 'provisioning'` update at line 317. FR-016 exists so an instance is never billed while queued.
@@ -326,8 +343,8 @@ SC-002, SC-003, SC-014 and SC-016, and they are written first in this phase for 
       provisioning failure is otherwise invisible until reconciliation
 - [ ] T049 [US3] Add the stranded-lease sweep to `apps/sisyphus-control-plane/src/jobs/reconcile.ts`, with a
       colocated test asserting it does **not** touch leases held by `paused` or `parked_resumable` workflows:
-      a live lease whose workflow is terminal or absent is released as `forced` with the reason recorded
-      (FR-022, SC-015)
+      a live lease whose workflow is terminal or absent is released as `forced`, with the reason recorded and a
+      `force_released` audit entry attributed to the sweep rather than to a user (FR-022, FR-058, SC-015)
 
 ### Envelope and machine surface
 
@@ -361,7 +378,8 @@ SC-002, SC-003, SC-014 and SC-016, and they are written first in this phase for 
       against **Linux** file behaviour; a developer machine may hold this material in an OS keychain, so local
       execution is not a valid test of this path (research R3) — the test fixture supplies a synthetic file, it
       does not rely on a real agent login.
-- [ ] T059 [US3] Add `apps/sisyphus-executor/src/credential/index.ts` barrel
+- [ ] T059 [US3] Add `apps/sisyphus-executor/src/credential/index.ts` barrel and `index.test.ts` asserting its
+      public surface
 - [ ] T060 [US3] Flush any pending rotation from `apps/sisyphus-executor/src/session/suspend.ts`, extending
       `suspend.test.ts` to cover it. `suspend()` is already the single routine for pause, stop and spot
       interruption, so one flush covers all three — and this flush is the difference between a recoverable seat
@@ -456,8 +474,8 @@ server-side and never transits their device.
       than two
 - [ ] T077 [US1] Create `apps/sisyphus-control-plane/src/credentials/login/reaper.ts` satisfying T071 — a
       **wall-clock** reaper, not one waiting on a completion event
-- [ ] T078 [US1] Add `apps/sisyphus-control-plane/src/credentials/login/index.ts` barrel and register the reaper
-      in `apps/sisyphus-control-plane/src/jobs/index.ts`
+- [ ] T078 [US1] Add `apps/sisyphus-control-plane/src/credentials/login/index.ts` barrel and `index.test.ts`
+      asserting its public surface, and register the reaper in `apps/sisyphus-control-plane/src/jobs/index.ts`
 - [ ] T079 [US1] Add `startLogin` and `loginStatus` to
       `packages/sisyphus-api/src/server/admin/credentials.ts`, recording failure reasons against the credential
       (FR-009)
@@ -484,9 +502,12 @@ exercised and its liveness time updated — including in a group no workflow eve
       ambiguous case resolving to `cooling_off` (research R5). Do not provoke a real rate limit as an
       acceptance step; the fixture is recorded responses, not a live call.
 - [ ] T083 [P] [US7] The keep-alive suite in
-      `apps/sisyphus-control-plane/src/credentials/liveness/schedule.test.ts`, whose load-bearing assertion is
-      that **every member of an untouched lower-preference group was exercised** — the case that proves LRU
-      alone would not have sufficed — and that a leased credential is skipped rather than exercised concurrently
+      `apps/sisyphus-control-plane/src/credentials/liveness/schedule.test.ts`, with three assertions:
+      **every member of an untouched lower-preference group was exercised** — the case that proves LRU alone
+      would not have sufficed; a leased or disabled credential is skipped (FR-036); and — the FR-038 edge case —
+      **a keep-alive claim racing a workflow reservation for the same idle seat, where exactly one wins and the
+      loser observes zero rows affected**. Drive both orderings. A read-then-act implementation passes the skip
+      assertion and fails this one, which is the whole reason it is written separately.
 
 ### Implementation for User Story 7
 
@@ -497,20 +518,28 @@ exercised and its liveness time updated — including in a group no workflow eve
 - [ ] T085 [US7] Create `apps/sisyphus-control-plane/src/credentials/health/transition.ts` and its colocated
       test applying the T084 verdict to the credential row, alerting on `unhealthy` and **raising nothing** on
       `cooling_off` (FR-037, FR-076, SC-019), plus
-      `apps/sisyphus-control-plane/src/credentials/health/index.ts`
+      `apps/sisyphus-control-plane/src/credentials/health/index.ts` and its colocated test. Every transition
+      writes a `state_changed` audit entry naming both states — FR-058 covers credential state changes, not only
+      lease events, and this is the module every one of them passes through.
 - [ ] T086 [US7] Add the cooling-off return sweep to `apps/sisyphus-control-plane/src/jobs/reconcile.ts`:
       credentials past `cooling_off_until`, **and those with none set** retried on
       `SISYPHUS_COOLING_OFF_RETRY_MINUTES`, return to `available` and immediately re-enter T065's grant path
       (FR-076, FR-078)
 - [ ] T087 [US7] Create `apps/sisyphus-control-plane/src/credentials/liveness/schedule.ts` satisfying T083 —
       selecting credentials `available`, enabled, `last_exercised_at` older than
-      `SISYPHUS_KEEPALIVE_IDLE_HOURS`, **regardless of group** (FR-035), skipping leased and disabled
-      credentials (FR-036, FR-038)
+      `SISYPHUS_KEEPALIVE_IDLE_HOURS`, **regardless of group** (FR-035), skipping disabled credentials (FR-036).
+      **Claiming is the same conditional update T042 uses**, not a read-then-act check:
+      `UPDATE agent_credentials SET state = 'held', held_by = 'keep_alive' WHERE id = :id AND state =
+      'available'`, and zero rows affected means a workflow reservation won the row — keep-alive yields and moves
+      on. Reading `state` and then exercising would let both parties observe `available` and both proceed, which
+      is exactly the concurrent use FR-038 forbids and the double-use this whole feature exists to prevent.
+      Release back to `available` when the exercise finishes, whatever its outcome.
 - [ ] T088 [US7] Create `apps/sisyphus-control-plane/src/credentials/liveness/exercise.ts` and its colocated
       test — exercise the credential, write a `keep_alive_runs` row, update `last_exercised_at`, route failures
       through T084
-- [ ] T089 [US7] Add `apps/sisyphus-control-plane/src/credentials/liveness/index.ts` and register the keep-alive
-      job in `apps/sisyphus-control-plane/src/jobs/index.ts` and
+- [ ] T089 [US7] Add `apps/sisyphus-control-plane/src/credentials/liveness/index.ts` and `index.test.ts`
+      asserting its public surface, and register the keep-alive job in
+      `apps/sisyphus-control-plane/src/jobs/index.ts` and
       `apps/sisyphus-control-plane/src/jobs/sync-schedules.ts`
 - [ ] T090 [US7] Make a run whose own credential enters `cooling_off` **wait rather than fail**, retaining its
       lease, in `apps/sisyphus-control-plane/src/jobs/run-job.ts`, with a colocated test (FR-077, SC-020) —
@@ -544,7 +573,9 @@ written as a second path.
       **Leave `InstanceInitiatedShutdownBehavior: 'terminate'` alone** — it is what stops a crashed executor
       leaking a billable stopped instance, and the pause path calls `StopInstances` from the control plane
       instead.
-- [ ] T093 [US5] Mirror the three methods in `apps/sisyphus-control-plane/src/aws/compute-fake.ts`
+- [ ] T093 [US5] Mirror the three methods in `apps/sisyphus-control-plane/src/aws/compute-fake.ts`, extending
+      the existing `compute-fake.test.ts` to assert a stopped instance keeps its volume — the behaviour every
+      pause test below depends on the fake getting right
 - [ ] T094 [US5] Create `apps/sisyphus-control-plane/src/jobs/pause-instance.ts` satisfying T091 — turn
       boundary, durable snapshot, then `StopInstances` for `on_demand`, replacing the hold-alive behaviour of
       `002/FR-049` (FR-039)
@@ -624,9 +655,10 @@ confirm every state is distinguishable and queue depth and wait times are shown.
 - [ ] T107 [US8] Create `packages/sisyphus-api/src/server/admin/credential-pool.ts` — the FR-053 pool query:
       per credential, state, health, holder, hold duration, `last_used_at`, `last_exercised_at`,
       `cooling_off_until`, grouped by credential group
-- [ ] T108 [US8] Break holders down by `running` / `paused` / `parked` in `credential-pool.ts`, satisfying part
-      of T106 (FR-074) — a parked holder shows no activity while consuming capacity indefinitely, which makes a
-      full pool look idle
+- [ ] T108 [US8] Break holders down by `running` / `paused` / `parked` — plus `keep_alive` where `held_by` says
+      so — in `credential-pool.ts`, satisfying part of T106 (FR-074). A parked holder shows no activity while
+      consuming capacity indefinitely, which makes a full pool look idle; a keep-alive holder is transient and
+      must not be mistaken for one, or an administrator reads a routine exercise as a stuck seat.
 - [ ] T109 [US8] Add the queue view to `credential-pool.ts`, satisfying part of T106: depth and longest current
       wait **per group**, derived from `workflows` in `awaiting_credential` joined to profile attachments —
       there is no queue table, by design (FR-054, SC-011)
@@ -667,7 +699,9 @@ re-login, and confirm it returns to the pool.
 ### Implementation for User Story 9
 
 - [ ] T116 [US9] Add force-release to `packages/sisyphus-api/src/server/admin/credentials.ts`, satisfying part
-      of T114: releases the lease as `forced` with `released_by_user_id` (FR-057)
+      of T114: releases the lease as `forced` with `released_by_user_id`, resolves the affected workflow to a
+      recorded state, and writes a `force_released` audit entry attributed to the acting administrator (FR-057,
+      FR-058)
 - [ ] T117 [US9] Route re-login through the **identical** Phase 7 flow (FR-072) — returning a broken credential
       to service must not be a lesser-tested path than creating one
 - [ ] T118 [US9] Fail a run whose credential goes `unhealthy` **naming the credential**, with no substitution
