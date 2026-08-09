@@ -100,16 +100,12 @@ export {
 export type { WorkspacesRouter } from './workspaces'
 
 export {
-  createProfilesRouter,
   duplicateProfileNameError,
   profilesRouter,
   profileStateError,
   profileTargetNotFoundError,
 } from './profiles'
-export type { ProfilesRouter, ProfilesRouterOptions } from './profiles'
-
-export { createRefusingReachabilityProbe, probeTargets } from './reachability'
-export type { RepositoryReachabilityProbe } from './reachability'
+export type { ProfilesRouter } from './profiles'
 
 export {
   createIntegrationsRouter,

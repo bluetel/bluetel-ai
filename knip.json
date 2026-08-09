@@ -191,7 +191,6 @@
         // callers. Each seeds or fakes something a production caller would never construct.
         "!src/server/admin/test-database.ts!",
         "!src/server/admin/integration-connectors-fake.ts!",
-        "!src/server/admin/reachability-fake.ts!",
         "!src/server/machine/test-support.ts!",
         "!src/server/notify/test-support.ts!",
         "!src/server/workflow/test-support.ts!",
