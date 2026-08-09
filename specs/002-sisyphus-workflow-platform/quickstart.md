@@ -347,10 +347,11 @@ SC-027). Time the interaction: under 30 seconds (SC-027).
 
 **Check:** refused with the reason shown — not silently ignored (FR-123).
 
-5. Attempt to enable a profile whose bundle is disabled, then one whose repository is unreachable.
+5. Attempt to enable a profile whose bundle is disabled, then one whose workspace version holds no repositories.
 
-**Check:** both refused **naming the failing element** (FR-124, SC-029). This is the gate that prevents a run
-launching with a bundle that does not match its repositories.
+**Check:** both refused **naming the failing element** (FR-124, SC-029). Then enable a profile naming a
+repository that does not exist: it **succeeds**. Reachability is not checked at enable time
+(`specs/004-remove-reachability-gate`); a bad repository fails at `entry_checkout` instead, naming the entry.
 
 6. As a non-admin, attempt an ad hoc launch.
 

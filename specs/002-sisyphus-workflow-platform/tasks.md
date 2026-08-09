@@ -353,8 +353,11 @@ deactivated user is denied at their next request and their running workflow is f
 - [x] T078 [US9] `admin.workspaces` sub-router in `packages/sisyphus-api/src/server/admin/workspaces.ts`, editing
       creating a **new version** with entries hanging off it (FR-125)
 - [x] T079 [US9] `admin.profiles` sub-router in `packages/sisyphus-api/src/server/admin/profiles.ts`.
-      `setEnabled(true)` runs the FR-124 gate — bundle enabled **and** every workspace entry reachable — and
-      refuses naming the failing element, which is what stops a profile/bundle mismatch reaching a run.
+      `setEnabled(true)` runs the FR-124 gate — published version present, pinned rows readable, bundle enabled
+      and unarchived, workspace unarchived and non-empty — and refuses naming every failing element.
+      **Amended by `specs/004-remove-reachability-gate`:** the per-entry repository reachability half shipped as
+      a refuse-by-default stub that no deployment ever wired, so it refused every enable. It is removed rather
+      than completed — the credential it needed exists only on the executor instance.
 - [x] T080 [US9] Add the profile-first path to the launch form in
       `apps/sisyphus-admin/src/app/workflows/new/page.tsx` — profile selection prefills every value and becomes
       the **default and only** path for a non-admin, with T064a's direct-entry fields remaining admin-only
@@ -1262,7 +1265,7 @@ recorded manual run is the honest verdict here and a green tick would be a fabri
       against real archived data. Supersedes the prose checkpoint at line 601. Not a CI target: its subject is
       a stage's accumulated history, which no fixture reproduces (SC-011, SC-012, SC-013, SC-014, SC-026)
 - [ ] T223 [P] [US9] **Run quickstart Scenario 3 end to end** — create a profile, launch supplying only a
-      prompt, and time it. Steps 4, 5 and 6 (locked-field override, disabled-bundle and unreachable-repository
+      prompt, and time it. Steps 4, 5 and 6 (locked-field override, the disabled-bundle and empty-workspace
       refusals, the non-admin ad hoc refusal) are already covered by `sisyphus-api`'s database-backed suites;
       what only a stage can prove is steps 2 and 3 — that the run **actually used** every profile value on the
       instance, that the workflow records profile and version, that the override and its originating profile
