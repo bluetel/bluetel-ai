@@ -11,6 +11,15 @@
  * The connector interface lives here rather than in an integration package for FR-192: the
  * control plane depends on the abstraction and never on Jira, so adding a second integration type
  * is a new package plus a registry entry, not a change to anything that already exists.
+ *
+ * `./agent-credential` widens "types and pure functions" to include **zod schemas**, and the
+ * browser-safety rule is undisturbed: zod is already a dependency of the panel's forms through
+ * `src/schemas/`, and a schema is a plain value. It is here rather than in `src/schemas/` because
+ * `src/schemas/` is the resolver-and-form barrel, while these shapes are the wire between three
+ * members — the executor calls both procedures, the control plane puts the reference into the job
+ * envelope, and the panel renders what comes back. It is the one contract in this directory whose
+ * *runtime* behaviour is the guarantee: what it refuses is what stops one run being able to ask
+ * for another's seat at all.
  */
 
 /**
@@ -28,6 +37,26 @@ export type ExecutorProtocolVersion = 'v1'
 export interface ProtocolMessage {
   readonly protocolVersion: ExecutorProtocolVersion
 }
+
+export {
+  AGENT_CREDENTIAL_MATERIAL_FIELD,
+  agentCredentialFence,
+  agentCredentialReference,
+  credentialRotationRejection,
+  fetchAgentCredentialInput,
+  fetchAgentCredentialOutput,
+  reportCredentialRotationInput,
+  reportCredentialRotationOutput,
+} from './agent-credential'
+export type {
+  AgentCredentialFence,
+  AgentCredentialReference,
+  CredentialRotationRejection,
+  FetchAgentCredentialInput,
+  FetchAgentCredentialOutput,
+  ReportCredentialRotationInput,
+  ReportCredentialRotationOutput,
+} from './agent-credential'
 
 export type {
   CandidateItem,

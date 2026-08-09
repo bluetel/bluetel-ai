@@ -95,6 +95,31 @@ describe('workflows', () => {
     ])
   })
 
+  it('records the one agent credential the run used, nullable while it waits (003/FR-059)', () => {
+    expect(columnOf(workflows, 'agent_credential_id').notNull).toBe(false)
+    expect(columnOf(workflows, 'agent_credential_id').type).toBe('uuid')
+    expect(referencedTables(workflows)).toContain('agent_credentials')
+  })
+
+  it('makes per-credential spend a join, not a second ledger (003/FR-055)', () => {
+    // The claim is that everything the aggregation needs is already on this row, reachable by
+    // grouping on `agent_credential_id`. If any of these moved off `workflows`, the join would
+    // stop being sufficient and a separate ledger would start looking necessary.
+    const names = describeTable(workflows).columns.map((column) => column.name)
+    for (const name of ['agent_credential_id', 'spend_used', 'turns_used', 'compute_cost_basis']) {
+      expect(names).toContain(name)
+    }
+  })
+
+  it('derives the credential queue from an index rather than a queue table (003/FR-026, FR-054)', () => {
+    const queue = indexOf(workflows, 'workflows_awaiting_credential_idx')
+    expect(queue.unique).toBe(false)
+    expect(queue.columns).toStrictEqual(['state', 'created_at'])
+    // Partial: grant order is over the waiting rows only, and they are a vanishing fraction of a
+    // table that keeps every run for the retention period.
+    expect(queue.where).toBe(`"workflows"."state" = 'awaiting_credential'`)
+  })
+
   it('flags a run whose owner was deactivated rather than orphaning it (FR-176)', () => {
     expect(columnOf(workflows, 'needs_reassignment').defaultValue).toBe(false)
   })

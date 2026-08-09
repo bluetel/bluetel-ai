@@ -9,7 +9,7 @@ description: 'Task list for Agent Credential Pool'
 **Prerequisites**: [plan.md](./plan.md), [spec.md](./spec.md), [research.md](./research.md),
 [data-model.md](./data-model.md), [contracts/](./contracts/), [quickstart.md](./quickstart.md)
 
-**Tests**: **Required, not optional**, including for `index.ts` barrels — Principle III says *every* module
+**Tests**: **Required, not optional**, including for `index.ts` barrels — Principle III says _every_ module
 file, and this plan applies it uniformly rather than inheriting the repo's split habit (`enums/index.ts` and
 `db/schema/index.ts` have colocated tests; `bootstrap/index.ts` and `session/index.ts` do not). That existing
 inconsistency is a governance question worth settling separately — the constitution's own wording says a
@@ -35,12 +35,12 @@ releases it — with a queue when the pool is dry, and the race/fencing tests th
 it. US2, US3 and US4 land whole; **US1 is split**, which is what makes the MVP reachable in six phases rather
 than seven:
 
-| Story   | Priority | In the MVP                                                    | Deferred to                            |
-| ------- | -------- | ------------------------------------------------------------- | -------------------------------------- |
-| **US2** | P1       | Whole — groups, ordered attachments, the unlaunchable gate    | —                                      |
-| **US1** | P1       | Register into a group; adopt a secret seeded out of band      | Phase 7 — the hosted login environment |
-| **US3** | P1       | Whole — lease, fetch, rotate, release, reconcile               | —                                      |
-| **US4** | P1       | Whole — waiting state, grant on release, wait limit             | —                                      |
+| Story   | Priority | In the MVP                                                 | Deferred to                            |
+| ------- | -------- | ---------------------------------------------------------- | -------------------------------------- |
+| **US2** | P1       | Whole — groups, ordered attachments, the unlaunchable gate | —                                      |
+| **US1** | P1       | Register into a group; adopt a secret seeded out of band   | Phase 7 — the hosted login environment |
+| **US3** | P1       | Whole — lease, fetch, rotate, release, reconcile           | —                                      |
+| **US4** | P1       | Whole — waiting state, grant on release, wait limit        | —                                      |
 
 **The US1 split is the big one.** FR-069–FR-072 (ephemeral EC2 login instance, SSM relay, server-side capture,
 wall-clock reaper) is the single most expensive piece of work in this feature and it gates nothing except
@@ -59,12 +59,12 @@ until Phase 7**. That is a stated, temporary gap, not a silent one.
 
 Four existing workspace members change; **none is added** (plan.md → Structure Decision).
 
-| Member                         | Role in this feature                                     |
-| ------------------------------- | ----------------------------------------------------------- |
-| `packages/sisyphus-api`        | Schema, enums, contracts, tRPC admin + machine surfaces  |
-| `apps/sisyphus-control-plane`  | Allocation, leasing, liveness, health, login, jobs        |
-| `apps/sisyphus-executor`       | `credential_install` phase, rotation watch, suspend       |
-| `apps/sisyphus-admin`          | Pool view, group management, login flow                   |
+| Member                        | Role in this feature                                    |
+| ----------------------------- | ------------------------------------------------------- |
+| `packages/sisyphus-api`       | Schema, enums, contracts, tRPC admin + machine surfaces |
+| `apps/sisyphus-control-plane` | Allocation, leasing, liveness, health, login, jobs      |
+| `apps/sisyphus-executor`      | `credential_install` phase, rotation watch, suspend     |
+| `apps/sisyphus-admin`         | Pool view, group management, login flow                 |
 
 All commands go through Nx (`pnpm nx …`) per Constitution Principle I.
 
@@ -81,14 +81,14 @@ All commands go through Nx (`pnpm nx …`) per Constitution Principle I.
 **Purpose**: The configuration this feature reads exists before anything reads it. No new dependencies — the
 three AWS clients (`client-ec2`, `client-secrets-manager`, `client-ssm`) are already control-plane deps.
 
-- [ ] T001 [P] Add the four credential-pool knobs to `apps/sisyphus-control-plane/src/env-schemas.ts` and
+- [x] T001 [P] Add the four credential-pool knobs to `apps/sisyphus-control-plane/src/env-schemas.ts` and
       `apps/sisyphus-control-plane/src/env.ts`: `SISYPHUS_KEEPALIVE_IDLE_HOURS` (default `24`, per research R2),
       `SISYPHUS_CREDENTIAL_WAIT_LIMIT_MINUTES` (FR-028), `SISYPHUS_LEASE_HOLD_EXPECTATION_HOURS` (FR-056), and
       `SISYPHUS_COOLING_OFF_RETRY_MINUTES` (FR-078). All four are configuration rather than constants precisely
       because R1/R2 are unmeasured — tuning them must not need a code change.
-- [ ] T002 [P] Add `SISYPHUS_AGENT_CREDENTIAL_SECRET_PREFIX` to the same two files — the Secrets Manager name
+- [x] T002 [P] Add `SISYPHUS_AGENT_CREDENTIAL_SECRET_PREFIX` to the same two files — the Secrets Manager name
       prefix under which one secret per agent credential is created (research R8)
-- [ ] T003 Add the workflow-scoped-vs-agent-credential distinction as a doc comment in
+- [x] T003 Add the workflow-scoped-vs-agent-credential distinction as a doc comment in
       `apps/sisyphus-control-plane/src/credentials/index.ts`, naming `mint.ts`/`revoke.ts` as the former and the
       new subdirectories as the latter
 
@@ -104,29 +104,29 @@ three AWS clients (`client-ec2`, `client-secrets-manager`, `client-ssm`) are alr
 
 ### Enums
 
-- [ ] T004 [P] Create `packages/sisyphus-api/src/enums/credential-state.ts` with its guard test, covering
+- [x] T004 [P] Create `packages/sisyphus-api/src/enums/credential-state.ts` with its guard test, covering
       `awaiting_login | available | held | cooling_off | unhealthy | disabled` and a `createEnumGuard` guard,
       matching the sibling enum modules; document that **only `available` is selectable**
       ([data-model.md → state machine](./data-model.md#credential-state-machine))
-- [ ] T005 [P] Create `packages/sisyphus-api/src/enums/credential-release-reason.ts` with its guard test,
+- [x] T005 [P] Create `packages/sisyphus-api/src/enums/credential-release-reason.ts` with its guard test,
       covering `terminal | forced | login_replaced`
-- [ ] T006 Extend `packages/sisyphus-api/src/enums/workflow-state.test.ts` to assert `awaiting_credential` is a
+- [x] T006 Extend `packages/sisyphus-api/src/enums/workflow-state.test.ts` to assert `awaiting_credential` is a
       member of **both** `WORKFLOW_STATES` and `ACTIVE_WORKFLOW_STATES` (research R10), then add it in
       `workflow-state.ts`. The `ACTIVE_WORKFLOW_STATES` half is what keeps the reconciliation sweep treating a
       waiting run as live so its reservation is not swept away — a test that only checked `WORKFLOW_STATES` would
       pass while shipping that bug.
-- [ ] T007 Extend `packages/sisyphus-api/src/enums/bootstrap-phase.test.ts` to assert `credential_install` sits
+- [x] T007 Extend `packages/sisyphus-api/src/enums/bootstrap-phase.test.ts` to assert `credential_install` sits
       **between `setup_script` and `entry_checkout`**, then insert it in `bootstrap-phase.ts`. The file's own doc
       comment states that reordering renames what stored rows refer to, so this ships as a migration (T014),
       never an append (research R7).
-- [ ] T008 Re-export both new enums from `packages/sisyphus-api/src/enums/index.ts` and extend
+- [x] T008 Re-export both new enums from `packages/sisyphus-api/src/enums/index.ts` and extend
       `index.test.ts` to assert they are reachable from the barrel
-- [ ] T009 Register `credential_state` and `credential_release_reason` as Postgres enums in
+- [x] T009 Register `credential_state` and `credential_release_reason` as Postgres enums in
       `packages/sisyphus-api/src/db/schema/enums.ts`, with a colocated assertion that both round-trip
 
 ### Schema
 
-- [ ] T010 Create `packages/sisyphus-api/src/db/schema/credential.ts` and `credential.test.ts` with all five
+- [x] T010 Create `packages/sisyphus-api/src/db/schema/credential.ts` and `credential.test.ts` with all five
       tables — `credentialGroups`, `agentCredentials`, `credentialLeases`, `profileCredentialGroups`,
       `keepAliveRuns` — per [data-model.md → New tables](./data-model.md#new-tables). `agentCredentials.fence` is
       `bigint not null default 0` and lives on the **credential, not the lease**, because it must outlive the
@@ -134,21 +134,21 @@ three AWS clients (`client-ec2`, `client-secrets-manager`, `client-ssm`) are alr
       which is what lets the two contend for the same row under one conditional update (FR-038 — see
       [data-model.md](./data-model.md#agent_credentials)). No column anywhere holds credential material —
       assert that against the table definitions, not just by eye.
-- [ ] T011 Add the indexes to `credential.ts`, extending `credential.test.ts` to prove the partial unique index
+- [x] T011 Add the indexes to `credential.ts`, extending `credential.test.ts` to prove the partial unique index
       on `(agent_credential_id) WHERE released_at IS NULL` rejects a second live lease at the database level —
       per [data-model.md → Indexes](./data-model.md#indexes), this single index is the whole of FR-017 and
       SC-003, so it is proven here rather than trusted for the first time in Phase 5.
-- [ ] T012 Add the nullable `agent_credential_id` FK column to `workflows` in
+- [x] T012 Add the nullable `agent_credential_id` FK column to `workflows` in
       `packages/sisyphus-api/src/db/schema/workflow.ts`, plus the
       `(state, created_at) WHERE state = 'awaiting_credential'` index that serves the queue view (FR-059,
       FR-026), and extend `workflow.test.ts` to cover both. This one column is also what makes per-credential
       spend a join rather than a second ledger.
-- [ ] T013 Re-export `./credential` from `packages/sisyphus-api/src/db/schema/index.ts`, extending
+- [x] T013 Re-export `./credential` from `packages/sisyphus-api/src/db/schema/index.ts`, extending
       `index.test.ts` — a table absent from this barrel does not exist as far as drizzle-kit is concerned
-- [ ] T014 Generate the migration into `packages/sisyphus-api/src/db/migrations/` and **read it before
+- [x] T014 Generate the migration into `packages/sisyphus-api/src/db/migrations/` and **read it before
       applying**: confirm the `bootstrap_phase` change is a mid-order insert and not an append, then verify with
       `psql "$SISYPHUS_DATABASE_URL" -c "SELECT unnest(enum_range(NULL::bootstrap_phase))"`
-- [ ] T015 [P] Create `packages/sisyphus-api/src/contracts/agent-credential.ts` and its colocated test with the
+- [x] T015 [P] Create `packages/sisyphus-api/src/contracts/agent-credential.ts` and its colocated test with the
       zod shapes shared by panel, control plane and executor — `fetchAgentCredential` and
       `reportCredentialRotation` inputs/outputs per
       [executor-credential.md](./contracts/executor-credential.md#machine-surface--two-calls) — and export it
@@ -156,12 +156,12 @@ three AWS clients (`client-ec2`, `client-secrets-manager`, `client-ssm`) are alr
 
 ### Secret store seam
 
-- [ ] T016 [P] Extend `apps/sisyphus-control-plane/src/aws/secrets.ts` and `secrets.test.ts` from the read-only
+- [x] T016 [P] Extend `apps/sisyphus-control-plane/src/aws/secrets.ts` and `secrets.test.ts` from the read-only
       `SecretReader` to add `create(name, value)` and `write(secretId, value)` over
       `CreateSecretCommand`/`PutSecretValueCommand`, widening `SecretsCommandSender` to match. Keep the existing
       no-caching rule — a cached credential outlives its own rotation, which is the exact failure this feature
       exists to prevent.
-- [ ] T017 [P] Mirror the new methods in `apps/sisyphus-control-plane/src/aws/secrets-fake.ts` and
+- [x] T017 [P] Mirror the new methods in `apps/sisyphus-control-plane/src/aws/secrets-fake.ts` and
       `secrets-fake.test.ts` so every path below is testable without an AWS account
 - [ ] T018 Create `packages/sisyphus-api/src/server/admin/credential-store.ts` and its colocated test — reads
       and writes over the five tables, **no transport concerns** — following the `bundle-store.ts` /
@@ -530,7 +530,7 @@ exercised and its liveness time updated — including in a group no workflow eve
       `SISYPHUS_KEEPALIVE_IDLE_HOURS`, **regardless of group** (FR-035), skipping disabled credentials (FR-036).
       **Claiming is the same conditional update T042 uses**, not a read-then-act check:
       `UPDATE agent_credentials SET state = 'held', held_by = 'keep_alive' WHERE id = :id AND state =
-      'available'`, and zero rows affected means a workflow reservation won the row — keep-alive yields and moves
+'available'`, and zero rows affected means a workflow reservation won the row — keep-alive yields and moves
       on. Reading `state` and then exercising would let both parties observe `available` and both proceed, which
       is exactly the concurrent use FR-038 forbids and the double-use this whole feature exists to prevent.
       Release back to `available` when the exercise finishes, whatever its outcome.

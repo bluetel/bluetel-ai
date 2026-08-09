@@ -6,6 +6,8 @@ import {
   BOOTSTRAP_PHASES,
   CLAUDE_MODELS,
   CORRECTION_DELIVERY_OUTCOMES,
+  CREDENTIAL_RELEASE_REASONS,
+  CREDENTIAL_STATES,
   ENTRY_RESULTS,
   EXTERNAL_ACTION_KINDS,
   EXTERNAL_ACTION_RESULTS,
@@ -59,6 +61,8 @@ describe('Postgres enum types', () => {
       [pgEnums.externalActionKindEnum, EXTERNAL_ACTION_KINDS],
       [pgEnums.externalActionResultEnum, EXTERNAL_ACTION_RESULTS],
       [pgEnums.notificationEventEnum, NOTIFICATION_EVENTS],
+      [pgEnums.credentialStateEnum, CREDENTIAL_STATES],
+      [pgEnums.credentialReleaseReasonEnum, CREDENTIAL_RELEASE_REASONS],
     ] as const
 
     for (const [pgEnum, tuple] of pairs) {
@@ -72,6 +76,8 @@ describe('Postgres enum types', () => {
     expect(pgEnums.claudeModelEnum.enumName).toBe('claude_model')
     expect(pgEnums.bootstrapPhaseEnum.enumName).toBe('bootstrap_phase')
     expect(pgEnums.notificationEventEnum.enumName).toBe('notification_event')
+    expect(pgEnums.credentialStateEnum.enumName).toBe('credential_state')
+    expect(pgEnums.credentialReleaseReasonEnum.enumName).toBe('credential_release_reason')
   })
 
   it('gives every enum type a unique name, since a Postgres enum type is database-wide', () => {

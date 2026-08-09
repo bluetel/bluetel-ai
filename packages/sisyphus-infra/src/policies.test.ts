@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { getAgentCredentialSecretPrefix, getStackScope } from './lib'
 import {
   GITHUB_OIDC_AUDIENCE,
   GITHUB_OIDC_CLAIM_PREFIX,
@@ -37,6 +38,13 @@ const controlPlaneConfig: ControlPlanePolicyConfig = {
   region: 'eu-west-2',
   accountId: '429776178057',
   executorRunnerRoleArn: 'arn:aws:iam::429776178057:role/sisyphus-staging-executor-runner',
+  agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('staging')),
+}
+
+const panelBundlesConfig: PanelBundlesPolicyConfig = {
+  region: 'eu-west-2',
+  accountId: '429776178057',
+  bundlesBucketName: 'sisyphus-staging-bundles',
 }
 
 const controlPlaneActions = (config: ControlPlanePolicyConfig = controlPlaneConfig): string[] =>
@@ -302,6 +310,32 @@ describe('buildRunnerPolicy — the fleet-wide profile, when no workflow id is g
   })
 })
 
+describe('buildPanelBundlesPolicy', () => {
+  const policy = buildPanelBundlesPolicy(panelBundlesConfig)
+
+  it('registers an archive into the bundles bucket and nothing else', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'RegisterSetupBundleArchive')
+
+    expect(statement?.Action).toEqual(['s3:PutObject'])
+    expect(statement?.Resource).toEqual(['arn:aws:s3:::sisyphus-staging-bundles/*'])
+  })
+
+  it('encrypts under the managed key the upload path asks for, not every key in the account', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'EncryptSetupBundleArchive')
+
+    expect(statement?.Action).toEqual(['kms:GenerateDataKey'])
+    expect(statement?.Resource).toEqual(['arn:aws:kms:eu-west-2:429776178057:alias/aws/s3'])
+  })
+
+  it('cannot read a bundle back — validation and executor boot read through the runner role', () => {
+    const actions = policy.Statement.flatMap((statement) => [...statement.Action])
+
+    expect(actions).not.toContain('s3:GetObject')
+    expect(actions).not.toContain('s3:DeleteObject')
+    expect(policy.Statement).toHaveLength(2)
+  })
+})
+
 describe('buildControlPlanePolicy — what the control plane may do', () => {
   const policy = buildControlPlanePolicy(controlPlaneConfig)
 
@@ -354,6 +388,7 @@ describe('buildControlPlanePolicy — what the control plane may do', () => {
       region: 'us-east-1',
       accountId: '111111111111',
       executorRunnerRoleArn: 'arn:aws:iam::111111111111:role/sisyphus-other-executor-runner',
+      agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('production')),
     })
     const ec2Resources = other.Statement.filter(
       (statement) => statement.Sid !== 'PassExecutorRunnerRoleToLaunchedInstances',
@@ -367,18 +402,84 @@ describe('buildControlPlanePolicy — what the control plane may do', () => {
     }
   })
 
-  it('grants nothing outside the four scoped statements', () => {
-    expect(policy.Statement).toHaveLength(4)
+  it('creates, describes, reads and rotates agent credential secrets', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'ManageAgentCredentialSecrets')
+
+    expect(statement?.Action).toEqual([
+      'secretsmanager:CreateSecret',
+      'secretsmanager:DescribeSecret',
+      'secretsmanager:GetSecretValue',
+      'secretsmanager:PutSecretValue',
+    ])
+  })
+
+  it('scopes those secrets to the stage’s own prefix, never to every secret in the account', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'ManageAgentCredentialSecrets')
+
+    expect(statement?.Resource).toEqual([
+      'arn:aws:secretsmanager:eu-west-2:429776178057:secret:sisyphus/staging/agent-credential/*',
+    ])
+    expect(statement?.Resource).not.toContain('*')
+    expect(statement?.Resource).not.toContain(
+      'arn:aws:secretsmanager:eu-west-2:429776178057:secret:*',
+    )
+  })
+
+  it('cannot reach another stage’s agent credentials', () => {
+    const production = buildControlPlanePolicy({
+      ...controlPlaneConfig,
+      agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('production')),
+    })
+    const secretResources = production.Statement.flatMap(
+      (statement) => statement.Resource ?? [],
+    ).filter((resource) => resource.startsWith('arn:aws:secretsmanager:'))
+
+    expect(secretResources).toHaveLength(1)
+    for (const resource of secretResources) {
+      expect(resource).toContain('sisyphus/production/agent-credential/')
+      expect(resource).not.toContain('staging')
+    }
+  })
+
+  it('refuses an empty prefix rather than scoping the grant to secret:/*', () => {
+    expect(() =>
+      buildControlPlanePolicy({ ...controlPlaneConfig, agentCredentialSecretPrefix: '   ' }),
+    ).toThrow('empty agent credential prefix')
+  })
+
+  it('grants nothing outside the five scoped statements', () => {
+    expect(policy.Statement).toHaveLength(5)
     expect(policy.Statement.every((statement) => statement.Effect === 'Allow')).toBe(true)
   })
 })
 
 describe('buildControlPlanePolicy — what the control plane must never do', () => {
-  it('cannot reach the database, Secrets Manager or Parameter Store', () => {
+  it('cannot reach the database or Parameter Store', () => {
     for (const action of controlPlaneActions()) {
       expect(action.startsWith('rds')).toBe(false)
-      expect(action.startsWith('secretsmanager:')).toBe(false)
       expect(action.startsWith('ssm:')).toBe(false)
+    }
+  })
+
+  it('cannot delete a secret or enumerate the ones outside its prefix', () => {
+    const actions = controlPlaneActions()
+
+    expect(actions).not.toContain('secretsmanager:DeleteSecret')
+    expect(actions).not.toContain('secretsmanager:ListSecrets')
+    expect(actions).not.toContain('secretsmanager:ListSecretVersionIds')
+  })
+
+  it('holds no Secrets Manager action on a resource other than the agent credential prefix', () => {
+    const policy = buildControlPlanePolicy(controlPlaneConfig)
+    const secretStatements = policy.Statement.filter((statement) =>
+      statement.Action.some((action) => action.startsWith('secretsmanager:')),
+    )
+
+    expect(secretStatements).toHaveLength(1)
+    for (const resource of secretStatements[0]?.Resource ?? []) {
+      expect(resource).toBe(
+        `arn:aws:secretsmanager:eu-west-2:429776178057:secret:${controlPlaneConfig.agentCredentialSecretPrefix}/*`,
+      )
     }
   })
 

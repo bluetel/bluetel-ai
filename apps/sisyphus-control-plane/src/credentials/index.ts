@@ -24,6 +24,24 @@
  * application's source.
  *
  * Consumers import this barrel, never a module underneath it.
+ *
+ * ## Two things called a credential — read this once
+ *
+ * This directory now holds **two unrelated concepts** that share a word, and confusing them is the
+ * expensive mistake available here:
+ *
+ * - **Workflow-scoped credential** — `mint.ts` and `revoke.ts`, directly beside this file. A
+ *   short-lived JWT the platform issues so an executor instance can call the machine surface. It
+ *   belongs to a workflow, lasts minutes, and the platform is its issuer. This is 002/FR-037.
+ * - **Agent credential** — the subdirectories `allocate/`, `lease/`, `liveness/`, `health/` and
+ *   `login/`. The agent's *own* login with its model provider: a pooled, leased, rotating secret
+ *   the platform holds but does not issue, whose material lives in Secrets Manager and never in
+ *   Postgres. This is 003.
+ *
+ * They are kept apart by directory, not by naming discipline: every 003 module lands **inside a
+ * subdirectory**, so the two never share a file and a reader who opens `mint.ts` looking for the
+ * pool finds nothing to misread. Nothing under those subdirectories is re-exported from here —
+ * each has its own barrel, and callers import that.
  */
 
 export {

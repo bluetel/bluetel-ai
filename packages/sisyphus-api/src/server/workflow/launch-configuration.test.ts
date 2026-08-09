@@ -64,6 +64,8 @@ const workflowRow = (overrides: Partial<Workflow> = {}): Workflow => ({
   spendUsed: '11.0000',
   computeCostBasis: null,
   predecessorWorkflowId: null,
+  /** Null here because these rows predate the credential pool; 003/FR-059 sets it at admission. */
+  agentCredentialId: null,
   sessionId: '00000000-0000-0000-0000-000000000001',
   currentSnapshotId: null,
   reviewerSummary: null,

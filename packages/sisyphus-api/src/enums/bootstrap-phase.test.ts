@@ -10,9 +10,23 @@ describe('BOOTSTRAP_PHASES', () => {
       'bundle_verify',
       'bundle_unpack',
       'setup_script',
+      'credential_install',
       'entry_checkout',
       'agent_start',
     ])
+  })
+
+  it('installs the agent credential between the setup script and the checkout (003/FR-049, R7)', () => {
+    // Position, not membership, is the assertion. The credential must be installed *after* the
+    // bundle has put the agent CLI in place and *before* any workspace work begins, so this is a
+    // mid-order insert — appending it to dodge the migration would place credential installation
+    // after `agent_start` in the vocabulary, which is wrong and undetectable once rows refer to it.
+    expect(BOOTSTRAP_PHASES.indexOf('setup_script')).toBeLessThan(
+      BOOTSTRAP_PHASES.indexOf('credential_install'),
+    )
+    expect(BOOTSTRAP_PHASES.indexOf('credential_install')).toBeLessThan(
+      BOOTSTRAP_PHASES.indexOf('entry_checkout'),
+    )
   })
 
   it('verifies a bundle before unpacking it', () => {

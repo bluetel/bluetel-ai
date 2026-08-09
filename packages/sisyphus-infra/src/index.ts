@@ -37,6 +37,7 @@
 export {
   POLICY_VERSION,
   SISYPHUS_PROJECT,
+  getAgentCredentialSecretPrefix,
   getAppSecurityGroupIdParameterName,
   getAppSubnetIdsParameterName,
   getBucketName,

@@ -211,15 +211,48 @@ export interface ControlPlanePolicyConfig {
    * liked, which would make `buildRunnerPolicy`'s careful omissions pointless.
    */
   readonly executorRunnerRoleArn: string
+  /**
+   * Secrets Manager name prefix the stage's agent credentials live under, from
+   * `getAgentCredentialSecretPrefix` in `lib.ts` — never a hand-written string,
+   * and never another stage's. Every Secrets Manager grant below is scoped to
+   * ARNs beneath it, which is the whole of what stops a staging control plane
+   * from reading a production agent's login.
+   */
+  readonly agentCredentialSecretPrefix: string
 }
 
 /**
  * The control plane's own permission policy: launch an instance (FR-036),
  * destroy one at teardown (FR-038), and enumerate the fleet to reconcile it
  * (FR-039) — see `compute.ts`'s `ComputeProvisioner`, which this policy exists
- * to make deployable. Nothing else: no S3, no Secrets Manager, no database
- * IAM action, because the control plane already reaches those through
- * `DATABASE_URL` and the buckets' own bucket policies, not through this role.
+ * to make deployable — plus the one thing it must do with Secrets Manager, set
+ * out below. Nothing else: no S3 and no database IAM action, because the
+ * control plane already reaches those through `DATABASE_URL` and the buckets'
+ * own bucket policies, not through this role.
+ *
+ * The Secrets Manager statement is the exception, and it is a narrow one. The
+ * control plane is the only member that ever holds agent credential material:
+ * it creates a secret when a credential is registered, writes a new version
+ * when one is rotated, and reads the current version back when it hands the
+ * material to an instance — Postgres stores the identifier and never the
+ * material (FR-011, research R8). All four actions are therefore required, and
+ * all four are scoped by resource ARN to `agentCredentialSecretPrefix`, which
+ * is derived from the plain stage. Two things follow that are worth stating
+ * explicitly, because both would deploy cleanly if they were wrong:
+ *
+ * - **Never `Resource: ['*']`.** A wildcard here would let a staging control
+ *   plane read production's agent logins, and — more quietly — every other
+ *   secret in the account, including any an unrelated stack happens to own.
+ * - **No `secretsmanager:DeleteSecret` and no `secretsmanager:ListSecrets`.**
+ *   Retiring a credential is a state change on the row, not the destruction of
+ *   the material behind it; a control plane that could delete could lose an
+ *   agent's only login with no recovery, and one that could list could
+ *   enumerate secrets outside its own prefix regardless of the scoping above,
+ *   since `ListSecrets` takes no resource-level permission.
+ *
+ * An empty prefix is refused rather than formatted into the ARN: it would
+ * silently produce `secret:/*`, which is the wildcard this scoping exists to
+ * avoid, and it would deploy.
  *
  * `ec2:DescribeInstances` has no resource-level permissions at all — AWS
  * requires `Resource: ['*']` for it regardless of how narrowly the rest of
@@ -239,6 +272,21 @@ export interface ControlPlanePolicyConfig {
 export const buildControlPlanePolicy = (config: ControlPlanePolicyConfig): PolicyDocument => {
   const ec2Resource = (resourceType: string): string =>
     `arn:aws:ec2:${config.region}:${config.accountId}:${resourceType}/*`
+
+  if (config.agentCredentialSecretPrefix.trim() === '') {
+    throw new Error(
+      'Cannot scope the control plane’s Secrets Manager grant to an empty agent credential prefix, ' +
+        'which would widen it to every secret in the account.',
+    )
+  }
+
+  /**
+   * Secrets Manager appends a six-character suffix to the name it is given, so
+   * the ARN of a secret created beneath the prefix is
+   * `…:secret:{prefix}/{name}-AbCdEf`. Matching on `{prefix}/*` covers exactly
+   * the secrets this stage creates there and nothing above or beside it.
+   */
+  const agentCredentialSecretArn = `arn:aws:secretsmanager:${config.region}:${config.accountId}:secret:${config.agentCredentialSecretPrefix}/*`
 
   return {
     Version: POLICY_VERSION,
@@ -272,6 +320,17 @@ export const buildControlPlanePolicy = (config: ControlPlanePolicyConfig): Polic
         Effect: 'Allow',
         Action: ['iam:PassRole'],
         Resource: [config.executorRunnerRoleArn],
+      },
+      {
+        Sid: 'ManageAgentCredentialSecrets',
+        Effect: 'Allow',
+        Action: [
+          'secretsmanager:CreateSecret',
+          'secretsmanager:DescribeSecret',
+          'secretsmanager:GetSecretValue',
+          'secretsmanager:PutSecretValue',
+        ],
+        Resource: [agentCredentialSecretArn],
       },
     ],
   }

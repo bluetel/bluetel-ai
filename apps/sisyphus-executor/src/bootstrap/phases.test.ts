@@ -48,6 +48,46 @@ describe('phase vocabulary', () => {
       DEFAULT_PHASE_TIMEOUTS.bundle_verify,
     )
   })
+
+  /**
+   * The timeout map is written as a schedule, so it is checked as one. The
+   * membership assertion above sorts both sides and would pass on a map that
+   * listed the phases in any order at all; this one does not, which is what
+   * stops the map and `BOOTSTRAP_PHASES` drifting into disagreeing about when a
+   * phase runs while still agreeing that it exists.
+   */
+  it('lists its phases in the order the protocol runs them', () => {
+    expect(Object.keys(DEFAULT_PHASE_TIMEOUTS)).toEqual([...BOOTSTRAP_PHASES])
+  })
+
+  /**
+   * Position asserted by index rather than by membership (003/FR-049). A test
+   * that only checked `credential_install` was present would pass with the
+   * phase appended after `agent_start` — that is, with the credential installed
+   * after the agent that needs it had already been started, which is the one
+   * arrangement the enum's ordering exists to forbid.
+   */
+  it('installs the credential after the bundle and before any repository is cloned', () => {
+    const at = (phase: (typeof BOOTSTRAP_PHASES)[number]) => BOOTSTRAP_PHASES.indexOf(phase)
+
+    expect(at('setup_script')).toBeLessThan(at('credential_install'))
+    expect(at('credential_install')).toBeLessThan(at('entry_checkout'))
+    expect(at('credential_install')).toBeLessThan(at('agent_start'))
+  })
+
+  /**
+   * A fetch and a small write, not a download or a clone. If this phase ever
+   * acquires a bundle-sized budget it means it has grown work that belongs in
+   * another phase.
+   */
+  it('budgets the credential fetch as a round trip, not as a transfer', () => {
+    expect(DEFAULT_PHASE_TIMEOUTS.credential_install).toBeLessThan(
+      DEFAULT_PHASE_TIMEOUTS.bundle_download,
+    )
+    expect(DEFAULT_PHASE_TIMEOUTS.credential_install).toBeLessThan(
+      DEFAULT_PHASE_TIMEOUTS.entry_checkout,
+    )
+  })
 })
 
 describe('BootstrapPhaseError', () => {
@@ -166,6 +206,57 @@ describe('runPhase', () => {
     ).catch(() => undefined)
 
     expect(aborted).toBe(true)
+  })
+
+  /**
+   * 003/FR-051: a credential-install failure must fail the workflow **naming
+   * that phase**. The phase's own module is T055's; what is asserted here is
+   * the property that module will inherit — that there is no route by which
+   * this phase produces an unattributed bootstrap failure, whether it fails on
+   * its own terms, on an unexpected throw, or on its timeout.
+   */
+  it('names credential_install when the credential fetch fails (FR-051)', async () => {
+    const reporter = recordingReporter()
+
+    const failure = await runPhase(
+      'credential_install',
+      () =>
+        Promise.reject(
+          new BootstrapPhaseError('credential_install', 'machine surface returned 503'),
+        ),
+      { reporter },
+    ).catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(BootstrapPhaseError)
+    expect((failure as BootstrapPhaseError).message).toContain('credential_install')
+    expect(reporter.finished[0]).toMatchObject({
+      phase: 'credential_install',
+      outcome: 'failed',
+      detail: 'machine surface returned 503',
+    })
+  })
+
+  it('names credential_install on an unexpected throw and on its own timeout (FR-051)', async () => {
+    const reporter = recordingReporter()
+
+    const thrown = await runPhase(
+      'credential_install',
+      () => Promise.reject(new Error('EACCES writing agent credential file')),
+      { reporter },
+    ).catch((error: unknown) => error)
+
+    expect(thrown).toMatchObject({
+      phase: 'credential_install',
+      reason: 'EACCES writing agent credential file',
+    })
+
+    const hung = await runPhase('credential_install', () => new Promise(() => undefined), {
+      reporter,
+      timeoutMs: 20,
+    }).catch((error: unknown) => error)
+
+    expect(hung).toMatchObject({ phase: 'credential_install', timedOut: true })
+    expect(reporter.finished[1]?.outcome).toBe('timed_out')
   })
 
   it('takes the entry id off the failure when the phase was entered without one', async () => {

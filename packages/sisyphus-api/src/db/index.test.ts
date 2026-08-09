@@ -38,6 +38,7 @@ describe('the db barrel', () => {
 
   it('re-exports every table in the data model', () => {
     const expected = [
+      'agentCredentials',
       'artifacts',
       // Auth.js adapter storage. Listed here for the same reason as everything else: the barrel is
       // what drizzle-kit generates migrations from, so a table missing from it does not exist.
@@ -48,6 +49,8 @@ describe('the db barrel', () => {
       'computeLeases',
       'configurationAudit',
       'corrections',
+      'credentialGroups',
+      'credentialLeases',
       'executionProfiles',
       'executionProfileVersions',
       'externalActions',
@@ -55,10 +58,12 @@ describe('the db barrel', () => {
       'integrationRuns',
       'integrations',
       'iterations',
+      'keepAliveRuns',
       'logSegments',
       'notificationPreferences',
       'notifications',
       'profileAccessGrants',
+      'profileCredentialGroups',
       'profileOverrides',
       'reviewFindings',
       'roleChanges',
