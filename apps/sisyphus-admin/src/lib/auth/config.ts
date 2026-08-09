@@ -61,6 +61,13 @@ const findExistingUser = async (email: string): Promise<ExistingUserFacts | unde
  * work happens on the first request instead. See `./index.ts` for where it is invoked.
  */
 export const createAuthConfig = (): NextAuthConfig => ({
+  // The panel runs behind CloudFront/Lambda (OpenNext), which does not present a single fixed
+  // origin to Auth.js the way a traditional server would. Without this, Auth.js compares the
+  // request's `Host` header against its own guess of the origin and refuses anything it does not
+  // recognise — `UntrustedHost` — even for the panel's real domain. `AUTH_URL`/`SISYPHUS_PANEL_URL`
+  // still pin the canonical origin used for callback URLs; this only stops the host check from
+  // rejecting legitimate requests.
+  trustHost: true,
   adapter: createSisyphusAdapter({
     db: getAuthDatabase(),
     // T037: a first-time signer-in is created as `engineer` (FR-170). The override exists because

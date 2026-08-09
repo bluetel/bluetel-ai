@@ -39,6 +39,16 @@ export const serverSchemas = {
   AUTH_GOOGLE_ID: z.string().min(1),
   AUTH_GOOGLE_SECRET: z.string().min(1),
   /**
+   * The panel's canonical origin, read by Auth.js itself (`@auth/core` reads
+   * `process.env.AUTH_URL` directly, not through this validated `env` module) to pin its callback
+   * URLs and to derive `trustHost`. Without it in a deployed environment, Auth.js falls back to the
+   * request's `Host` header and refuses it — `UntrustedHost` — because nothing told it that host was
+   * expected. Optional only in development, where `@auth/core` already trusts the host because
+   * `NODE_ENV !== 'production'`; declared here anyway so a missing value fails loudly in every other
+   * environment instead of surfacing as a sign-in error days later.
+   */
+  AUTH_URL: process.env.NODE_ENV === 'development' ? z.string().url().optional() : z.string().url(),
+  /**
    * Google Workspace domains permitted to sign in. The `hd` claim is verified
    * server-side against this list (FR-011) — an email suffix check on the
    * client could be trivially faked.

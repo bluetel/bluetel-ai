@@ -29,16 +29,23 @@
 //   policies.ts                     every IAM document, and the exact trusted OIDC subject
 //   schedule-name.ts                schedule naming, including the collision refusal
 //   missing-oidc-provider-message.ts the diagnostic FR-068 requires when the provider is absent
+//   panel-domain.ts                 the panel's domain per stage, and the refusal that confines
+//                                   what it may create in the shared `bluetel.co.uk` zone
 //
 // A construct reads its values from those modules and never restates one.
 
 export {
   POLICY_VERSION,
   SISYPHUS_PROJECT,
+  getAppSecurityGroupIdParameterName,
+  getAppSubnetIdsParameterName,
   getBucketName,
   getBucketNames,
   getConnectionUrlParameterName,
   getEnvSecret,
+  getExecutorInstanceProfileParameterName,
+  getExecutorSecurityGroupIdsParameterName,
+  getExecutorSubnetIdsParameterName,
   getResourceIdentifier,
   getStackScope,
   readEnvRecord,
@@ -96,16 +103,22 @@ export {
   GITHUB_OIDC_CLAIM_PREFIX,
   GITHUB_OIDC_ISSUER_URL,
   GITHUB_OIDC_THUMBPRINTS,
+  buildControlPlanePolicy,
   buildDeployRoleTrustPolicy,
+  buildPanelBundlesPolicy,
   buildRunnerPolicy,
   buildRunnerTrustPolicy,
   getDeployBranchRef,
   getTrustedSubject,
+  type ControlPlanePolicyConfig,
   type DeployRoleTrustPolicyConfig,
+  type PanelBundlesPolicyConfig,
   type RunnerPolicyConfig,
 } from './policies'
 
 export { getMissingOidcProviderMessage } from './missing-oidc-provider-message'
+
+export { RESERVED_LAMBDA_ENV_KEYS, omitReservedLambdaEnv } from './reserved-lambda-env'
 
 export {
   getControlPlaneTickName,
@@ -125,7 +138,14 @@ export { createDatabase, type Database, type DatabaseConfig } from './database'
 
 export { createOidcProvider, type OidcProviderConfig } from './oidc-provider'
 
-export { createRunnerRole, type RunnerRole, type RunnerRoleConfig } from './runner-role'
+export {
+  EXECUTOR_RUNNER_ROLE_NAME,
+  createRunnerRole,
+  type RunnerRole,
+  type RunnerRoleConfig,
+} from './runner-role'
+
+export { SISYPHUS_VPC_NAME, createSisyphusVpc, type SisyphusVpc } from './vpc'
 
 export {
   CONTROL_PLANE_TICK_JOB,
@@ -140,3 +160,16 @@ export {
   createNextjsWebsite,
   type NextjsWebsiteConfig,
 } from './nextjs-website'
+
+export {
+  PANEL_DNS_ZONE_NAME,
+  PANEL_DOMAIN_ROOT,
+  assertPanelDnsZone,
+  getMissingPanelDnsZoneMessage,
+  getPanelDomain,
+  getPanelUrl,
+  isPanelDnsName,
+  type PanelDnsZoneAssertion,
+} from './panel-domain'
+
+export { createPanelDomain, type PanelDomainConfig } from './panel-dns'

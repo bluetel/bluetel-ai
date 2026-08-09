@@ -29,9 +29,9 @@ describe('getPlainStage', () => {
   })
 
   it('is idempotent', () => {
-    const once = getPlainStage('dev-harry-bootstrap')
+    const once = getPlainStage('local-bootstrap')
 
-    expect(once).toBe('dev-harry')
+    expect(once).toBe('local')
     expect(getPlainStage(once)).toBe(once)
   })
 

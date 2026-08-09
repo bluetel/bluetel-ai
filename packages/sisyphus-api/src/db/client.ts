@@ -80,6 +80,10 @@ export const createDatabaseClient = (options: DatabaseClientOptions): DatabaseCl
     connect_timeout: options.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS,
     max_lifetime: options.maxLifetimeSeconds ?? DEFAULT_MAX_LIFETIME_SECONDS,
     prepare: options.prepare ?? false,
+    // RDS's default parameter group sets `rds.force_ssl=1`, rejecting any unencrypted connection.
+    // `require` matches libpq's connection mode of the same name: encrypted, without verifying the
+    // server certificate against a CA.
+    ssl: 'require',
     onnotice: () => {
       // Postgres notices are not application events; swallow rather than writing them to the
       // workflow log, which is sanitised output meant for a human reading a run.

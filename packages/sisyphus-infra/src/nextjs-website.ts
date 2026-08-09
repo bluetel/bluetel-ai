@@ -18,6 +18,8 @@
  * describing arguments the provider will reject.
  */
 
+import { omitReservedLambdaEnv } from './reserved-lambda-env'
+
 type NextjsArgs = NonNullable<ConstructorParameters<typeof sst.aws.Nextjs>[1]>
 
 /**
@@ -33,14 +35,24 @@ export interface NextjsWebsiteConfig {
   readonly permissions?: NextjsArgs['permissions']
   readonly server?: NextjsArgs['server']
   readonly transform?: NextjsArgs['transform']
+  readonly vpc?: NextjsArgs['vpc']
 }
 
 export const createNextjsWebsite = (config: NextjsWebsiteConfig): sst.aws.Nextjs =>
   new sst.aws.Nextjs(NEXTJS_WEBSITE_NAME, {
     path: config.path,
-    environment: config.environment,
+    // The server function's environment is a Lambda environment underneath;
+    // AWS_REGION is injected by the runtime itself and a deploy is rejected
+    // outright if it is also declared here. `environment` is an `Input`, not
+    // necessarily a plain object, so it is resolved through `$output` before
+    // the reserved key can be filtered out of it.
+    environment:
+      config.environment === undefined
+        ? undefined
+        : $output(config.environment).apply((environment) => omitReservedLambdaEnv(environment)),
     domain: config.domain,
     permissions: config.permissions,
     server: config.server,
     transform: config.transform,
+    vpc: config.vpc,
   })

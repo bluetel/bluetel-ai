@@ -5,11 +5,15 @@ import {
   GITHUB_OIDC_CLAIM_PREFIX,
   GITHUB_OIDC_ISSUER_URL,
   GITHUB_OIDC_THUMBPRINTS,
+  buildControlPlanePolicy,
   buildDeployRoleTrustPolicy,
+  buildPanelBundlesPolicy,
   buildRunnerPolicy,
   buildRunnerTrustPolicy,
   getDeployBranchRef,
   getTrustedSubject,
+  type ControlPlanePolicyConfig,
+  type PanelBundlesPolicyConfig,
   type RunnerPolicyConfig,
 } from './policies'
 import { DEPLOY_STAGES } from './sst-app'
@@ -28,6 +32,15 @@ const runnerConfig: RunnerPolicyConfig = {
 
 const runnerActions = (config: RunnerPolicyConfig = runnerConfig): string[] =>
   buildRunnerPolicy(config).Statement.flatMap((statement) => [...statement.Action])
+
+const controlPlaneConfig: ControlPlanePolicyConfig = {
+  region: 'eu-west-2',
+  accountId: '429776178057',
+  executorRunnerRoleArn: 'arn:aws:iam::429776178057:role/sisyphus-staging-executor-runner',
+}
+
+const controlPlaneActions = (config: ControlPlanePolicyConfig = controlPlaneConfig): string[] =>
+  buildControlPlanePolicy(config).Statement.flatMap((statement) => [...statement.Action])
 
 describe('the GitHub OIDC identity', () => {
   it('federates the GitHub Actions issuer', () => {
@@ -55,7 +68,7 @@ describe('getDeployBranchRef', () => {
   })
 
   it('gives a personal stage no CI branch at all', () => {
-    expect(getDeployBranchRef('dev-harry')).toBeUndefined()
+    expect(getDeployBranchRef('local')).toBeUndefined()
     expect(getDeployBranchRef('')).toBeUndefined()
   })
 
@@ -88,9 +101,7 @@ describe('getTrustedSubject', () => {
   })
 
   it('refuses to issue a subject for a stage with no protected branch', () => {
-    expect(() => getTrustedSubject(githubRepo, 'dev-harry')).toThrow(
-      'has no protected deploy branch',
-    )
+    expect(() => getTrustedSubject(githubRepo, 'local')).toThrow('has no protected deploy branch')
   })
 })
 
@@ -142,7 +153,7 @@ describe('buildDeployRoleTrustPolicy', () => {
       buildDeployRoleTrustPolicy({
         oidcProviderArn: 'arn:aws:iam::123456789012:oidc-provider/x',
         githubRepo,
-        stage: 'dev-harry',
+        stage: 'local',
       }),
     ).toThrow('has no protected deploy branch')
   })
@@ -252,9 +263,141 @@ describe('buildRunnerPolicy — what the executor must never do', () => {
     }
   })
 
-  it('refuses a policy with no workflow to scope its grants to', () => {
+  it('refuses an empty workflow id rather than treating it as deliberately fleet-wide', () => {
     expect(() => buildRunnerPolicy({ ...runnerConfig, workflowId: '' })).toThrow(
       'empty workflow id',
     )
+  })
+})
+
+describe('buildRunnerPolicy — the fleet-wide profile, when no workflow id is given', () => {
+  const fleetWideConfig: RunnerPolicyConfig = { bucketNames: runnerConfig.bucketNames }
+  const policy = buildRunnerPolicy(fleetWideConfig)
+
+  it('grants the whole bucket rather than a workflow partition', () => {
+    const logsAndArtifacts = policy.Statement.find(
+      (entry) => entry.Sid === 'WriteOwnLogsAndArtifacts',
+    )
+    const snapshots = policy.Statement.find((entry) => entry.Sid === 'ReadWriteOwnSnapshots')
+
+    expect(logsAndArtifacts?.Resource).toEqual([
+      'arn:aws:s3:::sisyphus-staging-logs/*',
+      'arn:aws:s3:::sisyphus-staging-artifacts/*',
+    ])
+    expect(snapshots?.Resource).toEqual(['arn:aws:s3:::sisyphus-staging-snapshots/*'])
+  })
+
+  it('is otherwise the same document — bundle read and the Session Manager channel unaffected', () => {
+    const bundles = policy.Statement.find((entry) => entry.Sid === 'ReadSetupBundleArchive')
+    const sessionManager = policy.Statement.find((entry) => entry.Sid === 'SessionManagerChannel')
+
+    expect(bundles?.Resource).toEqual(['arn:aws:s3:::sisyphus-staging-bundles/*'])
+    expect(sessionManager?.Action).toContain('ssmmessages:OpenDataChannel')
+  })
+
+  it('still refuses an explicit empty string, distinguishing it from an omitted id', () => {
+    expect(() => buildRunnerPolicy({ ...fleetWideConfig, workflowId: '' })).toThrow(
+      'empty workflow id',
+    )
+  })
+})
+
+describe('buildControlPlanePolicy — what the control plane may do', () => {
+  const policy = buildControlPlanePolicy(controlPlaneConfig)
+
+  it('can enumerate the fleet, with the wildcard resource DescribeInstances requires', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'ReconcileFleetVisibility')
+
+    expect(statement?.Action).toEqual(['ec2:DescribeInstances'])
+    expect(statement?.Resource).toEqual(['*'])
+  })
+
+  it('can launch and terminate instances scoped to its own account and region', () => {
+    const statement = policy.Statement.find(
+      (entry) => entry.Sid === 'LaunchAndTerminateExecutorInstances',
+    )
+
+    expect(statement?.Action).toEqual([
+      'ec2:RunInstances',
+      'ec2:TerminateInstances',
+      'ec2:CreateTags',
+    ])
+    expect(statement?.Resource).toEqual(['arn:aws:ec2:eu-west-2:429776178057:instance/*'])
+  })
+
+  it('grants RunInstances the dependent resources it also needs permission on', () => {
+    const statement = policy.Statement.find(
+      (entry) => entry.Sid === 'RunInstancesResourceDependencies',
+    )
+
+    expect(statement?.Action).toEqual(['ec2:RunInstances'])
+    expect(statement?.Resource).toEqual([
+      'arn:aws:ec2:eu-west-2::image/*',
+      'arn:aws:ec2:eu-west-2:429776178057:subnet/*',
+      'arn:aws:ec2:eu-west-2:429776178057:network-interface/*',
+      'arn:aws:ec2:eu-west-2:429776178057:security-group/*',
+      'arn:aws:ec2:eu-west-2:429776178057:volume/*',
+    ])
+  })
+
+  it('may pass exactly the executor runner role, and no other', () => {
+    const statement = policy.Statement.find(
+      (entry) => entry.Sid === 'PassExecutorRunnerRoleToLaunchedInstances',
+    )
+
+    expect(statement?.Action).toEqual(['iam:PassRole'])
+    expect(statement?.Resource).toEqual([controlPlaneConfig.executorRunnerRoleArn])
+  })
+
+  it('scopes every EC2 resource ARN to the region and account supplied, not another stage’s', () => {
+    const other = buildControlPlanePolicy({
+      region: 'us-east-1',
+      accountId: '111111111111',
+      executorRunnerRoleArn: 'arn:aws:iam::111111111111:role/sisyphus-other-executor-runner',
+    })
+    const ec2Resources = other.Statement.filter(
+      (statement) => statement.Sid !== 'PassExecutorRunnerRoleToLaunchedInstances',
+    )
+      .flatMap((statement) => statement.Resource ?? [])
+      .filter((resource) => resource !== '*')
+
+    for (const resource of ec2Resources) {
+      expect(resource.includes('eu-west-2')).toBe(false)
+      expect(resource.includes('429776178057')).toBe(false)
+    }
+  })
+
+  it('grants nothing outside the four scoped statements', () => {
+    expect(policy.Statement).toHaveLength(4)
+    expect(policy.Statement.every((statement) => statement.Effect === 'Allow')).toBe(true)
+  })
+})
+
+describe('buildControlPlanePolicy — what the control plane must never do', () => {
+  it('cannot reach the database, Secrets Manager or Parameter Store', () => {
+    for (const action of controlPlaneActions()) {
+      expect(action.startsWith('rds')).toBe(false)
+      expect(action.startsWith('secretsmanager:')).toBe(false)
+      expect(action.startsWith('ssm:')).toBe(false)
+    }
+  })
+
+  it('cannot touch S3 — the buckets rely on their own bucket policies, not this role', () => {
+    for (const action of controlPlaneActions()) {
+      expect(action.startsWith('s3:')).toBe(false)
+    }
+  })
+
+  it('has no wildcard action, and passes no role by wildcard', () => {
+    for (const action of controlPlaneActions()) {
+      expect(action).not.toBe('*')
+      expect(action.endsWith(':*')).toBe(false)
+    }
+
+    const passRoleResources = buildControlPlanePolicy(controlPlaneConfig).Statement.find((entry) =>
+      entry.Action.includes('iam:PassRole'),
+    )?.Resource
+
+    expect(passRoleResources).not.toContain('*')
   })
 })

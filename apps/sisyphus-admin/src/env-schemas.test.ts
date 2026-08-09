@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest'
+/* cspell:words requiredness */
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { clientSchemas, processEnvKeys, serverSchemas } from './env-schemas'
+
+/** `AUTH_URL`'s requiredness is decided by `process.env.NODE_ENV` at import time. */
+const importServerSchemasWithNodeEnv = async (nodeEnv: string) => {
+  vi.resetModules()
+  vi.stubEnv('NODE_ENV', nodeEnv)
+  const { serverSchemas: reimportedServerSchemas } = await import('./env-schemas')
+  return reimportedServerSchemas
+}
 
 describe('serverSchemas', () => {
   describe('required values', () => {
@@ -50,6 +59,25 @@ describe('serverSchemas', () => {
 
     it('rejects a missing stage', () => {
       expect(() => serverSchemas.SISYPHUS_STAGE.parse(undefined)).toThrow()
+    })
+
+    it('rejects a missing Auth.js URL outside development, so a deploy fails loudly rather than as an UntrustedHost error at sign-in', () => {
+      expect(() => serverSchemas.AUTH_URL.parse(undefined)).toThrow()
+      expect(() => serverSchemas.AUTH_URL.parse('/panel')).toThrow()
+      expect(serverSchemas.AUTH_URL.parse('https://sisyphus.example.com')).toBe(
+        'https://sisyphus.example.com',
+      )
+    })
+  })
+
+  describe('AUTH_URL in development', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('allows the Auth.js URL to be absent, because @auth/core already trusts a non-production host', async () => {
+      const devServerSchemas = await importServerSchemasWithNodeEnv('development')
+      expect(devServerSchemas.AUTH_URL.parse(undefined)).toBeUndefined()
     })
   })
 

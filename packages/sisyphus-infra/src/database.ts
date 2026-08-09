@@ -11,6 +11,13 @@
  * standby, to keep cost minimal. Production still gets a fortnight of backups
  * and deletion protection; every other stage is disposable by design, because
  * a personal stage that cannot be torn down is a stage nobody deletes.
+ *
+ * `publiclyAccessible: false` only means what it says once the instance is
+ * actually inside a VPC a caller can reach from: `subnetIds` and
+ * `securityGroupIds` below are the shared VPC's private subnets and its
+ * database security group (`createSisyphusVpc` in `vpc.ts`), so "reach it from
+ * inside the VPC" is what the two Lambda callers' own VPC attachment makes
+ * true, not an aspiration this instance states on its own.
  */
 
 import { getConnectionUrlParameterName, getResourceIdentifier, type ResourceScope } from './lib'
@@ -19,7 +26,7 @@ import { isProductionStage } from './sst-app'
 /** The database, and the role the panel and the control plane connect as. */
 const DATABASE_NAME = 'sisyphus'
 
-const DEFAULT_ENGINE_VERSION = '17.4'
+const DEFAULT_ENGINE_VERSION = '17.5'
 
 export interface DatabaseConfig {
   readonly scope: ResourceScope
@@ -38,10 +45,15 @@ export interface DatabaseConfig {
   readonly instanceClass?: string
   readonly allocatedStorageGb?: number
   readonly engineVersion?: string
+  /** The shared VPC's private subnets — `SisyphusVpc.privateSubnetIds` from `vpc.ts`. */
+  readonly subnetIds: $util.Input<$util.Input<string>[]>
+  /** The shared VPC's database security group — `SisyphusVpc.databaseSecurityGroup.id`. */
+  readonly securityGroupIds: $util.Input<$util.Input<string>[]>
 }
 
 export interface Database {
   readonly instance: aws.rds.Instance
+  readonly subnetGroup: aws.rds.SubnetGroup
   /** Secret-wrapped, and only knowable once the instance has an endpoint. */
   readonly connectionUrl: $util.Output<string>
   readonly connectionUrlParameter: aws.ssm.Parameter
@@ -54,6 +66,13 @@ export const createDatabase = (config: DatabaseConfig): Database => {
   const identifier = getResourceIdentifier(config.scope, 'database')
   const username = config.username ?? DATABASE_NAME
 
+  const subnetGroup = new aws.rds.SubnetGroup(
+    getResourceIdentifier(config.scope, 'database-subnets'),
+    {
+      subnetIds: config.subnetIds,
+    },
+  )
+
   const instance = new aws.rds.Instance(identifier, {
     identifier,
     engine: 'postgres',
@@ -62,8 +81,19 @@ export const createDatabase = (config: DatabaseConfig): Database => {
     allocatedStorage: config.allocatedStorageGb ?? 20,
     // FR-072 forbids platform credentials and data at rest in the clear.
     storageEncrypted: true,
-    // The control plane and panel reach it from inside the VPC only.
+    // The control plane and panel reach it from inside the VPC only — true
+    // because both are attached to the same VPC's private subnets, and
+    // `vpcSecurityGroupIds` below admits only the app security group they share.
     publiclyAccessible: false,
+    dbSubnetGroupName: subnetGroup.name,
+    vpcSecurityGroupIds: config.securityGroupIds,
+    // Without this, AWS accepts a subnet-group or security-group change and
+    // reports it back as a "pending modification" it will apply at the next
+    // maintenance window — which can be days away — rather than now. A stack
+    // that reports success is then lying about the state of a resource nothing
+    // told it was still catching up: `sst deploy` finishing is what "applied"
+    // is supposed to mean here.
+    applyImmediately: true,
     multiAz: false,
     backupRetentionPeriod: isProduction ? 14 : 1,
     deletionProtection: isProduction,
@@ -93,5 +123,11 @@ export const createDatabase = (config: DatabaseConfig): Database => {
     },
   )
 
-  return { instance, connectionUrl, connectionUrlParameter, connectionUrlParameterName }
+  return {
+    instance,
+    subnetGroup,
+    connectionUrl,
+    connectionUrlParameter,
+    connectionUrlParameterName,
+  }
 }

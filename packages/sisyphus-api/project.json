@@ -42,6 +42,17 @@
         "command": "tsx src/db/migrations/cli.ts",
         "cwd": "packages/sisyphus-api"
       },
+      "configurations": {
+        "local": {
+          "command": "tsx src/db/migrations/cli.ts"
+        },
+        "staging": {
+          "command": "SISYPHUS_STAGE=staging tsx src/db/migrations/deploy.ts"
+        },
+        "production": {
+          "command": "SISYPHUS_STAGE=production tsx src/db/migrations/deploy.ts"
+        }
+      },
       "cache": false
     }
   }

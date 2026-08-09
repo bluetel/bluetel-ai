@@ -8,16 +8,33 @@
  * instance, because launching is the control plane's job (FR-038).
  *
  * ---------------------------------------------------------------------------
- * Two things this config deliberately does not create
+ * One thing this config deliberately does not create
  * ---------------------------------------------------------------------------
  * **No bucket.** The panel's stack owns all four. This config derives their
  * names from the same `getBucketNames` the panel builds them with, so the two
  * stacks cannot disagree about a name or a retention schedule.
  *
- * **No runner role.** `createRunnerRole` scopes every S3 grant to one workflow's
- * partition, which is what stops one run reading another's logs (FR-071). A
- * role created at deploy time could only be scoped to every workflow at once, so
- * the role is created per launch by the control plane instead.
+ * ---------------------------------------------------------------------------
+ * The runner role this config *does* create, and why that is a compromise
+ * ---------------------------------------------------------------------------
+ * `createRunnerRole` is meant to be called **per launch**, by the control plane,
+ * with the workflow id it is about to hand the instance — `buildRunnerPolicy`
+ * then scopes every S3 grant to that one workflow's partition, which is what
+ * stops one run reading another's logs (FR-071). Nothing builds that per-launch
+ * path yet.
+ *
+ * Until it does, this config calls `createRunnerRole` once, with no workflow id,
+ * and publishes the resulting profile's ARN for the control plane to hand every
+ * instance it launches. Every instance in the fleet therefore shares one
+ * profile, and `buildRunnerPolicy` falls back to granting the whole bucket
+ * rather than a partition — FR-071's isolation does not hold under this shape.
+ * See the caveat on `createRunnerRole` in `runner-role.ts` for the full
+ * rationale; this is a known, temporary gap, not the intended one.
+ *
+ * The instance's network — the VPC, its public subnets and its security group
+ * — is not created here either. It is the one shared VPC every deployable's
+ * compute lives in, owned by the panel's stack alongside the buckets and the
+ * database; see `createSisyphusVpc` in `vpc.ts`.
  *
  * The release lives in the bundles bucket under `releases/`, outside the
  * `workflow/` prefix every lifecycle rule is scoped to. That is not a
@@ -110,7 +127,9 @@ export default $config({
 
     const {
       BUCKET_SERVER_SIDE_ENCRYPTION,
+      createRunnerRole,
       getBucketNames,
+      getExecutorInstanceProfileParameterName,
       getStackScope,
       // The package barrel — never a module inside it.
     } = await import('@bluetel-ai/sisyphus-infra')
@@ -122,6 +141,27 @@ export default $config({
 
     // Names, not resources — the panel's stack creates these buckets.
     const bucketNames = getBucketNames(scope)
+
+    /**
+     * The instance profile every executor instance boots with.
+     *
+     * Called here — once, at deploy time, with no workflow id — only because
+     * nothing yet creates one per launch the way `runner-role.ts` says this
+     * role is meant to be created. `buildRunnerPolicy` falls back to granting
+     * the whole bucket in that shape, so FR-071's per-workflow isolation does
+     * not hold today: every instance in the fleet shares this one profile. See
+     * the caveat on `createRunnerRole` for the full rationale.
+     */
+    const runnerRole = createRunnerRole({ scope, bucketNames })
+
+    new aws.ssm.Parameter('SisyphusExecutorInstanceProfileArn', {
+      name: getExecutorInstanceProfileParameterName(stage),
+      // Not a credential: the ARN names a profile whose own policy is what
+      // restricts it, the same reasoning as the release-key parameter below.
+      type: 'String',
+      value: runnerRole.instanceProfile.arn,
+      description: `Sisyphus executor instance profile ARN for stage "${stage}" (fleet-wide)`,
+    })
 
     const contents = readFileSync(RELEASE_ARTIFACT_PATH)
     const digest = createHash('sha256').update(contents).digest('hex')
@@ -152,6 +192,7 @@ export default $config({
       releaseDigest: digest,
       releaseBucket: bucketNames.bundles,
       releaseKeyParameter: getReleaseKeyParameterName(stage),
+      executorInstanceProfileArn: runnerRole.instanceProfile.arn,
     }
   },
 })

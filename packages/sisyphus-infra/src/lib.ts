@@ -101,6 +101,58 @@ export const getBucketNames = (scope: ResourceScope): Readonly<Record<ObjectClas
 export const getConnectionUrlParameterName = (stage: string): string =>
   `/sisyphus/${getPlainStage(stage)}/database/connection-url`
 
+/**
+ * The Parameter Store path the executor's instance profile ARN is published to.
+ *
+ * The executor's own stack creates the profile (fleet-wide today — see the
+ * caveat on `createRunnerRole` in `runner-role.ts`) and publishes its ARN here.
+ * The control plane reads it from here rather than from a copy in its own
+ * operator-edited env blob, for the same reason it reads the database
+ * connection URL from a published parameter instead of one: a stack that
+ * recreates the profile must not leave every other deployable pointed at an ARN
+ * that no longer exists. This means the executor's stack must be deployed
+ * before the control plane's on a stage that has never seen either.
+ */
+export const getExecutorInstanceProfileParameterName = (stage: string): string =>
+  `/sisyphus/${getPlainStage(stage)}/executor/instance-profile-arn`
+
+/**
+ * The Parameter Store paths the executor's public subnet and security-group
+ * ids are published to.
+ *
+ * Same reasoning as {@link getExecutorInstanceProfileParameterName}, but this
+ * time the panel's stack is the publisher: it creates the one shared VPC every
+ * deployable's compute lives in (`createSisyphusVpc` in `vpc.ts`) alongside the
+ * buckets and the database, and the control plane reads the executor's public
+ * subnet ids and executor security group id from here rather than from a value
+ * an operator typed once. Each parameter holds a comma-separated list, in the
+ * same shape `SISYPHUS_EXECUTOR_SUBNET_IDS` and
+ * `SISYPHUS_EXECUTOR_SECURITY_GROUP_IDS` already take at runtime.
+ */
+export const getExecutorSubnetIdsParameterName = (stage: string): string =>
+  `/sisyphus/${getPlainStage(stage)}/executor/subnet-ids`
+
+export const getExecutorSecurityGroupIdsParameterName = (stage: string): string =>
+  `/sisyphus/${getPlainStage(stage)}/executor/security-group-ids`
+
+/**
+ * The Parameter Store paths the shared VPC's **private** subnet ids and app
+ * security group id are published to — what a VPC-attached Lambda needs, as
+ * opposed to {@link getExecutorSubnetIdsParameterName}'s public subnets for the
+ * executor's EC2 instances.
+ *
+ * The panel's own server function reads these to attach itself; the control
+ * plane's Lambda reads the same two parameters for the same reason: both have
+ * to be inside the VPC to reach the database, and both have to share one app
+ * security group, because the database's own security group admits exactly
+ * that one group and no other (`createSisyphusVpc` in `vpc.ts`).
+ */
+export const getAppSubnetIdsParameterName = (stage: string): string =>
+  `/sisyphus/${getPlainStage(stage)}/app/subnet-ids`
+
+export const getAppSecurityGroupIdParameterName = (stage: string): string =>
+  `/sisyphus/${getPlainStage(stage)}/app/security-group-id`
+
 // ---------------------------------------------------------------------------
 // Deploy-time environment values
 // ---------------------------------------------------------------------------

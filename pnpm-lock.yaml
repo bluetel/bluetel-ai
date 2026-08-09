@@ -392,6 +392,12 @@ importers:
 
   packages/sisyphus-api:
     dependencies:
+      '@aws-sdk/client-ssm':
+        specifier: ^3.0.0
+        version: 3.1098.0
+      '@bluetel-ai/sisyphus-infra':
+        specifier: workspace:*
+        version: link:../sisyphus-infra
       '@trpc/server':
         specifier: ^11.18.0
         version: 11.18.0(typescript@5.9.2)

@@ -11,6 +11,7 @@ const environment: Readonly<Record<string, string>> = {
   AUTH_SECRET: 'auth-secret',
   AUTH_GOOGLE_ID: 'google-client-id',
   AUTH_GOOGLE_SECRET: 'google-client-secret',
+  AUTH_URL: 'https://sisyphus.example.com',
   SISYPHUS_PERMITTED_EMAIL_DOMAINS: 'bluetel.co.uk, example.com',
   SISYPHUS_MACHINE_CREDENTIAL_SECRET: 'machine-secret',
   SISYPHUS_SLACK_BOT_TOKEN: 'slack-bot-token-fixture',

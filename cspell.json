@@ -145,7 +145,8 @@
     "ACMR",
     "sarif",
     "speckit",
-    "assertable"
+    "assertable",
+    "libpq"
   ],
   "ignorePaths": [
     "node_modules",
