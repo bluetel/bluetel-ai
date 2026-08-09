@@ -122,12 +122,12 @@ observable, auditable thing.
 
 This specification **changes** the following, which the platform specification states otherwise:
 
-| 002 requirement                 | Was                                                       | Becomes                                                                           |
-| ------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `002/FR-043`, `002/FR-075`      | `setup.sh` installs the agent CLI **and its credentials** | Installs the agent CLI and non-agent credentials only; agent credential is leased |
-| `002/FR-072`                    | Credentials reinstalled from the bundle on every boot     | Agent credential fetched from its lease on every boot                             |
+| 002 requirement                 | Was                                                       | Becomes                                                                                                  |
+| ------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `002/FR-043`, `002/FR-075`      | `setup.sh` installs the agent CLI **and its credentials** | Installs the agent CLI and non-agent credentials only; agent credential is leased                        |
+| `002/FR-072`                    | Credentials reinstalled from the bundle on every boot     | Agent credential fetched from its lease on every boot                                                    |
 | `002/FR-049`                    | Pause holds the agent process alive on a running instance | Pause stops the instance (on-demand); session persists on its disk. Spot degrades to 002's snapshot path |
-| `002/US2 §4` (pause idle limit) | Paused too long → snapshot, release instance              | Unchanged; the seat is **retained**, since parking is not the workflow ending     |
+| `002/US2 §4` (pause idle limit) | Paused too long → snapshot, release instance              | Unchanged; the seat is **retained**, since parking is not the workflow ending                            |
 
 Execution profiles are **extended**, not changed: they gain an ordered attachment to credential groups
 (FR-062), and everything else about them — versioning, access control, locked fields — is untouched.

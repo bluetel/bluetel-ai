@@ -94,6 +94,7 @@ export default $config({
 
   run: async () => {
     const {
+      buildPanelBundlesPolicy,
       createBuckets,
       createDatabase,
       createNextjsWebsite,
@@ -164,6 +165,20 @@ export default $config({
     const bucketNames = getBucketNames(scope)
 
     /**
+     * Registering a bundle writes into `bucketNames.bundles`, a bucket this stack creates but
+     * that `createNextjsWebsite` below cannot see: it is referenced only by name, never `link`ed,
+     * so none of SST's automatic resource-permission wiring reaches it. `permissions` on the site
+     * below is what grants it explicitly — see `buildPanelBundlesPolicy` for exactly what it may
+     * do and, as importantly, what it may not (FR-084).
+     */
+    const { accountId } = await aws.getCallerIdentity()
+    const panelBundlesPolicy = buildPanelBundlesPolicy({
+      region,
+      accountId,
+      bundlesBucketName: bucketNames.bundles,
+    })
+
+    /**
      * The one VPC every deployable's compute lives in: public subnets for the
      * executor's EC2 instances, private subnets for this site's own server
      * function and the control plane's Lambda, and the security groups that
@@ -217,6 +232,15 @@ export default $config({
         privateSubnets: network.privateSubnetIds,
         securityGroups: [network.appSecurityGroup.id],
       },
+      // Maps `panelBundlesPolicy`'s statements onto the shape SST's own `permissions` prop takes
+      // rather than restating them — the same reasoning as `sisyphus-control-plane`'s mapping of
+      // `controlPlanePolicy`. Neither of this policy's statements uses a `Condition`, so nothing
+      // is lost in the mapping.
+      permissions: panelBundlesPolicy.Statement.map((statement) => ({
+        effect: statement.Effect === 'Allow' ? ('allow' as const) : ('deny' as const),
+        actions: [...statement.Action],
+        resources: [...(statement.Resource ?? [])],
+      })),
       domain: panelDomain,
       environment: {
         AWS_REGION: region,

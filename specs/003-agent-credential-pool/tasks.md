@@ -9,7 +9,7 @@ description: 'Task list for Agent Credential Pool'
 **Prerequisites**: [plan.md](./plan.md), [spec.md](./spec.md), [research.md](./research.md),
 [data-model.md](./data-model.md), [contracts/](./contracts/), [quickstart.md](./quickstart.md)
 
-**Tests**: **Required, not optional**, including for `index.ts` barrels — Principle III says *every* module
+**Tests**: **Required, not optional**, including for `index.ts` barrels — Principle III says _every_ module
 file, and this plan applies it uniformly rather than inheriting the repo's split habit (`enums/index.ts` and
 `db/schema/index.ts` have colocated tests; `bootstrap/index.ts` and `session/index.ts` do not). That existing
 inconsistency is a governance question worth settling separately — the constitution's own wording says a
@@ -35,12 +35,12 @@ releases it — with a queue when the pool is dry, and the race/fencing tests th
 it. US2, US3 and US4 land whole; **US1 is split**, which is what makes the MVP reachable in six phases rather
 than seven:
 
-| Story   | Priority | In the MVP                                                    | Deferred to                            |
-| ------- | -------- | ------------------------------------------------------------- | -------------------------------------- |
-| **US2** | P1       | Whole — groups, ordered attachments, the unlaunchable gate    | —                                      |
-| **US1** | P1       | Register into a group; adopt a secret seeded out of band      | Phase 7 — the hosted login environment |
-| **US3** | P1       | Whole — lease, fetch, rotate, release, reconcile               | —                                      |
-| **US4** | P1       | Whole — waiting state, grant on release, wait limit             | —                                      |
+| Story   | Priority | In the MVP                                                 | Deferred to                            |
+| ------- | -------- | ---------------------------------------------------------- | -------------------------------------- |
+| **US2** | P1       | Whole — groups, ordered attachments, the unlaunchable gate | —                                      |
+| **US1** | P1       | Register into a group; adopt a secret seeded out of band   | Phase 7 — the hosted login environment |
+| **US3** | P1       | Whole — lease, fetch, rotate, release, reconcile           | —                                      |
+| **US4** | P1       | Whole — waiting state, grant on release, wait limit        | —                                      |
 
 **The US1 split is the big one.** FR-069–FR-072 (ephemeral EC2 login instance, SSM relay, server-side capture,
 wall-clock reaper) is the single most expensive piece of work in this feature and it gates nothing except
@@ -59,12 +59,12 @@ until Phase 7**. That is a stated, temporary gap, not a silent one.
 
 Four existing workspace members change; **none is added** (plan.md → Structure Decision).
 
-| Member                         | Role in this feature                                     |
-| ------------------------------- | ----------------------------------------------------------- |
-| `packages/sisyphus-api`        | Schema, enums, contracts, tRPC admin + machine surfaces  |
-| `apps/sisyphus-control-plane`  | Allocation, leasing, liveness, health, login, jobs        |
-| `apps/sisyphus-executor`       | `credential_install` phase, rotation watch, suspend       |
-| `apps/sisyphus-admin`          | Pool view, group management, login flow                   |
+| Member                        | Role in this feature                                    |
+| ----------------------------- | ------------------------------------------------------- |
+| `packages/sisyphus-api`       | Schema, enums, contracts, tRPC admin + machine surfaces |
+| `apps/sisyphus-control-plane` | Allocation, leasing, liveness, health, login, jobs      |
+| `apps/sisyphus-executor`      | `credential_install` phase, rotation watch, suspend     |
+| `apps/sisyphus-admin`         | Pool view, group management, login flow                 |
 
 All commands go through Nx (`pnpm nx …`) per Constitution Principle I.
 
@@ -530,7 +530,7 @@ exercised and its liveness time updated — including in a group no workflow eve
       `SISYPHUS_KEEPALIVE_IDLE_HOURS`, **regardless of group** (FR-035), skipping disabled credentials (FR-036).
       **Claiming is the same conditional update T042 uses**, not a read-then-act check:
       `UPDATE agent_credentials SET state = 'held', held_by = 'keep_alive' WHERE id = :id AND state =
-      'available'`, and zero rows affected means a workflow reservation won the row — keep-alive yields and moves
+'available'`, and zero rows affected means a workflow reservation won the row — keep-alive yields and moves
       on. Reading `state` and then exercising would let both parties observe `available` and both proceed, which
       is exactly the concurrent use FR-038 forbids and the double-use this whole feature exists to prevent.
       Release back to `available` when the exercise finishes, whatever its outcome.

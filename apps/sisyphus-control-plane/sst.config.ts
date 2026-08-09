@@ -247,8 +247,6 @@ export default $config({
     // `runner-role.ts` cannot name the role differently.
     const executorRunnerRoleArn = `arn:aws:iam::${accountId}:role/${getResourceIdentifier(scope, EXECUTOR_RUNNER_ROLE_NAME)}`
 
-    const controlPlanePolicy = buildControlPlanePolicy({ region, accountId, executorRunnerRoleArn })
-
     const schedulerRoleName = getResourceIdentifier(scope, 'scheduler-invoke')
     const schedulerRoleArn = `arn:aws:iam::${accountId}:role/${schedulerRoleName}`
 
@@ -266,6 +264,14 @@ export default $config({
     const scheduler = createScheduler({
       scope,
       target: { functionArn, roleArn: schedulerRoleArn },
+    })
+
+    const controlPlanePolicy = buildControlPlanePolicy({
+      region,
+      accountId,
+      executorRunnerRoleArn,
+      schedulerGroupName: scheduler.groupName,
+      schedulerRoleArn,
     })
 
     new sst.aws.Function('SisyphusControlPlane', {
