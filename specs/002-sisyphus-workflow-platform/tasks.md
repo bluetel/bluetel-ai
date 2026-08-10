@@ -1359,6 +1359,40 @@ reworded or re-ticked here, including the ones this layer supersedes — the rec
 what was done is worth more intact than tidy, and the same argument the Phase 19 preamble makes about
 checked-but-in-breach tasks applies to superseded ones.
 
+> ### Re-verified after specs 003 and 004 landed on `main` (2026-08-10)
+>
+> This layer was written against PR #19's head. Specs 003 and 004 have since merged to `main`
+> (`3e60717`), along with a follow-up reconciliation commit (`0f0d288`) that neither analysis had seen.
+> **Every task below was re-checked against the merged tree and none changed.** Recorded because the
+> re-check is worth as much as the original finding, and a layer that was not re-verified after its
+> subject moved should not be trusted.
+>
+> | Task | Re-verified on merged `main` |
+> | --- | --- |
+> | T232 (T210 satisfied) | Holds — three consumers import `PAUSE_IDLE_CEILING_MS` from `@bluetel-ai/sisyphus-api/contracts` |
+> | T233 (`awaiting_credential`) | Holds — still **zero** occurrences in `spec.md`, `data-model.md` or `quickstart.md` |
+> | T234 (pool prerequisite) | Holds — `quickstart.md`'s only "pool" references are PgBouncer connection pooling in the S3 spike |
+> | T236 (Scenario 5) | Holds — `quickstart.md:400` still reads "the process is alive (not terminated)" |
+> | T237 (Scenario 6) | Holds — step 1 still resumes by restoring a snapshot onto a fresh instance, not by starting the stopped one |
+> | T238 (forge URL) | Holds — still no producer; the only reference outside the executor is a comment at `jobs/start-workflow.ts:106` |
+> | T239 (T231 residue) | Holds — `assembleRun` still returns `options` with no `secrets` key |
+> | T240 / T197, T241 / T200, and T198, T196 | All hold — `createQuietMetadataReader`, `validationModeUnsupportedError`, `?? createRefusingPromptRedactor()` and `noWorkflowPorts` are all present and unchanged |
+>
+> **What the merge did add is one piece of context, and it changes a rationale rather than a decision.**
+> [plan.md](./plan.md) gained a "fourth finding" recording that FR-124's reachability probe was not merely
+> unimplemented but **unimplementable**, and it draws two rules from that: _a seam is a claim that both sides
+> can exist_, and _when a seam's real implementation needs a credential, name which component will hold it and
+> how it gets there before writing the interface_. It then names `apps/sisyphus-control-plane/src/jobs/prompt-redact.ts`
+> — **T198's refusing default** — and `notify/emitter.ts` as the two modules citing that probe as precedent,
+> judging both to be on paths where absence _degrades rather than blocks_.
+>
+> That judgement is right at the platform level and does not soften T198: a refusing redactor means **US8 is
+> dead in production**, which is a blocked story even though the product as a whole still runs. What it does
+> change is the reading — T198 is a **deliberate, documented deferral** rather than an oversight, so it should
+> be scheduled rather than escalated. The two rules apply directly to **T238** and to **T200**, both of which
+> are exactly the case the second rule describes: a seam whose implementation needs a credential nobody named
+> a holder for.
+
 **What this layer is**: the answer to _what actually needs doing now_, after spec 003 landed as
 [PR #19](https://github.com/bluetel/bluetel-ai/pull/19) (125/129) and spec 004 closed.
 
