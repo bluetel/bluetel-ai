@@ -320,32 +320,6 @@ describe('buildRunnerPolicy — the fleet-wide profile, when no workflow id is g
   })
 })
 
-describe('buildPanelBundlesPolicy', () => {
-  const policy = buildPanelBundlesPolicy(panelBundlesConfig)
-
-  it('registers an archive into the bundles bucket and nothing else', () => {
-    const statement = policy.Statement.find((entry) => entry.Sid === 'RegisterSetupBundleArchive')
-
-    expect(statement?.Action).toEqual(['s3:PutObject'])
-    expect(statement?.Resource).toEqual(['arn:aws:s3:::sisyphus-staging-bundles/*'])
-  })
-
-  it('encrypts under the managed key the upload path asks for, not every key in the account', () => {
-    const statement = policy.Statement.find((entry) => entry.Sid === 'EncryptSetupBundleArchive')
-
-    expect(statement?.Action).toEqual(['kms:GenerateDataKey'])
-    expect(statement?.Resource).toEqual(['arn:aws:kms:eu-west-2:429776178057:alias/aws/s3'])
-  })
-
-  it('cannot read a bundle back — validation and executor boot read through the runner role', () => {
-    const actions = policy.Statement.flatMap((statement) => [...statement.Action])
-
-    expect(actions).not.toContain('s3:GetObject')
-    expect(actions).not.toContain('s3:DeleteObject')
-    expect(policy.Statement).toHaveLength(2)
-  })
-})
-
 describe('buildPanelPolicy — the whole of what the panel’s server function may do', () => {
   const policy = buildPanelPolicy(panelConfig)
 
@@ -489,7 +463,7 @@ describe('buildControlPlanePolicy — what the control plane may do', () => {
     expect(statement?.Resource).toEqual([controlPlaneConfig.schedulerRoleArn])
   })
 
-  it('scopes every EC2 and Scheduler resource ARN to the region and account supplied, not another stage’s', () => {
+  it('scopes every EC2, Scheduler and Secrets Manager resource ARN to the region and account supplied, not another stage’s', () => {
     const other = buildControlPlanePolicy({
       region: 'us-east-1',
       accountId: '111111111111',
@@ -653,12 +627,14 @@ describe('buildPanelBundlesPolicy — what the panel may do', () => {
 })
 
 describe('buildPanelBundlesPolicy — what the panel must never do', () => {
-  it('cannot read a bundle back — validation runs and the executor read through the runner role', () => {
+  it('cannot read a bundle back or remove one — validation runs and the executor read through the runner role', () => {
     const actions = buildPanelBundlesPolicy(panelBundlesConfig).Statement.flatMap(
       (statement) => statement.Action,
     )
 
     expect(actions).not.toContain('s3:GetObject')
+    // Removing a durable object is the lifecycle policy's job, never the panel's.
+    expect(actions).not.toContain('s3:DeleteObject')
   })
 
   it('cannot reach any bucket other than the one it was configured with', () => {

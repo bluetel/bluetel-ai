@@ -153,9 +153,11 @@ export interface SisyphusDependencies {
    * of FR-057 (resolving the affected run to a recorded state) deliberately stays in this package.
    *
    * Optional, and an omitted one is refused **before the procedure writes anything**, which is
-   * unlike all three of the others. They refuse at the moment they are called, which is safe because
-   * calling them is the whole operation; a force-release is two writes in a fixed order, and a
-   * refusal discovered between them would have ended somebody's run without freeing the seat.
+   * unlike the two other refusing ports. Those refuse at the moment they are called, which is safe
+   * because calling them is the whole operation; a force-release is two writes in a fixed order,
+   * and a refusal discovered between them would have ended somebody's run without freeing the seat.
+   * ({@link SisyphusDependencies.notifier} is the fourth, and refuses at no point at all — an
+   * omitted notifier is a silent no-op, for the reason given there.)
    */
   readonly agentCredentialLeases?: AgentCredentialLeaseReleases
 }

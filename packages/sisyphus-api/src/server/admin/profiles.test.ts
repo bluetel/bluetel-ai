@@ -436,19 +436,27 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
   })
 
   it('re-enabling an already-enabled profile succeeds and writes no second audit entry', async () => {
-    const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
-    const alpha = page.items.find((item) => item.name === `alpha-${fixtures.suffix}`)
-    const before = (await auditFor(alpha?.id ?? '')).length
+    // Its own profile, enabled here rather than borrowed from an earlier test: the subject has to
+    // be already-enabled *and* already-attached for the assertion to mean anything, and reaching
+    // back for one leaves this test passing or failing on the order the file happens to run in.
+    const created = await asAdmin().create({
+      ...launchValues(),
+      name: `already-enabled-${fixtures.suffix}`,
+    })
+    await attachCredentialGroup(created.profile.id)
+    await asAdmin().setEnabled({ executionProfileId: created.profile.id, enabled: true })
+
+    const before = (await auditFor(created.profile.id)).length
 
     const result = await asAdmin().setEnabled({
-      executionProfileId: alpha?.id ?? '',
+      executionProfileId: created.profile.id,
       enabled: true,
     })
 
     expect(result.profile.enabled).toBe(true)
     expect(result.check?.passed).toBe(true)
     // Nothing changed, and a trail padded with non-events is harder to read.
-    expect(await auditFor(alpha?.id ?? '')).toHaveLength(before)
+    expect(await auditFor(created.profile.id)).toHaveLength(before)
   })
 
   it('refuses to enable against a disabled setup bundle, naming it (FR-124)', async () => {
