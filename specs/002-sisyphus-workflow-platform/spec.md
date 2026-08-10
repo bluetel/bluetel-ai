@@ -8,6 +8,36 @@
 
 **Input**: User description: a scalable, AI-native delivery platform (codename **Sisyphus**) that runs Claude Code on isolated cloud instances on behalf of Bluetel engineers — supervised delegation of a ticket, a fully autonomous develop→review→integrate loop, and a standalone review workflow — administered and observed through an internal admin panel.
 
+> ### Partly superseded by `003-agent-credential-pool`
+>
+> Four requirements in this document have been **replaced** by
+> [`specs/003-agent-credential-pool/spec.md`](../003-agent-credential-pool/spec.md), and each carries a
+> note where it appears: **FR-043**, **FR-049**, **FR-072** and **FR-075**.
+>
+> They are marked rather than deleted, and deliberately. This specification is the record of what the
+> platform was designed to do and why, and a requirement that quietly vanished would leave the
+> reasoning behind it — and every design decision downstream of it — with nothing to point at. A
+> reader arriving at `002/FR-049` from a code comment written in 2026 needs to find it, and needs to
+> find out in the same breath that it is no longer what the platform does.
+>
+> The two changes in one sentence each:
+>
+> - **The agent's credential left the setup bundle.** 002 assumed it was a static secret a bundle
+>   could install and a boot could reinstall. That is true of a metered API key and false of a
+>   subscription login session, whose refresh credential rotates every time the agent uses it — so a
+>   bundle-carried copy is stale the moment the agent works, and bundles are shared across clients
+>   besides. The agent identity is now a **pooled credential leased to one workflow at a time**;
+>   bundles keep every _other_ credential exactly as 002 describes.
+> - **A pause stops the instance instead of holding the process alive.** 002's pause kept the agent
+>   in memory on a running instance, which made a resume instant and made a pause cost the same as
+>   running. A pause is now a turn boundary, a durable snapshot, and then a **stop with the disk
+>   retained**; spot instances cannot be stopped at all and degrade to 002's snapshot path.
+>
+> Everything else in this document stands. In particular 003 leaves untouched: access control and
+> execution profiles, workspaces and entries, integrations and scheduling, correction and
+> supervision, the output strip-and-redact pipeline, notifications, snapshots as a durability
+> mechanism, and the reconciliation sweep.
+
 ## Overview
 
 Sisyphus turns "remote Claude Code" into a first-class, observable product. An engineer hands a ticket
@@ -23,8 +53,10 @@ control, and reporting.
 Four configuration constructs keep client onboarding out of the platform's release cycle entirely:
 
 - **Setup bundles** — a named, versioned archive with a `setup.sh` at its root that turns a bare instance
-  into a worker able to do one client's work, installing the agent credentials and whatever else that work
-  needs. A new client is a new bundle, not a deploy.
+  into a worker able to do one client's work, installing the repository, ticket-tracker and other
+  credentials that work needs, and whatever tooling goes with them. A new client is a new bundle, not a
+  deploy. (The **agent's own** credential is no longer among them — see the supersession note at the top
+  of this document, and `003/FR-048`.)
 - **Workspaces** — a named set of repositories, each on its own branch, checked out side by side into one
   folder. A workspace may hold a single repository or several (backend, frontend, admin), which is what lets
   one run make a coordinated change across all of them.
@@ -333,13 +365,17 @@ and confirm the result set and each workflow's stored log and timeline are compl
 
 A platform administrator needs Sisyphus to be able to work on a new client's repository, which requires a
 different set of credentials and tooling from the last one. Rather than changing Sisyphus, they build a
-setup bundle: a gzipped tar archive with a `setup.sh` at its root that installs the agent credentials, the
-repository and ticket-tracker credentials, and whatever else that client's work needs. They upload it in the
+setup bundle: a gzipped tar archive with a `setup.sh` at its root that installs the repository and
+ticket-tracker credentials and whatever else that client's work needs. They upload it in the
 admin panel, give it a name and description, and enable it. From then on any workflow — started by hand or
 by an integration — can name that bundle, and the executor unpacks and runs it before the agent starts.
 
-**Why this priority**: This is how any credential reaches an instance at all, so nothing else runs without
-it. It is also the mechanism that keeps client onboarding out of the platform's release cycle — a new
+> Under 003 a bundle no longer installs the **agent's** credential: that is a pooled seat fetched from
+> the machine surface during bootstrap (`003/FR-048`, `003/FR-011`). Every other credential in this
+> story is unchanged, and so is the whole of the bundle mechanism around it.
+
+**Why this priority**: This is how every credential except the agent's own reaches an instance at all, so
+nothing else runs without it. It is also the mechanism that keeps client onboarding out of the platform's release cycle — a new
 client is a new bundle, not a deploy.
 
 **Independent Test**: Register a bundle whose `setup.sh` writes a recognisable marker file and exports a
@@ -1025,10 +1061,20 @@ profile and confirm they can see and supervise that one workflow without gaining
 - **FR-042**: The executor MUST run on a dedicated, isolated instance per workflow, MUST support only the
   Claude Code agent, and MUST NOT contain multi-agent routing, agent registries, tunnelling, or inbound
   webhook handling.
-- **FR-043**: The executor MUST provision its own runtime prerequisites on the instance — the agent CLI, its
+- **FR-043**: ~~The executor MUST provision its own runtime prerequisites on the instance — the agent CLI, its
   credentials, repository access, and the third-party credentials the job needs (e.g. ticket tracker,
   repository host) — by running the **setup bundle** its job references at bootstrap, never baking them into
-  a machine image and never writing them to the log.
+  a machine image and never writing them to the log.~~
+
+  > **Superseded in part by `003/FR-048` and `003/FR-011`.** The clause that no longer holds is
+  > "**its credentials**" where those are the _agent's_. The bundle still installs the agent CLI,
+  > repository access and every third-party credential the job needs, on exactly the terms above; what
+  > it no longer installs is the agent's own login. That is a **pooled agent credential**, leased to
+  > the workflow at admission and fetched from the machine surface during bootstrap phase
+  > `credential_install` — because a subscription login rotates as the agent uses it, so a
+  > bundle-carried copy is stale as soon as the run does any work, and bundles are shared across
+  > clients besides. See `003/spec.md` → _Why this exists_.
+
 - **FR-044**: The executor MUST run the agent in a non-interactive streaming mode that (a) emits
   structured events it can parse and (b) accepts additional user turns on its input stream while the agent
   is working, so a correction can be injected **without terminating and relaunching the agent**.
@@ -1042,10 +1088,26 @@ profile and confirm they can see and supervise that one workflow without gaining
   MUST flush everything it holds to durable storage before terminating for any reason.
 - **FR-048**: The executor MUST send a heartbeat at a defined interval carrying its current state, so a
   lapsed heartbeat is detectable as an interruption.
-- **FR-049**: **Pause** MUST suspend the relaying of work to the agent, capture a snapshot, and hold the
-  process alive without terminating it. **Stop** MUST end the run cleanly after capturing everything.
+- **FR-049**: **Pause** MUST suspend the relaying of work to the agent, capture a snapshot, and ~~hold the
+  process alive without terminating it~~. **Stop** MUST end the run cleanly after capturing everything.
   **Correction** MUST be delivered as an additional user turn in the same conversation, exactly once, in
   submission order.
+
+  > **The pause clause is superseded by `003/FR-039`; the rest of this requirement stands.** Suspending
+  > the relay at a turn boundary and capturing a snapshot before the pause is acknowledged are
+  > unchanged and are still what makes "paused" true. What changed is what happens next: the agent is
+  > **ended** and the **instance is stopped with its disk retained**, so compute billing ends while
+  > the working tree and the conversation stay where they are and a resume is a `StartInstances`
+  > against the same box (`003/FR-041`). Holding the process alive made a pause cost the same as
+  > running, which is why pauses were something to avoid using.
+  >
+  > Two consequences worth stating because they are easy to miss: a **one-time spot instance cannot be
+  > stopped at all**, so a spot pause degrades to this document's snapshot-and-terminate path and is
+  > held to 002's resume performance (`003/SC-007` reports the two separately); and the pause idle
+  > limit in _US2 §4_ is **unchanged** — a pause left too long still parks — except that the workflow
+  > **keeps its agent credential** through the park, because a park is an environment ending and not a
+  > workflow ending (`003/FR-073`).
+
 - **FR-050**: At the end of every session — and on pause, on stop, and on interruption warning — the
   executor MUST persist a snapshot to durable storage comprising **both** the agent's conversation state
   **and** the workspace state (including uncommitted work in progress), and MUST register the snapshot's
@@ -1182,10 +1244,34 @@ profile and confirm they can see and supervise that one workflow without gaining
   itself** uses (integration credentials for discovering work, cloud and database credentials) come from the
   managed secret store; credentials an **executor** uses to do the work come from the setup bundle its job
   references (FR-075, FR-083).
-- **FR-075**: The agent and every other integration credential MUST be delivered to the executor by the
+
+  > **Amended by `003/FR-011`, `003/FR-012` and `003/FR-013`: there are now three paths, not two.**
+  > The first two are exactly as written. The third is the **agent credential**: it is held in the
+  > managed secret store like a platform credential, but it is used by an _executor_ like a bundle
+  > credential — the instance fetches it from the machine surface with its workflow-scoped credential
+  > during bootstrap, and writes rotations back the same way.
+  >
+  > Everything this requirement says about _not appearing in plain text_ applies to it unchanged and
+  > is if anything stricter: it is never in the job envelope (user data is readable from the metadata
+  > service by anything on the box), never in a snapshot (the credential subtree is excluded at pack
+  > time), never in a log segment (it is registered as a known value in the existing redaction
+  > pipeline, `003/FR-014`), and never in an administrator-visible response (`003/SC-014`).
+
+- **FR-075**: ~~The agent and~~ every other integration credential MUST be delivered to the executor by the
   **setup bundle** the job references (see _Executor setup bundles_ below), never baked into a machine
   image, never committed, and never held as a platform-wide constant. A credential installed by a bundle
   MUST NOT be shared with the target repository's own automation.
+
+  > **The words "the agent and" are superseded by `003/FR-048`.** The agent's credential is no longer
+  > a bundle credential: it is a pooled seat, leased to one workflow for that workflow's entire life
+  > (`003/FR-023`) and fetched at bootstrap rather than installed by `setup.sh`. Every other clause
+  > holds for it too and then some — never baked into an image, never committed, never a platform-wide
+  > constant, and never shared with the target repository's automation.
+  >
+  > The separation is the point of 003 rather than a side effect of it: a setup bundle answers _what
+  > machine setup does this client's work need_, and an agent credential answers _which agent identity
+  > performs it_. The two vary independently, so three bundles and four credentials should be seven
+  > objects rather than twelve.
 
 #### Boundary with existing tooling
 

@@ -3,12 +3,14 @@ import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import process from 'node:process'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
 import { createZstdDecompress } from 'node:zlib'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+
+import { agentCredentialPath } from '../bootstrap'
+import { gitFixtureEnvironment } from '../git-fixture-environment'
 
 import { sessionLogDirectory } from './conversation-log'
 import {
@@ -46,17 +48,16 @@ const run = promisify(execFile)
 
 const SESSION_ID = '0199a1f4-0000-7000-8000-00000000c0de'
 
-const gitEnv = {
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
-  GIT_AUTHOR_NAME: 'snapshot-test',
-  GIT_AUTHOR_EMAIL: 'snapshot@example.invalid',
-  GIT_COMMITTER_NAME: 'snapshot-test',
-  GIT_COMMITTER_EMAIL: 'snapshot@example.invalid',
-}
+/**
+ * The child's whole environment, composed rather than merged over `process.env` — see
+ * `../git-fixture-environment.ts`. An inherited `GIT_DIR`, which is what git exports into a hook
+ * process, would have the fixture's `git init` re-initialise the repository the hook is running in
+ * and leave this suite asserting against an archive of somebody else's working tree.
+ */
+const gitEnv = gitFixtureEnvironment()
 
 const git = async (cwd: string, args: readonly string[]): Promise<void> => {
-  await run('git', [...args], { cwd, env: { ...process.env, ...gitEnv } })
+  await run('git', [...args], { cwd, env: gitEnv })
 }
 
 describe('snapshotExcludePatterns', () => {
@@ -71,6 +72,17 @@ describe('snapshotExcludePatterns', () => {
 
     expect(pattern.startsWith('./workspace/')).toBe(true)
     expect(pattern).not.toContain('*')
+  })
+
+  /**
+   * 003/T061, FR-013. The exclusion and the install path have to be the *same* path or the
+   * requirement is not met, and "the same path" is easy to lose to a rename at one end. Asserted
+   * against `agentCredentialPath` directly rather than against a second copy of the string.
+   */
+  it('covers exactly where credential_install writes (003/FR-013)', () => {
+    const [pattern] = snapshotExcludePatterns('/workspace')
+
+    expect(agentCredentialPath('/workspace').startsWith(pattern.replace('./', '/'))).toBe(true)
   })
 
   it('never excludes the config tree itself — conversation state must be captured (FR-051)', () => {

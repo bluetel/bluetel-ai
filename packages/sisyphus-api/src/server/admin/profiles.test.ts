@@ -7,8 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { SisyphusDatabase } from '../../db'
 import {
   configurationAudit,
+  credentialGroups,
   executionProfiles,
   executionProfileVersions,
+  profileCredentialGroups,
   setupBundles,
   setupBundleVersions,
   workflows,
@@ -147,6 +149,8 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
   let workspaceVersionId = ''
   let emptyWorkspaceVersionId = ''
   let nonexistentRepoWorkspaceVersionId = ''
+  /** One credential group every profile that expects to be enabled is attached to (003/FR-065). */
+  let credentialGroupId = ''
 
   const asAdmin = () => createCaller(contextFor(fixtures.db(), admin, denials))
   const asEngineer = () => createCaller(contextFor(fixtures.db(), engineer, denials))
@@ -175,6 +179,25 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
           eq(configurationAudit.entityId, executionProfileId),
         ),
       )
+
+  /**
+   * Attach the shared credential group to a profile, at first preference.
+   *
+   * 003/FR-065 makes an attachment a precondition of enabling: a profile with none has no agent
+   * identity it is permitted to work as, and is refused at configuration time rather than at
+   * launch. This suite is about FR-124, so every profile it means to enable gets one — otherwise
+   * each of the assertions below would be passing on the wrong refusal.
+   *
+   * Inserted directly rather than through `admin.credentialGroups.attach`, for the same reason the
+   * run above is inserted directly: reaching for another router to build a fixture would make a
+   * failure there look like one here.
+   */
+  const attachCredentialGroup = async (executionProfileId: string): Promise<void> => {
+    await fixtures
+      .db()
+      .insert(profileCredentialGroups)
+      .values({ executionProfileId, credentialGroupId, position: 1 })
+  }
 
   const seedBundleVersion = async (label: string, enabled: boolean): Promise<string> => {
     const [bundle] = await fixtures
@@ -288,6 +311,13 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
     nonexistentRepoWorkspaceVersionId = await seedWorkspaceVersion('profiles-nonexistent-repo', [
       `github.com/acme/does-not-exist-${fixtures.suffix}`,
     ])
+
+    const [group] = await fixtures
+      .db()
+      .insert(credentialGroups)
+      .values({ name: `profiles-pool-${fixtures.suffix}`, createdByUserId: admin.id })
+      .returning({ id: credentialGroups.id })
+    credentialGroupId = group.id
   }, 60_000)
 
   afterAll(async () => {
@@ -366,6 +396,7 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
   it('enables a profile pinning an enabled bundle and a non-empty workspace (FR-124)', async () => {
     const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
     const alpha = page.items.find((item) => item.name === `alpha-${fixtures.suffix}`)
+    await attachCredentialGroup(alpha?.id ?? '')
 
     const result = await asAdmin().setEnabled({
       executionProfileId: alpha?.id ?? '',
@@ -393,6 +424,7 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
       workspaceVersionId: nonexistentRepoWorkspaceVersionId,
       name: `nonexistent-repo-${fixtures.suffix}`,
     })
+    await attachCredentialGroup(created.profile.id)
 
     const result = await asAdmin().setEnabled({
       executionProfileId: created.profile.id,
@@ -404,19 +436,27 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
   })
 
   it('re-enabling an already-enabled profile succeeds and writes no second audit entry', async () => {
-    const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
-    const alpha = page.items.find((item) => item.name === `alpha-${fixtures.suffix}`)
-    const before = (await auditFor(alpha?.id ?? '')).length
+    // Its own profile, enabled here rather than borrowed from an earlier test: the subject has to
+    // be already-enabled *and* already-attached for the assertion to mean anything, and reaching
+    // back for one leaves this test passing or failing on the order the file happens to run in.
+    const created = await asAdmin().create({
+      ...launchValues(),
+      name: `already-enabled-${fixtures.suffix}`,
+    })
+    await attachCredentialGroup(created.profile.id)
+    await asAdmin().setEnabled({ executionProfileId: created.profile.id, enabled: true })
+
+    const before = (await auditFor(created.profile.id)).length
 
     const result = await asAdmin().setEnabled({
-      executionProfileId: alpha?.id ?? '',
+      executionProfileId: created.profile.id,
       enabled: true,
     })
 
     expect(result.profile.enabled).toBe(true)
     expect(result.check?.passed).toBe(true)
     // Nothing changed, and a trail padded with non-events is harder to read.
-    expect(await auditFor(alpha?.id ?? '')).toHaveLength(before)
+    expect(await auditFor(created.profile.id)).toHaveLength(before)
   })
 
   it('refuses to enable against a disabled setup bundle, naming it (FR-124)', async () => {
@@ -425,6 +465,7 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
       setupBundleVersionId: disabledBundleVersionId,
       name: `mismatched-${fixtures.suffix}`,
     })
+    await attachCredentialGroup(created.profile.id)
 
     const refusal = await refusalOf(
       asAdmin().setEnabled({ executionProfileId: created.profile.id, enabled: true }),
@@ -444,6 +485,7 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
       workspaceVersionId: emptyWorkspaceVersionId,
       name: `empty-${fixtures.suffix}`,
     })
+    await attachCredentialGroup(created.profile.id)
 
     const refusal = await refusalOf(
       asAdmin().setEnabled({ executionProfileId: created.profile.id, enabled: true }),
@@ -455,6 +497,71 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
     // Refused means refused: the flag did not move.
     const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
     expect(page.items.find((item) => item.id === created.profile.id)?.enabled).toBe(false)
+  })
+
+  /**
+   * 003/FR-065 through the router that enforces it.
+   *
+   * `profile-gate.test.ts` proves the rule; this proves it is wired into the only procedure that
+   * can make a profile launchable, and that the refusal names the missing attachment rather than
+   * reporting a generic failure. Failing at launch instead is the outcome the requirement exists to
+   * prevent: by then the run has been admitted, told an engineer it is starting, and would sit in
+   * `awaiting_credential` waiting on capacity that no registration could ever supply — which
+   * 003/FR-029 would report as exhaustion, the wrong diagnosis entirely.
+   */
+  it('refuses to enable a profile with no attached credential group (003/FR-065)', async () => {
+    const created = await asAdmin().create({
+      ...launchValues(),
+      name: `unscoped-${fixtures.suffix}`,
+    })
+
+    const refusal = await refusalOf(
+      asAdmin().setEnabled({ executionProfileId: created.profile.id, enabled: true }),
+    )
+
+    expect(refusal.code).toBe('CONFLICT')
+    expect(refusal.message).toContain('no attached credential group')
+    expect(refusal.message).toContain('attach at least one group')
+
+    // Refused means refused: the flag did not move, so no run can be launched against a profile
+    // with no identity to work as.
+    const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
+    expect(page.items.find((item) => item.id === created.profile.id)?.enabled).toBe(false)
+  })
+
+  it('reports the missing attachment alongside the FR-124 failures, in one attempt', async () => {
+    const created = await asAdmin().create({
+      ...launchValues(),
+      setupBundleVersionId: disabledBundleVersionId,
+      name: `unscoped-and-broken-${fixtures.suffix}`,
+    })
+
+    const refusal = await refusalOf(
+      asAdmin().setEnabled({ executionProfileId: created.profile.id, enabled: true }),
+    )
+
+    // An admin with two problems should learn about both now, not discover the second after
+    // fixing the first.
+    expect(refusal.message).toContain('no attached credential group')
+    expect(refusal.message).toContain(`profiles-disabled-bundle-${fixtures.suffix}`)
+  })
+
+  it('enables once the attachment is added, without any other change', async () => {
+    const created = await asAdmin().create({
+      ...launchValues(),
+      name: `scoped-late-${fixtures.suffix}`,
+    })
+
+    await refusalOf(asAdmin().setEnabled({ executionProfileId: created.profile.id, enabled: true }))
+    await attachCredentialGroup(created.profile.id)
+
+    const result = await asAdmin().setEnabled({
+      executionProfileId: created.profile.id,
+      enabled: true,
+    })
+
+    expect(result.profile.enabled).toBe(true)
+    expect(result.check?.passed).toBe(true)
   })
 
   it('never gates disabling — a profile that could not be enabled must still be withdrawable', async () => {

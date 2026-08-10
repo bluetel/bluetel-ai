@@ -2,11 +2,12 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import type { AgentAdapter, AgentFrame, AgentUsage } from '../agent'
 import { createFakeArchiveStore, runCommand, sha256Hex } from '../bootstrap'
 import type { Forge, GitReader, PullRequestSetEntry } from '../delivery'
+import { GIT_FIXTURE_ENVIRONMENT, stripAmbientGitEnvironment } from '../git-fixture-environment'
 import type { WorkflowJobEnvelope } from '../job-envelope'
 import { parseJobEnvelope } from '../job-envelope'
 import type { LogSegmentRecord, SanitisedText, SegmentStore } from '../output'
@@ -64,14 +65,16 @@ const waitUntil = async (condition: () => boolean): Promise<void> => {
   }
 }
 
-const GIT_ENV = {
-  GIT_AUTHOR_NAME: 'Sisyphus Test',
-  GIT_AUTHOR_EMAIL: 'test@example.invalid',
-  GIT_COMMITTER_NAME: 'Sisyphus Test',
-  GIT_COMMITTER_EMAIL: 'test@example.invalid',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
-}
+/**
+ * The fixture repository below is built with real `git`, so the ambient one has to go first — see
+ * `../git-fixture-environment.ts` for what a git hook exports into this process and what `git init`
+ * does with it.
+ */
+const restoreGitEnvironment = stripAmbientGitEnvironment()
+
+afterAll(restoreGitEnvironment)
+
+const GIT_ENV = GIT_FIXTURE_ENVIRONMENT
 
 const BASE_BRANCH = 'integration-line'
 const HEAD = 'd'.repeat(40)
@@ -135,8 +138,20 @@ interface RecordingSurface {
   readonly skillReferences: SkillReferenceInput[]
   /** Every park the run reported. Empty during a failing snapshot means `onParked` reaches nothing. */
   readonly parks: SnapshotParkReport[]
+  /** Every rotation the run wrote through (003/FR-030). */
+  readonly rotations: { fence: number; material: string }[]
   flushes: number
   pending: PendingCommands
+}
+
+/**
+ * The leased seat this fixture hands out. Synthetic — nothing here is, resembles, or could be
+ * mistaken for a credential belonging to any real service.
+ */
+const AGENT_CREDENTIAL = {
+  credentialId: '019fd631-15bf-7a03-a1c6-ff6d568c2670',
+  fence: 4,
+  material: 'not-a-real-agent-credential-0123456789-opaque',
 }
 
 const recordingSurface = (): RecordingSurface => {
@@ -148,6 +163,7 @@ const recordingSurface = (): RecordingSurface => {
   const segments: LogSegmentRecord[] = []
   const skillReferences: SkillReferenceInput[] = []
   const parks: SnapshotParkReport[] = []
+  const rotations: { fence: number; material: string }[] = []
   const state = { flushes: 0, pending: [] as PendingCommands }
 
   return {
@@ -159,6 +175,7 @@ const recordingSurface = (): RecordingSurface => {
     segments,
     skillReferences,
     parks,
+    rotations,
     get flushes() {
       return state.flushes
     },
@@ -223,6 +240,12 @@ const recordingSurface = (): RecordingSurface => {
       },
       reportExternalAction: async () =>
         Promise.reject(new Error('no external action in this fixture')),
+      fetchAgentCredential: async () => Promise.resolve(AGENT_CREDENTIAL),
+      reportCredentialRotation: async (input) => {
+        rotations.push({ ...input })
+
+        return Promise.resolve({ accepted: true as const })
+      },
       flush: async () => {
         state.flushes += 1
 
@@ -443,6 +466,55 @@ describe('runExecutor', () => {
     expect(world.surface.terminals[0]?.spendUsed).toBe('0.5000')
   })
 
+  /**
+   * **003/T054, T056, T058, T060 — the wiring, end to end.**
+   *
+   * Every piece of this feature is testable on its own, and every piece of it was until this
+   * assembly existed: `credential_install` was a named phase with no caller, and the rotation watch
+   * was a module nothing armed. FR-203 calls that a defect rather than a component awaiting
+   * integration, so what is asserted here is that the run actually does it.
+   */
+  describe('the agent credential (003)', () => {
+    it('installs the leased seat and writes a mid-run rotation through (FR-030, FR-049)', async () => {
+      const world = await harness()
+      const rotated = 'not-a-real-agent-credential-rotated-mid-run-0002'
+      const credentialPath = join(world.root, '.agent-config', 'credentials', '.credentials.json')
+
+      await runExecutor({
+        ...world.base,
+        ports: delegatedFactory(async () => {
+          // The agent refreshes its own login part-way through the run. Nothing announces it; the
+          // file simply changes.
+          await writeFile(credentialPath, rotated)
+        }),
+      })
+
+      // Installed from the machine surface, not from the bundle (FR-048).
+      await expect(readFile(credentialPath, 'utf8')).resolves.toBe(rotated)
+      // And written back under the fence the fetch answered with (FR-020).
+      expect(world.surface.rotations).toStrictEqual([{ fence: 4, material: rotated }])
+    })
+
+    it('never lets either the installed or the rotated material reach a log (FR-014, SC-014)', async () => {
+      const world = await harness()
+      const rotated = 'not-a-real-agent-credential-rotated-mid-run-0002'
+      const credentialPath = join(world.root, '.agent-config', 'credentials', '.credentials.json')
+
+      await runExecutor({
+        ...world.base,
+        ports: delegatedFactory(async () => {
+          await writeFile(credentialPath, rotated)
+        }),
+      })
+
+      const log = world.segments.bodies.join('')
+
+      expect(log).not.toContain(AGENT_CREDENTIAL.material)
+      expect(log).not.toContain(rotated)
+      expect(world.surface.terminals[0]?.reason).not.toContain(rotated)
+    })
+  })
+
   it('reports the skills the run read, digests intact (T179, FR-058, FR-059)', async () => {
     const world = await harness()
 
@@ -466,6 +538,8 @@ describe('runExecutor', () => {
       'bundle_verify:succeeded',
       'bundle_unpack:succeeded',
       'setup_script:succeeded',
+      // 003/FR-049, FR-050. Reported like every other phase, on every boot.
+      'credential_install:succeeded',
       'entry_checkout:succeeded',
       'agent_start:succeeded',
     ])

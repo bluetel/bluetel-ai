@@ -16,6 +16,7 @@ import {
   ALREADY_FINISHED_CODE,
   describeAlreadyFinished,
   isAlreadyFinishedFor,
+  isCancellableWithoutExecutor,
   isTerminalState,
   lockWorkflowForTransition,
   nextCommandSequence,
@@ -83,6 +84,27 @@ describe('isAlreadyFinishedFor (FR-081, FR-151)', () => {
     expect(isAlreadyFinishedFor('parked_resumable', 'pause')).toBe(true)
     expect(isAlreadyFinishedFor('parked_resumable', 'stop')).toBe(true)
     expect(isAlreadyFinishedFor('parked_resumable', 'correction')).toBe(true)
+  })
+})
+
+describe('isCancellableWithoutExecutor (003/FR-027)', () => {
+  it('applies a stop against a run waiting for an agent credential', () => {
+    // The run holds no instance and has no executor to collect a queued command, so a stop that was
+    // merely queued would do nothing visible until the pool freed up.
+    expect(isCancellableWithoutExecutor('awaiting_credential', 'stop')).toBe(true)
+  })
+
+  it('applies to nothing else, in that state or any other', () => {
+    // Narrow on both axes, deliberately. A pause or a correction against a waiting run is still a
+    // queued row; and a stop against a `running` run must go on going through the executor, or the
+    // panel would claim a run had stopped while its agent was still mid-turn.
+    for (const intent of ['pause', 'resume', 'correction'] as const) {
+      expect(isCancellableWithoutExecutor('awaiting_credential', intent)).toBe(false)
+    }
+
+    for (const state of WORKFLOW_STATES.filter((value) => value !== 'awaiting_credential')) {
+      expect(isCancellableWithoutExecutor(state, 'stop')).toBe(false)
+    }
   })
 })
 

@@ -34,6 +34,19 @@ describe('StateChip', () => {
     expect(renderToStaticMarkup(<StateChip state="failed" />)).not.toContain('animate-led-pulse')
   })
 
+  /**
+   * 003/SC-006 read off the rendered chip: an engineer looking at their own run sees why it is
+   * waiting, in the colour of a healthy queued run, with a steady lamp because a workflow waiting
+   * for a credential holds no instance and burns no compute (003/FR-025).
+   */
+  it('says what a waiting run is waiting for, without implying a machine is working', () => {
+    const markup = renderToStaticMarkup(<StateChip state="awaiting_credential" />)
+
+    expect(markup).toContain('agent credential')
+    expect(markup).toContain('text-signal')
+    expect(markup).not.toContain('animate-led-pulse')
+  })
+
   it('falls back to a graphite idle chip when there is no state behind it', () => {
     const markup = renderToStaticMarkup(<StateChip />)
     expect(markup).toContain('text-graphite')

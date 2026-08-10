@@ -87,6 +87,40 @@ export const NAV_SECTIONS: readonly NavSection[] = [
         match: '/admin/integrations',
         adminOnly: true,
       },
+      /**
+       * The three agent-credential surfaces (003/FR-053, FR-060, FR-193).
+       *
+       * Three entries rather than one screen with tabs, because they answer three different
+       * questions and only one of them is asked routinely. The pool view is the one an
+       * administrator opens to decide whether to buy another seat (FR-053); the registry is where
+       * a seat is added or recovered; groups is configuration that is edited once and then left.
+       * Folding them together would put the daily question behind a tab.
+       *
+       * All three are `adminOnly`, and more strictly so than the rest of this group: 003's access
+       * scoping is deliberately narrower than 002's profile-scoped model — a credential is
+       * platform infrastructure and its state reveals nothing an engineer can act on. The one
+       * credential fact an engineer sees is on their own workflow, that it is waiting for a seat
+       * and for how long, and that is reached through the existing workflow scoping rather than
+       * through any of these screens.
+       */
+      {
+        href: '/admin/credentials/pool',
+        label: 'Credential pool',
+        match: '/admin/credentials/pool',
+        adminOnly: true,
+      },
+      {
+        href: '/admin/credentials',
+        label: 'Agent credentials',
+        match: '/admin/credentials',
+        adminOnly: true,
+      },
+      {
+        href: '/admin/credentials/groups',
+        label: 'Credential groups',
+        match: '/admin/credentials/groups',
+        adminOnly: true,
+      },
       { href: '/admin/users', label: 'Users', match: '/admin/users', adminOnly: true },
       { href: '/admin/audit', label: 'Audit', match: '/admin/audit', adminOnly: true },
     ],

@@ -8,6 +8,7 @@ import { env } from '@sisyphus-admin/env'
 import { getAuthDatabase } from '@sisyphus-admin/lib/auth'
 import { WebClient } from '@slack/web-api'
 
+import { createAgentCredentialMaterialStore } from './credential-material'
 import { createScopedCredentialResolver, joseCredentialVerifier } from './machine-credential'
 import { recordDenial } from './record-denial'
 
@@ -79,10 +80,26 @@ export const resolveNoSession = (): Promise<SisyphusSession | null> => Promise.r
  * resolves them — from the validated environment, in the composition root and nowhere else, so no
  * resolver in `sisyphus-api` is ever handed a way to reach Slack. `WebClient` opens no connection
  * when it is constructed, so a request that notifies nothing pays for nothing.
+ *
+ * ## The credential material store, and why it is on this mount and no other (003/FR-012)
+ *
+ * `machine.fetchAgentCredential` and `machine.reportCredentialRotation` are the only two procedures
+ * in the platform that read or write agent credential material, and both are here. So the store is
+ * supplied here, and **deliberately not** by `./dependencies.ts` — see the note there. That is the
+ * same asymmetry as the two above, expressed against the same object: an executor presenting a
+ * workflow-scoped credential can reach material, and a signed-in administrator on `/api/trpc`
+ * cannot, because the mount they arrive at was never handed a way to.
+ *
+ * Unwired, `agentCredentialMaterialStore` falls back to a store that refuses in both directions —
+ * so until this line existed, every instance reaching `credential_install` failed with "this
+ * deployment has no agent credential material store configured", and no run could start.
+ * `credential-material.ts` explains why the panel is the host that can supply one and why it is a
+ * second Secrets Manager adapter rather than the control plane's.
  */
 export const createMachineDependencies = (): SisyphusDependencies => ({
   db: getAuthDatabase(),
   resolveSession: resolveNoSession,
+  // See below the object for why the material store is here and on no other mount.
   resolveMachineCredential: createScopedCredentialResolver({
     db: getAuthDatabase(),
     secret: env.SISYPHUS_MACHINE_CREDENTIAL_SECRET,
@@ -95,4 +112,5 @@ export const createMachineDependencies = (): SisyphusDependencies => ({
     messenger: createWebApiSlackMessenger({ client: new WebClient(env.SISYPHUS_SLACK_BOT_TOKEN) }),
     panel: { baseUrl: env.SISYPHUS_PANEL_URL },
   }),
+  agentCredentialMaterial: createAgentCredentialMaterialStore(env.AWS_REGION),
 })

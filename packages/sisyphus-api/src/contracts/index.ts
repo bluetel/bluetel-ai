@@ -11,6 +11,15 @@
  * The connector interface lives here rather than in an integration package for FR-192: the
  * control plane depends on the abstraction and never on Jira, so adding a second integration type
  * is a new package plus a registry entry, not a change to anything that already exists.
+ *
+ * `./agent-credential` widens "types and pure functions" to include **zod schemas**, and the
+ * browser-safety rule is undisturbed: zod is already a dependency of the panel's forms through
+ * `src/schemas/`, and a schema is a plain value. It is here rather than in `src/schemas/` because
+ * `src/schemas/` is the resolver-and-form barrel, while these shapes are the wire between three
+ * members — the executor calls both procedures, the control plane puts the reference into the job
+ * envelope, and the panel renders what comes back. It is the one contract in this directory whose
+ * *runtime* behaviour is the guarantee: what it refuses is what stops one run being able to ask
+ * for another's seat at all.
  */
 
 /**
@@ -29,6 +38,26 @@ export interface ProtocolMessage {
   readonly protocolVersion: ExecutorProtocolVersion
 }
 
+export {
+  AGENT_CREDENTIAL_MATERIAL_FIELD,
+  agentCredentialFence,
+  agentCredentialReference,
+  credentialRotationRejection,
+  fetchAgentCredentialInput,
+  fetchAgentCredentialOutput,
+  reportCredentialRotationInput,
+  reportCredentialRotationOutput,
+} from './agent-credential'
+export type {
+  AgentCredentialFence,
+  AgentCredentialReference,
+  CredentialRotationRejection,
+  FetchAgentCredentialInput,
+  FetchAgentCredentialOutput,
+  ReportCredentialRotationInput,
+  ReportCredentialRotationOutput,
+} from './agent-credential'
+
 export type {
   CandidateItem,
   DiscoverContext,
@@ -44,6 +73,15 @@ export type {
   WriteBackEvent,
   WriteBackSkipReason,
 } from './connector'
+
+/**
+ * The one threshold three applications enforce independently (003/FR-044, FR-047, FR-049).
+ *
+ * Here rather than in an application for the reason the connector interface is: the executor's
+ * timer, the control plane's backstop sweep and the panel's countdown all need the same number and
+ * none of the three can import either of the others. See `./pause-idle.ts`.
+ */
+export { PAUSE_IDLE_CEILING_MS } from './pause-idle'
 
 export { EXTERNAL_ACTION_KEY_SEPARATOR, externalActionKey, NO_WORKFLOW } from './external-action'
 export type {

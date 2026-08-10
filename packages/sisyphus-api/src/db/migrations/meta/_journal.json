@@ -15,6 +15,13 @@
       "when": 1785969896708,
       "tag": "0001_auth_adapter_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786297147465,
+      "tag": "0002_agent_credential_pool",
+      "breakpoints": true
     }
   ]
 }

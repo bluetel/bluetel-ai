@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { getAgentCredentialSecretPrefix, getStackScope } from './lib'
 import {
   GITHUB_OIDC_AUDIENCE,
   GITHUB_OIDC_CLAIM_PREFIX,
@@ -8,12 +9,14 @@ import {
   buildControlPlanePolicy,
   buildDeployRoleTrustPolicy,
   buildPanelBundlesPolicy,
+  buildPanelPolicy,
   buildRunnerPolicy,
   buildRunnerTrustPolicy,
   getDeployBranchRef,
   getTrustedSubject,
   type ControlPlanePolicyConfig,
   type PanelBundlesPolicyConfig,
+  type PanelPolicyConfig,
   type RunnerPolicyConfig,
 } from './policies'
 import { DEPLOY_STAGES } from './sst-app'
@@ -37,6 +40,7 @@ const controlPlaneConfig: ControlPlanePolicyConfig = {
   region: 'eu-west-2',
   accountId: '429776178057',
   executorRunnerRoleArn: 'arn:aws:iam::429776178057:role/sisyphus-staging-executor-runner',
+  agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('staging')),
   schedulerGroupName: 'sisyphus-staging-schedules',
   schedulerRoleArn: 'arn:aws:iam::429776178057:role/sisyphus-staging-scheduler-invoke',
 }
@@ -48,6 +52,12 @@ const panelBundlesConfig: PanelBundlesPolicyConfig = {
   region: 'eu-west-2',
   accountId: '429776178057',
   bundlesBucketName: 'sisyphus-staging-bundles',
+}
+
+const panelConfig: PanelPolicyConfig = {
+  ...panelBundlesConfig,
+  // The same helper the control-plane config above uses, and deliberately so — see the suite.
+  agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('staging')),
 }
 
 describe('the GitHub OIDC identity', () => {
@@ -310,6 +320,73 @@ describe('buildRunnerPolicy — the fleet-wide profile, when no workflow id is g
   })
 })
 
+describe('buildPanelPolicy — the whole of what the panel’s server function may do', () => {
+  const policy = buildPanelPolicy(panelConfig)
+
+  it('carries the bundles grants unchanged, so the two builders cannot drift', () => {
+    // Composed rather than restated. Asserted by equality against the other builder's output so
+    // that adding a bundles statement there cannot silently leave the panel's real policy behind.
+    const bundles = buildPanelBundlesPolicy(panelBundlesConfig).Statement
+
+    expect(policy.Statement.slice(0, bundles.length)).toEqual(bundles)
+  })
+
+  it('reads and writes agent credential material, scoped to this stage’s prefix (003/FR-012)', () => {
+    const statement = policy.Statement.find(
+      (entry) => entry.Sid === 'ReadAndWriteAgentCredentialMaterial',
+    )
+
+    expect(statement?.Action).toEqual([
+      'secretsmanager:GetSecretValue',
+      'secretsmanager:PutSecretValue',
+    ])
+    expect(statement?.Resource).toEqual([
+      'arn:aws:secretsmanager:eu-west-2:429776178057:secret:sisyphus/staging/agent-credential/*',
+    ])
+  })
+
+  it('is scoped to the same prefix the control plane writes under', () => {
+    // The control plane creates the secret and the panel's machine surface reads it back. Two
+    // prefixes would be two different secrets, and the failure would be a boot-time authorisation
+    // error against a name nothing had ever written.
+    const panelResources = policy.Statement.filter((entry) =>
+      entry.Action.some((action) => action.startsWith('secretsmanager:')),
+    ).flatMap((entry) => [...(entry.Resource ?? [])])
+    const controlPlaneResources = buildControlPlanePolicy(controlPlaneConfig)
+      .Statement.filter((entry) =>
+        entry.Action.some((action) => action.startsWith('secretsmanager:')),
+      )
+      .flatMap((entry) => [...(entry.Resource ?? [])])
+
+    expect(panelResources).toEqual(controlPlaneResources)
+  })
+
+  it.each([
+    'secretsmanager:CreateSecret',
+    'secretsmanager:DeleteSecret',
+    'secretsmanager:ListSecrets',
+    'secretsmanager:UpdateSecret',
+  ])('does not grant %s', (action) => {
+    // Each for its own reason — see the builder. `ListSecrets` is the one that matters most:
+    // it takes no resource-level permission, so granting it would defeat the ARN scoping above
+    // entirely rather than merely widening it.
+    expect(policy.Statement.flatMap((entry) => [...entry.Action])).not.toContain(action)
+  })
+
+  it('never scopes a secret grant to a wildcard', () => {
+    const resources = policy.Statement.flatMap((entry) => [...(entry.Resource ?? [])])
+
+    expect(resources).not.toContain('*')
+    expect(resources.every((resource) => resource.startsWith('arn:aws:'))).toBe(true)
+  })
+
+  it('refuses an empty prefix rather than widening to every secret in the account', () => {
+    expect(() => buildPanelPolicy({ ...panelConfig, agentCredentialSecretPrefix: '   ' })).toThrow(
+      'empty agent credential prefix',
+    )
+  })
+})
+
 describe('buildControlPlanePolicy — what the control plane may do', () => {
   const policy = buildControlPlanePolicy(controlPlaneConfig)
 
@@ -386,11 +463,12 @@ describe('buildControlPlanePolicy — what the control plane may do', () => {
     expect(statement?.Resource).toEqual([controlPlaneConfig.schedulerRoleArn])
   })
 
-  it('scopes every EC2 and Scheduler resource ARN to the region and account supplied, not another stage’s', () => {
+  it('scopes every EC2, Scheduler and Secrets Manager resource ARN to the region and account supplied, not another stage’s', () => {
     const other = buildControlPlanePolicy({
       region: 'us-east-1',
       accountId: '111111111111',
       executorRunnerRoleArn: 'arn:aws:iam::111111111111:role/sisyphus-other-executor-runner',
+      agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('production')),
       schedulerGroupName: 'sisyphus-other-schedules',
       schedulerRoleArn: 'arn:aws:iam::111111111111:role/sisyphus-other-scheduler-invoke',
     })
@@ -408,18 +486,84 @@ describe('buildControlPlanePolicy — what the control plane may do', () => {
     }
   })
 
-  it('grants nothing outside the seven scoped statements', () => {
-    expect(policy.Statement).toHaveLength(7)
+  it('creates, describes, reads and rotates agent credential secrets', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'ManageAgentCredentialSecrets')
+
+    expect(statement?.Action).toEqual([
+      'secretsmanager:CreateSecret',
+      'secretsmanager:DescribeSecret',
+      'secretsmanager:GetSecretValue',
+      'secretsmanager:PutSecretValue',
+    ])
+  })
+
+  it('scopes those secrets to the stage’s own prefix, never to every secret in the account', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'ManageAgentCredentialSecrets')
+
+    expect(statement?.Resource).toEqual([
+      'arn:aws:secretsmanager:eu-west-2:429776178057:secret:sisyphus/staging/agent-credential/*',
+    ])
+    expect(statement?.Resource).not.toContain('*')
+    expect(statement?.Resource).not.toContain(
+      'arn:aws:secretsmanager:eu-west-2:429776178057:secret:*',
+    )
+  })
+
+  it('cannot reach another stage’s agent credentials', () => {
+    const production = buildControlPlanePolicy({
+      ...controlPlaneConfig,
+      agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('production')),
+    })
+    const secretResources = production.Statement.flatMap(
+      (statement) => statement.Resource ?? [],
+    ).filter((resource) => resource.startsWith('arn:aws:secretsmanager:'))
+
+    expect(secretResources).toHaveLength(1)
+    for (const resource of secretResources) {
+      expect(resource).toContain('sisyphus/production/agent-credential/')
+      expect(resource).not.toContain('staging')
+    }
+  })
+
+  it('refuses an empty prefix rather than scoping the grant to secret:/*', () => {
+    expect(() =>
+      buildControlPlanePolicy({ ...controlPlaneConfig, agentCredentialSecretPrefix: '   ' }),
+    ).toThrow('empty agent credential prefix')
+  })
+
+  it('grants nothing outside the eight scoped statements', () => {
+    expect(policy.Statement).toHaveLength(8)
     expect(policy.Statement.every((statement) => statement.Effect === 'Allow')).toBe(true)
   })
 })
 
 describe('buildControlPlanePolicy — what the control plane must never do', () => {
-  it('cannot reach the database, Secrets Manager or Parameter Store', () => {
+  it('cannot reach the database or Parameter Store', () => {
     for (const action of controlPlaneActions()) {
       expect(action.startsWith('rds')).toBe(false)
-      expect(action.startsWith('secretsmanager:')).toBe(false)
       expect(action.startsWith('ssm:')).toBe(false)
+    }
+  })
+
+  it('cannot delete a secret or enumerate the ones outside its prefix', () => {
+    const actions = controlPlaneActions()
+
+    expect(actions).not.toContain('secretsmanager:DeleteSecret')
+    expect(actions).not.toContain('secretsmanager:ListSecrets')
+    expect(actions).not.toContain('secretsmanager:ListSecretVersionIds')
+  })
+
+  it('holds no Secrets Manager action on a resource other than the agent credential prefix', () => {
+    const policy = buildControlPlanePolicy(controlPlaneConfig)
+    const secretStatements = policy.Statement.filter((statement) =>
+      statement.Action.some((action) => action.startsWith('secretsmanager:')),
+    )
+
+    expect(secretStatements).toHaveLength(1)
+    for (const resource of secretStatements[0]?.Resource ?? []) {
+      expect(resource).toBe(
+        `arn:aws:secretsmanager:eu-west-2:429776178057:secret:${controlPlaneConfig.agentCredentialSecretPrefix}/*`,
+      )
     }
   })
 
@@ -483,12 +627,14 @@ describe('buildPanelBundlesPolicy — what the panel may do', () => {
 })
 
 describe('buildPanelBundlesPolicy — what the panel must never do', () => {
-  it('cannot read a bundle back — validation runs and the executor read through the runner role', () => {
+  it('cannot read a bundle back or remove one — validation runs and the executor read through the runner role', () => {
     const actions = buildPanelBundlesPolicy(panelBundlesConfig).Statement.flatMap(
       (statement) => statement.Action,
     )
 
     expect(actions).not.toContain('s3:GetObject')
+    // Removing a durable object is the lifecycle policy's job, never the panel's.
+    expect(actions).not.toContain('s3:DeleteObject')
   })
 
   it('cannot reach any bucket other than the one it was configured with', () => {

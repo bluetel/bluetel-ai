@@ -1,12 +1,36 @@
 /**
- * Bootstrap phases 2–5: download, verify, unpack, run `setup.sh` (T046).
+ * Bootstrap phases 2–5: download, verify, unpack, run `setup.sh` (T046, 003/T062).
  *
  * This is the part of a run that turns a bare instance into a worker able to do
  * one client's work (FR-087). It runs before any agent work, and it runs again
- * on a **restore** boot — that is what reinstalls the credentials a snapshot
- * deliberately does not carry (FR-072). Everything below is written on the
- * assumption that it will execute more than once against the same machine
- * state; see {@link SETUP_SCRIPT_IDEMPOTENCY_NOTE}.
+ * on a **restore** boot — that is what reinstalls the repository-host and
+ * third-party credentials a snapshot deliberately does not carry (FR-072).
+ * Everything below is written on the assumption that it will execute more than
+ * once against the same machine state; see {@link SETUP_SCRIPT_IDEMPOTENCY_NOTE}.
+ *
+ * ## What the bundle no longer does: the agent's own login (003/FR-048)
+ *
+ * `002/FR-043` and `002/FR-075` made `setup.sh` responsible for the agent CLI
+ * **and its credentials**. 003 supersedes that half. The bundle keeps the CLI,
+ * the repository-host credential and any third-party credentials; it installs
+ * **no agent credential**, because the agent's identity is now a leased seat
+ * belonging to the workflow rather than something baked into a client's bundle
+ * (003/FR-048). The material arrives in bootstrap phase `credential_install`,
+ * from the machine surface, one phase after this file finishes — see
+ * `./credential-install.ts`.
+ *
+ * Two consequences worth stating, because neither is visible from the code here:
+ *
+ * - **Nothing in phases 2–5 requires a credential to exist, and nothing here
+ *   fails if none ever does.** That is what keeps a bundle **validation** run
+ *   possible without holding a seat (003/FR-052): a validation run exercises
+ *   exactly these four phases and stops, never reaching `credential_install` or
+ *   `agent_start`, so proving a bundle consumes no pool capacity.
+ * - **`SISYPHUS_AGENT_CONFIG_DIR` is still passed to `setup.sh` and still
+ *   means what it meant.** It is where the agent CLI's own configuration and
+ *   the bundle's non-agent credentials go (`contracts/setup-bundle.md`), and
+ *   removing it would break every existing bundle to solve a problem nobody
+ *   has. FR-048 is about the agent's login, not about the directory.
  *
  * The governing requirement is FR-088 by way of FR-146: **a failure here names
  * its phase.** "Bootstrap failed" is the outcome those requirements exist to
@@ -50,12 +74,23 @@ export const SETUP_SCRIPT_NAME = 'setup.sh'
  * idempotency only in the contract means it is read once, by whoever read the
  * contract; a run that resumes from a snapshot and finds a half-installed
  * credential is discovered much later and much more expensively.
+ *
+ * It no longer mentions the **agent's** credential, and that omission is the
+ * whole of 003/FR-048 as an author sees it: a bundle that still installs one is
+ * not refused, but nothing depends on it, and an author reading this note is not
+ * told to do something the platform now does for itself. What the note still
+ * says — reinstall the repository-host and third-party credentials on every boot
+ * — is unchanged and still load-bearing, because those *are* excluded from
+ * snapshots and the bundle *is* how they come back.
  */
 export const SETUP_SCRIPT_IDEMPOTENCY_NOTE =
   'setup.sh must be idempotent: it runs on every boot, including the boot that restores a ' +
-  'snapshot. Credential material under .agent-config/credentials/ is deliberately excluded from ' +
-  'snapshots (FR-072), so re-running the bundle is how a resumed workflow gets its credentials ' +
-  'back. A script that fails or double-installs on a second run breaks resume, not just setup.'
+  'snapshot. Everything under .agent-config/credentials/ is deliberately excluded from snapshots ' +
+  '(FR-072), so re-running the bundle is how a resumed workflow gets its repository-host and ' +
+  'third-party credentials back. The agent’s own login is not among them — the platform installs ' +
+  'that from its credential pool in a later bootstrap phase (003/FR-048), so setup.sh neither ' +
+  'needs nor should install one. A script that fails or double-installs on a second run breaks ' +
+  'resume, not just setup.'
 
 /** What the job envelope says about the bundle to fetch. */
 export interface SetupBundleReference {
@@ -77,7 +112,13 @@ export interface BundleBootstrapOptions {
   readonly bundleDir: string
   /** `SISYPHUS_WORKSPACE_ROOT` — always the pinned root. */
   readonly workspaceRoot: string
-  /** `SISYPHUS_AGENT_CONFIG_DIR` — inside the pinned root (FR-051). */
+  /**
+   * `SISYPHUS_AGENT_CONFIG_DIR` — inside the pinned root (FR-051).
+   *
+   * Where the bundle puts the agent CLI's configuration and its own non-agent
+   * credentials. **Not** where the agent's login goes: that is
+   * `./credential-install.ts`'s to write, one phase later (003/FR-048).
+   */
   readonly agentConfigDir: string
   /** `SISYPHUS_WORKFLOW_ID` — for log correlation only, not a credential. */
   readonly workflowId: string

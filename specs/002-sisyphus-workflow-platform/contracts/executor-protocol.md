@@ -107,6 +107,16 @@ suspend(reason: 'pause' | 'interruption' | 'stop'):
   5. release compute                      # immediate for interruption/stop; on ceiling for pause
 ```
 
+> **Amended by `003/FR-039`.** Two lines of this sketch changed and the rest is unchanged. Step 1's
+> "process alive" is now true only for an interruption or a stop: a **pause ends the agent** as well,
+> because the snapshot has just been taken and an agent still writing would leave the disk and the
+> snapshot disagreeing. Step 5's "on ceiling for pause" is now "the control plane stops the instance
+> from outside" — an executor cannot stop its own instance, because every instance the platform
+> launches carries `InstanceInitiatedShutdownBehavior: 'terminate'` and would destroy the disk the
+> pause exists to keep. The idle ceiling still exists as the backstop for a stop that never came.
+> One step was also added ahead of the snapshot: **flush any agent credential rotation** the watcher
+> has observed but not yet written through (`003/FR-030`).
+
 **Step 2 can fail, and it must not be allowed to lose work.** If durable storage is unreachable at a snapshot
 boundary, the run **parks and retries** with backoff rather than continuing unsnapshotted or terminating
 (FR-082). Parking holds the agent at the turn boundary reached in step 1 — the process stays alive and no
@@ -149,9 +159,17 @@ uncommitted work and index state survive) plus the agent's conversation state un
 with both state flags; a snapshot missing either is not resumable (FR-050).
 
 **One exclusion: `/workspace/.agent-config/credentials/`.** FR-072 forbids a credential appearing in a snapshot
-in plain text, so credential material installed by `setup.sh` is excluded from the tar. This costs nothing,
-because phases 2–5 run on the restore boot as well — the bundle reinstalls the credentials, which is why
-`setup.sh` idempotency is a hard requirement rather than a nicety. The config **directory** still lives inside
+in plain text, so credential material is excluded from the tar. This costs nothing, because phases 2–5 run on
+the restore boot as well — the bundle reinstalls the credentials it owns, which is why `setup.sh` idempotency
+is a hard requirement rather than a nicety.
+
+> **Amended by `003/FR-048` and `003/FR-050`.** The exclusion is unchanged and so is the reason for it. What
+> changed is what re-supplies the excluded material on the way back in: the **agent's** credential is no
+> longer installed by `setup.sh` at all, so the restore boot fetches it from the machine surface in bootstrap
+> phase `credential_install` — which runs on _every_ boot, restore and resumed-instance alike. Every other
+> credential under this path is still the bundle's, reinstalled exactly as described.
+
+The config **directory** still lives inside
 the pinned root, because conversation state must be captured (FR-051); it is the credential subtree, not the
 config tree, that is excluded.
 

@@ -12,9 +12,13 @@ import {
 import { adminProcedure, createTRPCRouter } from '../procedures'
 
 import { recordConfigurationChange } from './audit-log'
+import type { CredentialStoreWriter } from './credential-store'
+import { readProfileCredentialGroups } from './credential-store'
 import type { ProfileEnableCheck } from './profile-gate'
 import {
   checkProfileCanBeEnabled,
+  credentialGroupAttachmentCheck,
+  mergeProfileEnableChecks,
   noPublishedVersionCheck,
   profileCannotBeEnabledError,
   unreadableSubjectCheck,
@@ -54,6 +58,14 @@ import type { Page } from './user-queries'
  * `setEnabled(false)` is never gated. Disabling is what FR-128 offers instead of deletion, and a
  * profile whose repositories have gone is precisely the one an admin most needs to be able to take
  * out of circulation.
+ *
+ * The gate has a **second half** as of 003/FR-065: a profile with no attached credential group has
+ * no agent identity it is permitted to work as, and is refused here — at configuration time — with
+ * the missing attachment named. Failing at launch instead is the outcome that requirement exists to
+ * prevent, because by then the run has been accepted and the queue would report a configuration
+ * fault as capacity exhaustion. See `credentialGroupAttachmentCheck` in `profile-gate.ts`, and
+ * `credential-groups.ts` for the other end of the same invariant: detaching a profile's last group
+ * while it is enabled is refused rather than quietly making it unlaunchable.
  *
  * ## Editing publishes a version
  *
@@ -203,31 +215,42 @@ const valuesFromVersion = (version: ExecutionProfileVersion): ProfileVersionValu
 })
 
 /**
- * Run FR-124's gate against a profile's current version.
+ * Run the enable gate against a profile — FR-124's validation and 003/FR-065's attachment check.
  *
  * Split out so the two "there is nothing to validate" cases are answered as verdicts rather than as
  * exceptions: the panel renders them in the same list as a disabled bundle, which is what an admin
  * needs — "no published version" is a thing to fix, not an internal error.
+ *
+ * **The credential-group check runs first and runs unconditionally**, including for a profile with
+ * no published version at all. Attachments hang off the mutable `execution_profiles` row rather
+ * than off a version (003/FR-062, `db/schema/credential.ts`), so the question "may this profile
+ * draw on any capacity" is answerable whether or not there is a version to validate — and an admin
+ * building a profile from nothing should be told about both gaps in one attempt rather than about
+ * the second only after closing the first.
  */
 const runEnableGate = async (
-  writer: ProfileStoreWriter,
+  writer: ProfileStoreWriter & CredentialStoreWriter,
   profile: ExecutionProfile,
 ): Promise<ProfileEnableCheck> => {
+  const attachments = credentialGroupAttachmentCheck(
+    await readProfileCredentialGroups(writer, profile.id),
+  )
+
   if (profile.currentVersionId === null) {
-    return noPublishedVersionCheck()
+    return mergeProfileEnableChecks(attachments, noPublishedVersionCheck())
   }
 
   const version = await findProfileVersion(writer, profile.currentVersionId)
   if (version === undefined) {
-    return unreadableSubjectCheck()
+    return mergeProfileEnableChecks(attachments, unreadableSubjectCheck())
   }
 
   const subject = await readProfileEnableSubject(writer, version)
   if (subject === undefined) {
-    return unreadableSubjectCheck()
+    return mergeProfileEnableChecks(attachments, unreadableSubjectCheck())
   }
 
-  return checkProfileCanBeEnabled(subject)
+  return mergeProfileEnableChecks(attachments, checkProfileCanBeEnabled(subject))
 }
 
 /** `admin.profiles` as it is mounted. */
@@ -436,8 +459,9 @@ export const profilesRouter = createTRPCRouter({
   /**
    * Enable or disable a profile. **Enabling runs the FR-124 gate** (FR-124, FR-128).
    *
-   * The gate reads the bundle and workspace the profile's current version pins, probes every
-   * entry, and refuses naming what failed. It runs inside the transaction that would flip the
+   * The gate reads the bundle and workspace the profile's current version pins, counts that
+   * workspace version's entries, checks the profile's credential-group attachments (003/FR-065),
+   * and refuses naming what failed. It runs inside the transaction that would flip the
    * flag, so a profile cannot be enabled on the strength of a check taken before a concurrent
    * edit re-pointed it.
    *

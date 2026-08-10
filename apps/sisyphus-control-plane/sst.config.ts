@@ -114,6 +114,7 @@ export default $config({
       POLICY_VERSION,
       buildControlPlanePolicy,
       createScheduler,
+      getAgentCredentialSecretPrefix,
       getAppSecurityGroupIdParameterName,
       getAppSubnetIdsParameterName,
       getBucketNames,
@@ -231,6 +232,18 @@ export default $config({
     // the names from the same helper is what makes "the same bucket" a fact
     // rather than a convention.
     const bucketNames = getBucketNames(scope)
+
+    // Derived for the same reason the bucket names above are, and against the
+    // same failure: this is the one place a stage's agent credentials live, and
+    // the value has to be identical in three places at once — the environment
+    // this function reads it from at runtime, the IAM statement that scopes
+    // what it may do to those secrets, and (later) the executor's own grant to
+    // read them. An operator-edited env blob cannot keep those three in step,
+    // and getting it wrong does not fail a deploy: it either points the control
+    // plane at secrets its policy does not cover, or — worse, and silently —
+    // at another stage's.
+    const agentCredentialSecretPrefix = getAgentCredentialSecretPrefix(scope)
+
     const functionName = getResourceIdentifier(scope, 'control-plane')
 
     // The function's own ARN, composed rather than read back from the resource:
@@ -270,6 +283,7 @@ export default $config({
       region,
       accountId,
       executorRunnerRoleArn,
+      agentCredentialSecretPrefix,
       schedulerGroupName: scheduler.groupName,
       schedulerRoleArn,
     })
@@ -325,6 +339,7 @@ export default $config({
         SISYPHUS_SNAPSHOTS_BUCKET: bucketNames.snapshots,
         SISYPHUS_BUNDLES_BUCKET: bucketNames.bundles,
         SISYPHUS_ARTIFACTS_BUCKET: bucketNames.artifacts,
+        SISYPHUS_AGENT_CREDENTIAL_SECRET_PREFIX: agentCredentialSecretPrefix,
         SISYPHUS_SCHEDULE_GROUP_NAME: scheduler.groupName,
         SISYPHUS_SCHEDULER_TARGET_ARN: functionArn,
         SISYPHUS_SCHEDULER_ROLE_ARN: schedulerRoleArn,

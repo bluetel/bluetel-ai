@@ -4,8 +4,9 @@ import { SchedulerClient } from '@aws-sdk/client-scheduler'
 import { SecretsManagerClient } from '@aws-sdk/client-secrets-manager'
 import type { SisyphusDatabase } from '@bluetel-ai/sisyphus-api/db'
 import { getDatabaseClient } from '@bluetel-ai/sisyphus-api/db'
-import type { WorkflowNotifier } from '@bluetel-ai/sisyphus-notify'
+import type { CredentialPoolAlerter, WorkflowNotifier } from '@bluetel-ai/sisyphus-notify'
 import {
+  createCredentialPoolAlerter,
   createNotificationStore,
   createWebApiSlackMessenger,
   createWorkflowNotifier,
@@ -22,12 +23,14 @@ import {
 import type { env as validatedEnv } from './env'
 import type {
   ConnectorRegistry,
+  CredentialExerciser,
   DurabilityBuckets,
   PromptRedactor,
   QueueDrain,
   WorkflowStarter,
 } from './jobs'
 import {
+  createRefusingCredentialExerciser,
   createRefusingPromptRedactor,
   createRegisteredConnectorRegistry,
   createWorkflowStarter,
@@ -76,6 +79,45 @@ export interface ControlPlaneContext {
   readonly buckets: DurabilityBuckets
   /** The platform-wide concurrency ceiling in force (FR-040). */
   readonly ceiling: number
+  /**
+   * How long a run may wait for an agent credential before it is failed (003/FR-028).
+   *
+   * Read here from `SISYPHUS_CREDENTIAL_WAIT_LIMIT_MINUTES` and handed to the drain in
+   * milliseconds, so the job never reads its own configuration and a test can choose the value
+   * under test — the same rule {@link ControlPlaneContext.ceiling} follows.
+   */
+  readonly credentialWaitLimitMs: number
+  /**
+   * How stale a credential may get before keep-alive exercises it (003/FR-035).
+   *
+   * Read here from `SISYPHUS_KEEPALIVE_IDLE_HOURS` and handed to the sweep, so the job never reads
+   * its own configuration — the same rule {@link ControlPlaneContext.ceiling} follows. Hours rather
+   * than milliseconds because that is the unit the threshold is reasoned about in and the unit the
+   * variable is written in; the conversion the sweep does is to a cut-off date, not to a duration
+   * anything compares.
+   */
+  readonly keepAliveIdleHours: number
+  /**
+   * How long a credential cooling off with no stated return time waits before the reconciler
+   * retries it (003/FR-078), in milliseconds.
+   *
+   * Minutes in the environment, milliseconds at the seam, for the same reason
+   * {@link ControlPlaneContext.credentialWaitLimitMs} converts here: the sweep compares it against
+   * a difference between two timestamps, and converting at the call site is how two jobs come to
+   * disagree about what the number meant.
+   */
+  readonly coolingOffRetryMs: number
+  /**
+   * The provider round trip keep-alive makes (003/FR-035, research R1/R2).
+   *
+   * A port like every other, and the one with no real implementation yet: what "exercise" means
+   * against a provider is not determined by the specification, so it is a seam and the default
+   * **refuses**. That is the `createRefusingPromptRedactor` choice repeated, and for a sharper
+   * reason — a stub reporting success would mark every seat in the pool as freshly proven without
+   * reaching anything, which is SC-009 defeated silently and discovered when every login has
+   * already expired.
+   */
+  readonly credentialExerciser: CredentialExerciser
   readonly machineSurfaceUrl: string
   readonly credentialSecret: string
   readonly bootstrapAdminEmails: readonly string[]
@@ -91,6 +133,21 @@ export interface ControlPlaneContext {
    * client is a job a Slack outage can fail — the FR-141 failure the notify layer is shaped against.
    */
   readonly notifier: WorkflowNotifier
+  /**
+   * How an administrator hears that a seat needs them (003/FR-056).
+   *
+   * Assembled here for the reason {@link ControlPlaneContext.notifier} is, and with one addition
+   * that is the whole reason it is a separate object rather than a method on that one: it carries
+   * the **two thresholds**. `SISYPHUS_KEEPALIVE_IDLE_HOURS` and
+   * `SISYPHUS_LEASE_HOLD_EXPECTATION_HOURS` are read once, here, and bound into the alerter, so the
+   * sweep that raises the alerts never reads its own configuration and there is no second copy of
+   * either number to drift from `env-schemas.ts`. `sisyphus-notify` requires both without defaults
+   * precisely so that wiring one is impossible without deciding them.
+   *
+   * A different audience from the notifier as well as a different vocabulary: this reaches whoever
+   * administers capacity, and none of its messages may be silenced by a notification preference.
+   */
+  readonly credentialAlerter: CredentialPoolAlerter
 }
 
 /**
@@ -108,6 +165,8 @@ export interface ControlPlaneContextOverrides {
   readonly redactor?: PromptRedactor
   readonly readCredential?: (secretArn: string) => Promise<string>
   readonly notifier?: WorkflowNotifier
+  readonly credentialExerciser?: CredentialExerciser
+  readonly credentialAlerter?: CredentialPoolAlerter
 }
 
 export interface ControlPlaneContextOptions extends ControlPlaneContextOverrides {
@@ -164,6 +223,7 @@ export const createControlPlaneContext = (
     createSecretsManagerReader({ client: new SecretsManagerClient({ region }) }).read
 
   const ceiling = env.SISYPHUS_CONCURRENCY_CEILING
+  const credentialWaitLimitMs = env.SISYPHUS_CREDENTIAL_WAIT_LIMIT_MINUTES * 60 * 1000
 
   const starter = createWorkflowStarter({
     db,
@@ -171,6 +231,36 @@ export const createControlPlaneContext = (
     machineSurfaceUrl: env.SISYPHUS_MACHINE_SURFACE_URL,
     credentialSecret: env.SISYPHUS_MACHINE_CREDENTIAL_SECRET,
   })
+
+  // Built here rather than in the job that needs it, so `SISYPHUS_SLACK_BOT_TOKEN` and
+  // `SISYPHUS_PANEL_URL` are read in exactly one place and no job is given a way to reach Slack.
+  // `WebClient` opens no connection at construction, so this costs nothing on an invocation that
+  // never notifies. Bound to a name because two fields below need the same one: the context's own
+  // port, and the drain, which announces the runs it fails for waiting too long (003/FR-028).
+  const notifier =
+    options.notifier ??
+    createWorkflowNotifier({
+      store: createNotificationStore({ db }),
+      messenger: createWebApiSlackMessenger({
+        client: new WebClient(env.SISYPHUS_SLACK_BOT_TOKEN),
+      }),
+      panel: { baseUrl: env.SISYPHUS_PANEL_URL },
+    })
+
+  // The FR-056 alerter, built from the same Slack seam and the same panel origin as the notifier
+  // above, plus the two thresholds. Bound here and nowhere else: the sweep is handed an object that
+  // already knows both numbers, so no job reads `SISYPHUS_KEEPALIVE_IDLE_HOURS` twice and the value
+  // the keep-alive sweep works to and the value the expiry alert warns against cannot disagree.
+  const credentialAlerter =
+    options.credentialAlerter ??
+    createCredentialPoolAlerter({
+      messenger: createWebApiSlackMessenger({
+        client: new WebClient(env.SISYPHUS_SLACK_BOT_TOKEN),
+      }),
+      panel: { baseUrl: env.SISYPHUS_PANEL_URL },
+      idleExpiryHours: env.SISYPHUS_KEEPALIVE_IDLE_HOURS,
+      leaseHoldExpectationHours: env.SISYPHUS_LEASE_HOLD_EXPECTATION_HOURS,
+    })
 
   return {
     db,
@@ -186,29 +276,22 @@ export const createControlPlaneContext = (
       snapshots: env.SISYPHUS_SNAPSHOTS_BUCKET,
     },
     ceiling,
+    credentialWaitLimitMs,
+    keepAliveIdleHours: env.SISYPHUS_KEEPALIVE_IDLE_HOURS,
+    coolingOffRetryMs: env.SISYPHUS_COOLING_OFF_RETRY_MINUTES * 60 * 1000,
+    credentialExerciser: options.credentialExerciser ?? createRefusingCredentialExerciser(),
     machineSurfaceUrl: env.SISYPHUS_MACHINE_SURFACE_URL,
     credentialSecret: env.SISYPHUS_MACHINE_CREDENTIAL_SECRET,
     bootstrapAdminEmails: env.SISYPHUS_BOOTSTRAP_ADMIN_EMAILS,
     starter,
-    // Built here rather than in the job that needs it, so `SISYPHUS_SLACK_BOT_TOKEN` and
-    // `SISYPHUS_PANEL_URL` are read in exactly one place and no job is given a way to reach Slack.
-    // `WebClient` opens no connection at construction, so this costs nothing on an invocation that
-    // never notifies.
-    notifier:
-      options.notifier ??
-      createWorkflowNotifier({
-        store: createNotificationStore({ db }),
-        messenger: createWebApiSlackMessenger({
-          client: new WebClient(env.SISYPHUS_SLACK_BOT_TOKEN),
-        }),
-        panel: { baseUrl: env.SISYPHUS_PANEL_URL },
-      }),
+    notifier,
+    credentialAlerter,
     // The drain the *other* jobs run after they free a slot. It is deliberately not
     // `runDrainQueue`: teardown and the reconciler report a drain that threw rather than failing on
     // it, and the outcome envelope would hide the throw they are meant to report.
     queueDrain: {
       drain: async () => {
-        await drainQueue({ db, ceiling, starter })
+        await drainQueue({ db, ceiling, starter, credentialWaitLimitMs, notifier })
       },
     },
   }

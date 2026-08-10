@@ -16,7 +16,7 @@
  */
 
 import { createStreamingRedactor } from './redact'
-import type { KnownSecret } from './secret-values'
+import type { SecretSource } from './secret-values'
 import { createControlStripper } from './strip-control'
 
 declare const sanitisedTextBrand: unique symbol
@@ -34,8 +34,12 @@ export const sanitisedByteLength = (text: SanitisedText): number =>
   new TextEncoder().encode(text).length
 
 export interface SanitiserOptions {
-  /** Every credential the setup bundle installed (FR-072). */
-  readonly secrets?: readonly KnownSecret[]
+  /**
+   * Every value this run knows — the credentials the setup bundle installed
+   * (FR-072), plus the agent's own credential when the caller passes a
+   * re-readable source (003/FR-014). See {@link SecretSource}.
+   */
+  readonly secrets?: SecretSource
   /** Passed through to the control stripper's retention window. */
   readonly retainRows?: number
 }

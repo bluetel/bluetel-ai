@@ -26,8 +26,9 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import process from 'node:process'
 import { promisify } from 'node:util'
+
+import { gitFixtureEnvironment } from '../git-fixture-environment'
 
 import {
   discoverSessionIds,
@@ -82,17 +83,24 @@ export interface RestoreSpikeOutcome {
   readonly credentialExcludedFromArchive: boolean
 }
 
-const gitEnv = {
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
+/**
+ * The child's whole environment, composed rather than merged over `process.env`.
+ *
+ * The harness builds a real repository in a temporary directory, so it must not inherit one. Under
+ * a git hook `process.env` carries `GIT_DIR` and `GIT_INDEX_FILE` pointing at the repository the
+ * hook is running in, and a merge cannot remove them — `git init` below would then re-initialise
+ * that repository and the spike would archive somebody else's working tree. See
+ * `../git-fixture-environment.ts`.
+ */
+const gitEnv = gitFixtureEnvironment({
   GIT_AUTHOR_NAME: 'spike',
   GIT_AUTHOR_EMAIL: 'spike@example.invalid',
   GIT_COMMITTER_NAME: 'spike',
   GIT_COMMITTER_EMAIL: 'spike@example.invalid',
-}
+})
 
 const git = async (cwd: string, args: readonly string[]): Promise<string> => {
-  const { stdout } = await run('git', [...args], { cwd, env: { ...process.env, ...gitEnv } })
+  const { stdout } = await run('git', [...args], { cwd, env: gitEnv })
 
   return stdout
 }

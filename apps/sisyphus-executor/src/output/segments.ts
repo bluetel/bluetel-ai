@@ -31,7 +31,7 @@
 
 import type { SanitisedText } from './sanitise'
 import { createSanitiser, sanitisedByteLength } from './sanitise'
-import type { KnownSecret } from './secret-values'
+import type { SecretSource } from './secret-values'
 import { createTokenBucket } from './token-bucket'
 
 /** What `appendLogSegment` is given once the body is durable (FR-046). */
@@ -64,8 +64,16 @@ export interface SegmentWriterOptions {
   readonly workflowId: string
   readonly store: SegmentStore
   readonly reporter: SegmentReporter
-  /** Every credential the setup bundle installed (FR-072). */
-  readonly secrets?: readonly KnownSecret[]
+  /**
+   * Every value this run knows.
+   *
+   * The credentials the setup bundle installed (FR-072), and — when a
+   * re-readable source is passed — the agent's own credential as it stands
+   * after any mid-run rotation (003/FR-014). This is the log, so this is the
+   * option SC-014 actually turns on: nothing else in the executor writes agent
+   * output anywhere durable.
+   */
+  readonly secrets?: SecretSource
   /** Cut a segment once its body reaches this many bytes. */
   readonly maxSegmentBytes?: number
   /** Sustained delivery rate. Paces; never drops. */

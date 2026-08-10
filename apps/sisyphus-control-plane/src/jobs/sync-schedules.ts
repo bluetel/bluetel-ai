@@ -3,7 +3,9 @@ import { integrations } from '@bluetel-ai/sisyphus-api/db'
 import { eq } from 'drizzle-orm'
 
 import type { ScheduleDefinition, ScheduleRegistry } from '../aws'
+import { KEEP_ALIVE_JOB_NAME } from '../credentials/liveness'
 
+import { CREDENTIAL_ALERTS_JOB_NAME } from './credential-alerts'
 import { listIntegrations } from './integration-store'
 import type { JobOutcome } from './run-job'
 import { runJob, toError } from './run-job'
@@ -40,12 +42,102 @@ import { runJob, toError } from './run-job'
  * Rather than deleting it. The schedule's history and its target survive, so re-enabling is a flag
  * rather than a re-creation, and an operator looking at the group can see that the integration
  * exists and is off — which a missing schedule cannot say.
+ *
+ * ## Platform schedules, which belong to no row (003/FR-035)
+ *
+ * Everything above is about schedules derived from `integrations`. {@link PLATFORM_SCHEDULES} is the
+ * other kind: timers the platform needs whether or not anybody has configured anything, registered
+ * by this same reconciler because it is the only thing that ever talks to the schedule group.
+ *
+ * There are two, and both are about the credential pool. The keep-alive sweep is here rather than in
+ * the stage's own tick for a reason worth stating: FR-035 requires credentials to be exercised **on
+ * a schedule, independently of workflow demand**, and a job that only ran as part of something else
+ * would be a job that stopped running whenever that something else was disabled or throttled.
+ * SC-009's failure mode — a pool that has quietly expired — is invisible until a workflow tries to
+ * use it, so the timer that prevents it must not be conditional on anything.
+ *
+ * The FR-056 alert sweep is the second, and it is a **separate** entry rather than a step inside
+ * keep-alive for the sharpest version of the same argument: one of the four alerts it raises is
+ * "this seat has not been exercised for most of its idle window", which is precisely what a
+ * deployment sees when keep-alive has stopped running. An alert that fired only as part of the job
+ * it is watching would go quiet in the one case it was written for.
+ *
+ * Their names carry {@link PLATFORM_SCHEDULE_PREFIX}, which is deliberately **not**
+ * {@link SCHEDULE_NAME_PREFIX}. That is what keeps the integration sweep from deleting them:
+ * `integrationIdFromScheduleName` does not recognise the platform prefix, so a platform schedule is
+ * one of the "not ours" names the sweep already declines to touch, and it stays that way without a
+ * special case anybody has to remember.
  */
 
 export const SYNC_SCHEDULES_JOB_NAME = 'sync-schedules'
 
 /** Prefix on every schedule this platform owns, so a sweep cannot delete somebody else's. */
 export const SCHEDULE_NAME_PREFIX = 'sisyphus-integration-'
+
+/** Prefix on schedules that belong to the platform rather than to any row. See the module note. */
+export const PLATFORM_SCHEDULE_PREFIX = 'sisyphus-platform-'
+
+/** The keep-alive sweep's schedule (FR-035, SC-009). */
+export const KEEP_ALIVE_SCHEDULE_NAME = `${PLATFORM_SCHEDULE_PREFIX}${KEEP_ALIVE_JOB_NAME}`
+
+/**
+ * How often the keep-alive sweep runs — which is **not** the same number as
+ * `SISYPHUS_KEEPALIVE_IDLE_HOURS`.
+ *
+ * The idle threshold says how stale a credential may get; this says how often the platform looks.
+ * The cadence has to be the finer of the two, or a credential could sit a whole extra interval past
+ * its threshold before anything noticed. Hourly against a 24-hour default gives twenty-four looks
+ * inside one threshold, and each look is bounded by `DEFAULT_KEEP_ALIVE_BATCH` — so a pass costs a
+ * handful of provider round trips at most, and a pass with nothing to do costs one query.
+ */
+export const KEEP_ALIVE_SCHEDULE_EXPRESSION = 'rate(1 hour)'
+
+/** The FR-056 alert sweep's schedule. */
+export const CREDENTIAL_ALERTS_SCHEDULE_NAME = `${PLATFORM_SCHEDULE_PREFIX}${CREDENTIAL_ALERTS_JOB_NAME}`
+
+/**
+ * How often the pool is looked at for conditions worth a person — the same hourly cadence as
+ * keep-alive, and for a related but not identical reason.
+ *
+ * The finer-of-the-two argument above applies here as well: the expiry alert fires in the last
+ * quarter of `SISYPHUS_KEEPALIVE_IDLE_HOURS`, which is six hours against the 24-hour default and
+ * ninety minutes for a deployment that measures the real window at six. A cadence coarser than an
+ * hour could therefore step over the warning window entirely and deliver nothing before the login
+ * lapsed, which is the alert doing the opposite of its job.
+ *
+ * The cost of the other direction is repetition, and it is accepted deliberately. Nothing in the
+ * alert path coalesces — `credential-alerts.ts` in the notify package explains why these are not
+ * `notifications` rows and therefore have no dedupe window — so a broken seat is raised once an
+ * hour until somebody fixes it. That is the right pressure for a condition that is only ever
+ * cleared by a person: the four conditions are each minutes of work, and a pool with none of them
+ * produces no message at all.
+ */
+export const CREDENTIAL_ALERTS_SCHEDULE_EXPRESSION = 'rate(1 hour)'
+
+/**
+ * Schedules the platform keeps regardless of configuration.
+ *
+ * `UTC`, because a rate expression has no wall clock to keep — the timezone field is required and
+ * naming the platform's own zone here would imply a daylight-saving behaviour the expression does
+ * not have. That is the opposite of the integration case (FR-155), where the wall clock is the
+ * whole point.
+ */
+export const PLATFORM_SCHEDULES: readonly ScheduleDefinition[] = [
+  {
+    name: KEEP_ALIVE_SCHEDULE_NAME,
+    expression: KEEP_ALIVE_SCHEDULE_EXPRESSION,
+    timezone: 'UTC',
+    payload: JSON.stringify({ job: KEEP_ALIVE_JOB_NAME }),
+    enabled: true,
+  },
+  {
+    name: CREDENTIAL_ALERTS_SCHEDULE_NAME,
+    expression: CREDENTIAL_ALERTS_SCHEDULE_EXPRESSION,
+    timezone: 'UTC',
+    payload: JSON.stringify({ job: CREDENTIAL_ALERTS_JOB_NAME }),
+    enabled: true,
+  },
+]
 
 /**
  * The schedule name for an integration.
@@ -139,6 +231,18 @@ export interface SyncSchedulesResult {
   readonly actions: readonly ScheduleAction[]
   /** Schedules removed because their integration no longer exists. */
   readonly swept: readonly string[]
+  /** Platform schedules brought to their definition this pass. See {@link PLATFORM_SCHEDULES}. */
+  readonly platform: readonly string[]
+  /**
+   * Why a platform schedule could not be registered, one per failure.
+   *
+   * Recorded rather than thrown, the same rule the integration rows follow: one schedule the
+   * registry refused is not a reason to abandon the rest of the sweep, and the next pass will try
+   * again. They count towards {@link SyncSchedulesResult.failures} because a keep-alive timer that
+   * is not there is not a lesser problem than an integration's — it is the one that ends in an
+   * expired pool.
+   */
+  readonly platformErrors: readonly string[]
   readonly failures: number
 }
 
@@ -160,6 +264,20 @@ export const syncSchedules = async (
   const rows = await listIntegrations(db)
   const actions: ScheduleAction[] = []
   const known = new Set<string>()
+  const platform: string[] = []
+  const platformErrors: string[] = []
+
+  // First, and unconditionally: these belong to no row, so nothing about the `integrations` table
+  // can make them unnecessary. A deployment with no integrations at all still needs its pool kept
+  // alive (FR-035).
+  for (const definition of PLATFORM_SCHEDULES) {
+    try {
+      await schedules.upsert(definition)
+      platform.push(definition.name)
+    } catch (thrown) {
+      platformErrors.push(`${definition.name}: ${toError(thrown).message}`)
+    }
+  }
 
   for (const integration of rows) {
     const scheduleName = scheduleNameFor(integration.id)
@@ -211,7 +329,13 @@ export const syncSchedules = async (
     swept.push(name)
   }
 
-  return { actions, swept, failures: actions.filter((action) => action.action === 'failed').length }
+  return {
+    actions,
+    swept,
+    platform,
+    platformErrors,
+    failures: actions.filter((action) => action.action === 'failed').length + platformErrors.length,
+  }
 }
 
 /**

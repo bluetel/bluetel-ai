@@ -151,6 +151,18 @@ export const ProfileCard = ({
           >
             who holds this profile
           </Link>
+          {/*
+            003/FR-062. A separate screen rather than a section of the editor, because attachments
+            hang off the mutable profile row and are not pinned by a version — editing them here
+            would say the opposite. It is also where 003/FR-065's refusal is stated, so a profile
+            this card cannot enable has somewhere to send the administrator.
+          */}
+          <Link
+            href={`/admin/profiles/${profile.id}`}
+            className="focus-ring type-data-mono text-signal"
+          >
+            which credential groups it draws on
+          </Link>
           <Field
             label="Clone as"
             value={cloneName}

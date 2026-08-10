@@ -2,16 +2,18 @@ import type { SisyphusDatabase, Workflow } from '@bluetel-ai/sisyphus-api/db'
 import {
   artifacts,
   computeLeases,
+  credentialLeases,
   logSegments,
   sessionSnapshots,
-  terminalOutcomeEnum,
   workflows,
 } from '@bluetel-ai/sisyphus-api/db'
 import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import type { ComputeProvisioner, ObjectStore } from '../aws'
 import { revokeScopedCredentials } from '../credentials'
+import { releaseLease } from '../credentials/lease'
 
+import { isTerminalWorkflowState, releasesAgentCredential } from './agent-credential-release'
 import type { JobOutcome } from './run-job'
 import { runJob, toError } from './run-job'
 
@@ -52,6 +54,35 @@ import { runJob, toError } from './run-job'
  * Releasing a lease frees a slot under the FR-040 ceiling, and nothing else re-examines the queue.
  * `admit-workflow.ts` names the drain as teardown's responsibility for exactly this reason: without
  * it the ceiling builds a queue nothing empties.
+ *
+ * ## The agent credential seat, and the one terminal outcome that keeps it (003/FR-019, T047)
+ *
+ * Teardown is where a run hands back its seat in the agent-credential pool. FR-019 makes this the
+ * *only* ordinary way one is released — an administrator's force-release (FR-057) and the FR-022
+ * sweep are the others, and both are exceptional — so the interesting question is not when this
+ * releases but what it must not release.
+ *
+ * **Pause never reaches here.** A `paused` run is not terminal, so teardown returns
+ * {@link NotTerminalTeardown} before it looks at anything: the run keeps its instance, and it keeps
+ * its seat.
+ *
+ * **Park reaches here and must not lose its seat.** This is the case that would be got wrong.
+ * `parked_resumable` *is* a terminal outcome, so every terminal check in this file answers true for
+ * it, and rightly — parking genuinely does release compute, which is the whole difference between
+ * parking and pausing. It does not release the credential: FR-073 says a parked workflow retains it
+ * and releases it only when it becomes terminal in some other way, and SC-018 depends on that,
+ * because a run resumed from a park onto a different identity would be one workflow performed by
+ * two agents. `releasesAgentCredential` in `agent-credential-release.ts` is the single expression of
+ * that rule, and it is consulted here rather than restated.
+ *
+ * **Environment destruction reaches here and takes nothing with it.** The `terminate` call above is
+ * the destruction of an execution environment, and it is deliberately not what triggers the seat
+ * release — the release is decided by the run's state, one level up. A lease belongs to the
+ * workflow, not to any instance (FR-018), so an instance going away — released here, reclaimed as
+ * spot capacity, or rebuilt on resume — changes nothing about who holds the seat.
+ *
+ * It is released **after** compute, so a seat only ever comes free once the run genuinely has no
+ * instance, and **before** the drain, so the queue's next pass can grant what this teardown freed.
  */
 
 export const TEARDOWN_WORKFLOW_JOB_NAME = 'teardown-workflow'
@@ -108,12 +139,28 @@ export interface MissingObject {
   readonly key: string
 }
 
+/**
+ * What teardown did about the run's seat in the agent-credential pool (FR-019, FR-073).
+ *
+ * Three answers rather than a boolean, because `retained` and `not_held` mean opposite things about
+ * the pool and collapsing them would hide the one that matters. `retained` is a seat still claimed
+ * by a parked run — capacity consumed indefinitely by something showing no activity, which FR-074
+ * calls the likeliest cause of unexplained pool exhaustion — and `not_held` is a run that never had
+ * one. A caller reading `false` could not tell a healthy park from a leak.
+ */
+export interface AgentCredentialDisposition {
+  readonly outcome: 'not_held' | 'released' | 'retained'
+  /** The seat, where there was one to name. */
+  readonly agentCredentialId: string | undefined
+}
+
 /** Durability confirmed; compute released and credential revoked, in that order. */
 export interface ReleasedTeardown {
   readonly outcome: 'released'
   readonly workflowId: string
   readonly terminatedInstanceId: string | undefined
   readonly credentialsRevoked: number
+  readonly agentCredential: AgentCredentialDisposition
   readonly confirmedObjects: number
   /**
    * The drain ran and threw. Reported rather than raised: the lease is already released, and a
@@ -138,6 +185,7 @@ export interface ForcedTeardown {
   readonly workflowId: string
   readonly terminatedInstanceId: string | undefined
   readonly credentialsRevoked: number
+  readonly agentCredential: AgentCredentialDisposition
   readonly missing: readonly MissingObject[]
   readonly deadline: Date
   /** See {@link ReleasedTeardown.queueDrainError}. */
@@ -149,6 +197,7 @@ export interface AlreadyReleasedTeardown {
   readonly outcome: 'already_released'
   readonly workflowId: string
   readonly credentialsRevoked: number
+  readonly agentCredential: AgentCredentialDisposition
 }
 
 /** The run has not finished. FR-038 is about completion, so there is nothing to tear down yet. */
@@ -169,15 +218,54 @@ export type TeardownOutcome =
 const firstRow = <TRow>(rows: readonly TRow[]): TRow | undefined => rows[0]
 
 /**
- * Whether a run has finished.
+ * Hand the run's seat in the agent-credential pool back, unless its state says it still owns it.
  *
- * Read off `terminalOutcomeEnum` rather than from a list restated here: the outcome names double
- * as states so `workflows.state` and `workflows.terminal_outcome` cannot disagree, and deriving
- * this from the same enum the column is typed by means a seventh outcome is understood by teardown
- * the day it is added.
+ * The guard is the requirement, not a precaution. See the module note: pause never gets this far,
+ * and park does — `parked_resumable` is terminal, so everything else in this file treats it as a
+ * finished run, and this one rule is the reason its agent credential survives to be resumed onto
+ * (FR-073, SC-018).
+ *
+ * `terminal` is the recorded reason (FR-019) and `released_by_user_id` stays null, which is what
+ * distinguishes a run finishing from an administrator seizing a seat (FR-057). The audit entry is
+ * written by `releaseLease` inside the same transaction as the release itself (FR-058).
+ *
+ * Calling it twice is safe: teardown is a job, jobs are retried, and the second call matches no live
+ * lease and answers `not_held` rather than freeing a seat some later run has since taken.
  */
-const isTerminal = (state: Workflow['state']): boolean =>
-  (terminalOutcomeEnum.enumValues as readonly string[]).includes(state)
+const handBackAgentCredential = async (options: {
+  readonly db: SisyphusDatabase
+  readonly workflowId: string
+  readonly state: Workflow['state']
+}): Promise<AgentCredentialDisposition> => {
+  if (!releasesAgentCredential(options.state)) {
+    // Named rather than merely left alone, so a parked run's hold on the pool is legible to the
+    // caller — FR-074's "which credentials are held by parked workflows" starts here.
+    const held = firstRow(
+      await options.db
+        .select({ id: credentialLeases.agentCredentialId })
+        .from(credentialLeases)
+        .where(
+          and(
+            eq(credentialLeases.workflowId, options.workflowId),
+            isNull(credentialLeases.releasedAt),
+          ),
+        )
+        .limit(1),
+    )
+
+    return { outcome: 'retained', agentCredentialId: held?.id }
+  }
+
+  const released = await releaseLease({
+    db: options.db,
+    workflowId: options.workflowId,
+    reason: 'terminal',
+  })
+
+  return released.outcome === 'released'
+    ? { outcome: 'released', agentCredentialId: released.agentCredentialId }
+    : { outcome: 'not_held', agentCredentialId: undefined }
+}
 
 /**
  * Everything the record says the run persisted, checked against durable storage.
@@ -326,7 +414,9 @@ export const teardownWorkflow = async (
     )
   }
 
-  if (!isTerminal(workflow.state)) {
+  // Where pause stops. A `paused` run holds its instance and its seat, and neither the compute
+  // release below nor the agent-credential release beyond it is reachable from here (FR-019).
+  if (!isTerminalWorkflowState(workflow.state)) {
     return { outcome: 'not_terminal', workflowId, state: workflow.state }
   }
 
@@ -342,7 +432,14 @@ export const teardownWorkflow = async (
     // Revoked anyway. A lease released by the reconciler took the compute; it is this job that
     // owns the credential, and leaving a live one for a finished run is the leak FR-038 closes.
     const revocation = await revokeScopedCredentials({ db, workflowId, now })
-    return { outcome: 'already_released', workflowId, credentialsRevoked: revocation.revoked }
+    return {
+      outcome: 'already_released',
+      workflowId,
+      credentialsRevoked: revocation.revoked,
+      // And the seat too, for the same reason: whoever took the compute did not take this, and a
+      // finished run holding one is capacity nobody can account for.
+      agentCredential: await handBackAgentCredential({ db, workflowId, state: workflow.state }),
+    }
   }
 
   const { confirmed, missing } = await confirmDurability({
@@ -370,6 +467,9 @@ export const teardownWorkflow = async (
       workflowId,
       terminatedInstanceId: released.terminatedInstanceId,
       credentialsRevoked: released.revoked,
+      // After compute, so a seat only comes free once the run truly has no instance — and before
+      // the drain, so the queue's next pass can grant what this teardown freed.
+      agentCredential: await handBackAgentCredential({ db, workflowId, state: workflow.state }),
       confirmedObjects: confirmed,
       // After the release, never before: the slot the drain is allowed to fill is the one this
       // release just freed.
@@ -405,6 +505,7 @@ export const teardownWorkflow = async (
     workflowId,
     terminatedInstanceId: released.terminatedInstanceId,
     credentialsRevoked: released.revoked,
+    agentCredential: await handBackAgentCredential({ db, workflowId, state: workflow.state }),
     missing,
     deadline,
     queueDrainError: await drainAfterRelease(options.queueDrain),

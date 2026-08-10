@@ -49,6 +49,13 @@ const env = {
   SISYPHUS_SLACK_BOT_TOKEN: 'slack-bot-token-fixture',
   SISYPHUS_PANEL_URL: 'https://panel.example',
   SISYPHUS_CONCURRENCY_CEILING: 9,
+  SISYPHUS_CREDENTIAL_WAIT_LIMIT_MINUTES: 60,
+  // The two hour knobs the FR-056 alerter is bound with. Stated here rather than left to the
+  // schema's defaults, because the point of the assertion below is that the composition root is
+  // the only place either is read.
+  SISYPHUS_KEEPALIVE_IDLE_HOURS: 24,
+  SISYPHUS_LEASE_HOLD_EXPECTATION_HOURS: 12,
+  SISYPHUS_COOLING_OFF_RETRY_MINUTES: 15,
   AWS_REGION: 'eu-west-2',
   SISYPHUS_STAGE: 'test',
 } as ControlPlaneEnv
@@ -66,8 +73,13 @@ describe('createControlPlaneContext', () => {
       'ceiling',
       'compute',
       'connectors',
+      'coolingOffRetryMs',
+      'credentialAlerter',
+      'credentialExerciser',
       'credentialSecret',
+      'credentialWaitLimitMs',
       'db',
+      'keepAliveIdleHours',
       'machineSurfaceUrl',
       'notifier',
       'objectStore',
@@ -83,6 +95,10 @@ describe('createControlPlaneContext', () => {
     const context = createControlPlaneContext({ env })
 
     expect(context.ceiling).toBe(9)
+    // Minutes in the environment, milliseconds at the seam: the drain compares it against a
+    // difference between two timestamps, and converting at each call site is how two jobs come to
+    // disagree about what the number meant (003/FR-028).
+    expect(context.credentialWaitLimitMs).toBe(60 * 60 * 1000)
     expect(context.buckets).toStrictEqual({
       logs: 'sisyphus-test-logs',
       artifacts: 'sisyphus-test-artifacts',
@@ -118,7 +134,15 @@ describe('createControlPlaneContext', () => {
 
     await context.queueDrain.drain()
 
-    expect(drainQueue).toHaveBeenCalledWith({ db, ceiling: 9, starter: context.starter })
+    expect(drainQueue).toHaveBeenCalledWith({
+      db,
+      ceiling: 9,
+      starter: context.starter,
+      // The drain fails a run that has waited past the limit, and announces it (003/FR-028,
+      // FR-136) — so the internal drain takes the same two as the scheduled one.
+      credentialWaitLimitMs: 60 * 60 * 1000,
+      notifier: context.notifier,
+    })
   })
 
   it('gives the drain a starter that provisions, rather than a second seam to wire', () => {
@@ -132,6 +156,41 @@ describe('createControlPlaneContext', () => {
 
     expect(notifier.workflowEvent).toBeTypeOf('function')
     expect(notifier.integrationTick).toBeTypeOf('function')
+  })
+
+  it('binds the FR-056 alerter to both thresholds, so no job reads either (003/FR-056)', async () => {
+    // The alerter is the only thing in the platform that knows what "approaching expiry" and "held
+    // too long" mean, and it knows them because they were bound here from the validated
+    // environment. A job that had to be handed the hours would be a second place either number
+    // could come from.
+    const { credentialAlerter } = createControlPlaneContext({ env })
+
+    expect(credentialAlerter.raise).toBeTypeOf('function')
+
+    // Raised against a pool holding one seat with no login: due whatever the thresholds are, so
+    // this asserts the alerter is real rather than a stub, without asserting a threshold twice.
+    const deliveries = await credentialAlerter.raise({
+      subjects: [
+        {
+          agentCredentialId: 'credential-1',
+          name: 'seat-one',
+          credentialGroupName: 'shared-seats',
+          state: 'awaiting_login',
+          hasLogin: false,
+          lastExercisedAt: null,
+          lastFailureReason: null,
+          holder: null,
+        },
+      ],
+      administrators: [{ userId: 'user-1', displayName: 'An admin', slackUserId: null }],
+    })
+
+    expect(deliveries).toHaveLength(1)
+    expect(deliveries[0].alert.kind).toBe('requires_login')
+    expect(deliveries[0].recipientUserId).toBe('user-1')
+    // Reported rather than thrown or dropped: an administrator nobody can reach is a gap in the
+    // alerting path, and a stub would have had nothing to say about it.
+    expect(deliveries[0].outcome).toBe('unnotifiable')
   })
 
   it('uses a supplied port verbatim, which is how a deployment wires its own redactor', () => {

@@ -1,8 +1,10 @@
+import type { Workflow } from '@bluetel-ai/sisyphus-api/db'
 import {
   artifacts,
   computeLeases,
   logSegments,
   sessionSnapshots,
+  workflows,
 } from '@bluetel-ai/sisyphus-api/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -10,7 +12,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { ComputeProvisioner, FakeObjectStore, ObjectStore } from '../aws'
 import { createFakeComputeProvisioner, createFakeObjectStore } from '../aws'
 import { liveCredentialFor, mintScopedCredential } from '../credentials'
+import { createCredentialPoolFixtures } from '../credentials/allocate/pool-fixtures'
 
+import { admitWorkflow } from './admit-workflow'
+import type { TeardownOutcome } from './teardown-workflow'
 import { teardownWorkflow, TEARDOWN_BUDGET_MS } from './teardown-workflow'
 import { createWorkflowFixtures, readTestDatabaseUrl } from './workflow-fixtures'
 
@@ -407,4 +412,226 @@ describeWithDatabase('tearing a finished run down', () => {
       )
     })
   })
+})
+
+/**
+ * FR-019 — the seat comes back on terminal state, and on nothing else (T047).
+ *
+ * The tests that earn their place are the three negatives, because FR-019 is a prohibition and the
+ * central promise of this feature is that a lease survives a pause, a park and every execution
+ * environment the run ever has. Each is asserted here rather than argued in a comment:
+ *
+ * - **pause** never reaches the release, and the assertion is that teardown answers `not_terminal`
+ *   with the credential still `held` and the instance still running;
+ * - **park** does reach teardown — `parked_resumable` is a terminal outcome, so every other
+ *   terminal check in the job answers true for it — releases the *instance*, and keeps the seat;
+ * - **environment destruction** is the same test read the other way: `terminate` is called in the
+ *   park case and the lease is untouched, which is FR-018 as an observation rather than a claim.
+ *
+ * This scope uses the credential pool fixtures for the graph they can seed, and inserts its own
+ * compute leases and log segments, which is what `reconcile.test.ts` does for the same reason.
+ */
+describeWithDatabase('handing the agent credential back at teardown (FR-019)', () => {
+  const pool = createCredentialPoolFixtures(connectionString ?? '')
+
+  beforeAll(() => pool.open(), 60_000)
+  afterAll(() => pool.close())
+
+  afterEach(async () => {
+    await pool.db().delete(logSegments)
+    await pool.db().delete(computeLeases)
+    await pool.clearLeases()
+  })
+
+  /** A run in the given state, holding one seat, one instance and one persisted log segment. */
+  const runHoldingASeat = async (options: {
+    readonly label: string
+    readonly state: Workflow['state']
+  }): Promise<{
+    readonly workflowId: string
+    readonly agentCredentialId: string
+    readonly objectStore: FakeObjectStore
+  }> => {
+    const credentialGroupId = await pool.seedGroup({ label: `${options.label}-group` })
+    const agentCredentialId = await pool.seedCredential({
+      label: `${options.label}-cred`,
+      credentialGroupId,
+    })
+    const executionProfileId = await pool.seedProfile({
+      label: `${options.label}-profile`,
+      groups: [{ credentialGroupId, position: 1 }],
+    })
+    const workflowId = await pool.seedWorkflow({
+      label: options.label,
+      executionProfileId,
+      state: 'queued',
+    })
+
+    // Through admission, so the lease under test is one the production path produced.
+    await admitWorkflow({ db: pool.db(), workflowId, ceiling: 8 })
+    await pool
+      .db()
+      .update(computeLeases)
+      .set({ providerInstanceId: `i-${options.label}` })
+      .where(eq(computeLeases.workflowId, workflowId))
+    await pool
+      .db()
+      .update(workflows)
+      .set({ state: options.state })
+      .where(eq(workflows.id, workflowId))
+
+    const logKey = `logs/${workflowId}/0001.ndjson`
+    await pool.db().insert(logSegments).values({
+      workflowId,
+      sequence: 1,
+      s3Key: logKey,
+      byteSize: 128,
+      startedAt: new Date(),
+      endedAt: new Date(),
+    })
+
+    const objectStore = createFakeObjectStore()
+    objectStore.put({ bucket: BUCKETS.logs, key: logKey })
+
+    return { workflowId, agentCredentialId, objectStore }
+  }
+
+  const tearDown = async (
+    workflowId: string,
+    objectStore: ObjectStore,
+    compute: ComputeProvisioner,
+  ): Promise<TeardownOutcome> =>
+    teardownWorkflow({ db: pool.db(), compute, objectStore, buckets: BUCKETS, workflowId })
+
+  it('releases the seat as `terminal` when the run finishes, recording it in the trail (FR-058)', async () => {
+    const { workflowId, agentCredentialId, objectStore } = await runHoldingASeat({
+      label: 'terminal-release',
+      state: 'succeeded',
+    })
+
+    const outcome = await tearDown(workflowId, objectStore, createFakeComputeProvisioner())
+
+    expect(outcome).toMatchObject({
+      outcome: 'released',
+      agentCredential: { outcome: 'released', agentCredentialId },
+    })
+
+    const [lease] = await pool.leases()
+    expect(lease).toMatchObject({ releaseReason: 'terminal', releasedByUserId: null })
+    expect(lease.releasedAt).not.toBeNull()
+
+    // Back in the pool, and the release recorded against the credential rather than a person.
+    expect(await pool.credential(agentCredentialId)).toMatchObject({
+      state: 'available',
+      heldBy: null,
+    })
+    expect(await pool.auditFor(agentCredentialId)).toMatchObject([
+      { action: 'leased' },
+      { action: 'released', actorUserId: null, detail: { releaseReason: 'terminal' } },
+    ])
+  }, 30_000)
+
+  it('does not reach the release for a paused run (FR-019)', async () => {
+    const { workflowId, agentCredentialId, objectStore } = await runHoldingASeat({
+      label: 'paused-keeps',
+      state: 'paused',
+    })
+    const compute = createFakeComputeProvisioner()
+
+    const outcome = await tearDown(workflowId, objectStore, compute)
+
+    expect(outcome).toStrictEqual({ outcome: 'not_terminal', workflowId, state: 'paused' })
+
+    // A pause holds its instance *and* its seat. Neither moved.
+    expect(await pool.liveLeases()).toHaveLength(1)
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'held' })
+    expect(compute.terminations).toStrictEqual([])
+  }, 30_000)
+
+  it('keeps the seat of a parked run while releasing its instance (FR-073, SC-018)', async () => {
+    // The case that would be got wrong. `parked_resumable` *is* terminal, so teardown proceeds and
+    // destroys the environment — that is the whole difference between parking and pausing — and the
+    // credential must survive it, because FR-151 resumes the same workflow onto the same identity.
+    const { workflowId, agentCredentialId, objectStore } = await runHoldingASeat({
+      label: 'parked-keeps',
+      state: 'parked_resumable',
+    })
+    const compute = createFakeComputeProvisioner()
+
+    const outcome = await tearDown(workflowId, objectStore, compute)
+
+    expect(outcome).toMatchObject({
+      outcome: 'released',
+      agentCredential: { outcome: 'retained', agentCredentialId },
+    })
+
+    // The environment is gone; the seat is not. FR-018: a lease belongs to the workflow, not to an
+    // execution environment, and destroying one takes nothing with it.
+    expect(compute.terminations).toStrictEqual(['i-parked-keeps'])
+    expect(await pool.liveLeases()).toHaveLength(1)
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'held' })
+    expect(await pool.auditFor(agentCredentialId)).toMatchObject([{ action: 'leased' }])
+  }, 30_000)
+
+  it('releases a parked run that later becomes terminal some other way (FR-073)', async () => {
+    const { workflowId, agentCredentialId, objectStore } = await runHoldingASeat({
+      label: 'parked-then-failed',
+      state: 'parked_resumable',
+    })
+
+    await tearDown(workflowId, objectStore, createFakeComputeProvisioner())
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'held' })
+
+    // "…and MUST release it when it becomes terminal — including when it becomes terminal by its
+    // durable snapshot passing the retention period and ceasing to be resumable."
+    await pool.db().update(workflows).set({ state: 'failed' }).where(eq(workflows.id, workflowId))
+
+    await expect(
+      tearDown(workflowId, objectStore, createFakeComputeProvisioner()),
+    ).resolves.toMatchObject({
+      outcome: 'already_released',
+      agentCredential: { outcome: 'released', agentCredentialId },
+    })
+
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'available' })
+  }, 30_000)
+
+  it('is safe to run twice, freeing no seat the second time', async () => {
+    const { workflowId, agentCredentialId, objectStore } = await runHoldingASeat({
+      label: 'twice',
+      state: 'succeeded',
+    })
+
+    await tearDown(workflowId, objectStore, createFakeComputeProvisioner())
+
+    // Teardown is a job and jobs are retried. A second release would append a second audit entry,
+    // or free a seat some later run had since taken.
+    await expect(
+      tearDown(workflowId, objectStore, createFakeComputeProvisioner()),
+    ).resolves.toMatchObject({
+      outcome: 'already_released',
+      agentCredential: { outcome: 'not_held' },
+    })
+
+    expect(await pool.auditFor(agentCredentialId)).toHaveLength(2)
+  }, 30_000)
+
+  it('does not repair a credential that fell ill while it was held (FR-033, SC-010)', async () => {
+    const { workflowId, agentCredentialId, objectStore } = await runHoldingASeat({
+      label: 'unwell',
+      state: 'succeeded',
+    })
+
+    await pool.execute(
+      `update agent_credentials set state = 'unhealthy' where id = '${agentCredentialId}'`,
+    )
+
+    await expect(
+      tearDown(workflowId, objectStore, createFakeComputeProvisioner()),
+    ).resolves.toMatchObject({ agentCredential: { outcome: 'released', agentCredentialId } })
+
+    // Released, but not returned to the pool: handing a broken login to the next run would fail it
+    // for a reason nothing in its own history explains.
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'unhealthy' })
+  }, 30_000)
 })

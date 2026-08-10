@@ -1,11 +1,18 @@
 /**
  * **The pause idle ceiling (T181, FR-049, FR-050, US2 §4, quickstart Scenario 5.6).**
  *
- * `suspend()`'s pause plan says `computeRelease: 'on-idle-ceiling'`. Until this module existed that
- * value had exactly one consumer — `plan.computeRelease === 'immediate'` — so all it meant was
+ * `suspend()`'s pause plan releases no compute of its own. Until this module existed that meant
  * *don't release the instance*, with nothing anywhere that would ever release it later. A pause was
  * therefore an instance held open until a person came back, or for ever if they did not. This is
  * the "later" the plan was referring to.
+ *
+ * **Since 003/FR-039 this is a backstop rather than the mechanism.** A pause now stops the instance
+ * — from the control plane, which is the only party that can, see `session/suspend.ts` — so in the
+ * ordinary case the instance is off long before this ceiling expires, and a stopped instance's
+ * in-process timer can never fire at all. What is left for this module is the case where that stop
+ * never comes: the pause job failed, or nothing invoked it. The same reason
+ * `apps/sisyphus-control-plane/src/jobs/reconcile.ts` enforces the ceiling a third time from the
+ * outside, and the same reason none of the three is redundant.
  *
  * ## What the requirement actually asks for
  *
@@ -41,6 +48,8 @@
  * it is already registered as current.
  */
 
+import { PAUSE_IDLE_CEILING_MS } from '@bluetel-ai/sisyphus-api/contracts'
+
 /**
  * How long a paused run may sit untouched before its instance is handed back.
  *
@@ -50,8 +59,16 @@
  * conversation onto a fresh instance (FR-053). Much shorter and an ordinary interruption costs a
  * restore cycle; much longer and a forgotten pause bills an idle instance for an afternoon, which
  * is the same silent-cost failure SC-007 exists to prevent.
+ *
+ * **The value is `@bluetel-ai/sisyphus-api/contracts`'s and is re-exported here rather than
+ * restated.** Three members enforce this threshold — this timer, the control plane's backstop sweep
+ * and the panel's countdown — and until the shared home existed each held its own literal. Three
+ * copies of a number deciding when somebody's working tree is destroyed is a drift waiting to
+ * happen: the platform would park at one deadline while the panel counted down to another. The
+ * re-export is what keeps `session/index.ts` and every existing caller unchanged while there is
+ * only one definition.
  */
-export const PAUSE_IDLE_CEILING_MS = 30 * 60 * 1000
+export { PAUSE_IDLE_CEILING_MS }
 
 /** What expiry reports: when the pause started, how long it ran, and what it ran past. */
 export interface PauseIdleExpiry {

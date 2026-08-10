@@ -39,6 +39,12 @@ export type {
   ReportableCorrectionDeliveryOutcome,
 } from './correction-delivery-outcome'
 
+export { CREDENTIAL_RELEASE_REASONS, isCredentialReleaseReason } from './credential-release-reason'
+export type { CredentialReleaseReason } from './credential-release-reason'
+
+export { CREDENTIAL_STATES, isCredentialState } from './credential-state'
+export type { CredentialState } from './credential-state'
+
 export { createEnumGuard } from './enum-guard'
 
 export { ENTRY_RESULTS, isEntryResult } from './entry-result'

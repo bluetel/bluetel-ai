@@ -24,6 +24,7 @@ const completeEnvironment: Readonly<Record<string, string>> = {
   SISYPHUS_EXECUTOR_SECURITY_GROUP_IDS: 'sg-a',
   SISYPHUS_SLACK_BOT_TOKEN: 'slack-bot-token',
   SISYPHUS_PANEL_URL: 'https://sisyphus.example.com',
+  SISYPHUS_AGENT_CREDENTIAL_SECRET_PREFIX: 'sisyphus/staging/agent-credential',
   SISYPHUS_STAGE: 'staging',
 }
 
@@ -57,6 +58,18 @@ describe('env', () => {
     expect(env.SISYPHUS_SNAPSHOTS_BUCKET).toBe('sisyphus-staging-snapshots')
     expect(env.SISYPHUS_EXECUTOR_SUBNET_IDS).toEqual(['subnet-a', 'subnet-b'])
     expect(env.AWS_REGION).toBe('eu-west-2')
+  })
+
+  it('defaults the four credential-pool durations rather than demanding them of every stage', async () => {
+    stubEnvironment()
+
+    const { env } = await importEnv()
+
+    expect(env.SISYPHUS_KEEPALIVE_IDLE_HOURS).toBe(24)
+    expect(env.SISYPHUS_CREDENTIAL_WAIT_LIMIT_MINUTES).toBe(60)
+    expect(env.SISYPHUS_LEASE_HOLD_EXPECTATION_HOURS).toBe(12)
+    expect(env.SISYPHUS_COOLING_OFF_RETRY_MINUTES).toBe(15)
+    expect(env.SISYPHUS_AGENT_CREDENTIAL_SECRET_PREFIX).toBe('sisyphus/staging/agent-credential')
   })
 
   it('exposes the bootstrap admin list as parsed addresses', async () => {

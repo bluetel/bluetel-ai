@@ -13,9 +13,14 @@ import {
  * The mapping table from `contracts/design-tokens.md`, restated here as the assertion rather than
  * imported from the implementation — a test that read the same object it is checking would only be
  * proving that an object equals itself.
+ *
+ * `awaiting_credential` is 003's addition to that table and is stated here for the same reason the
+ * others are: it is the contract, not the code, that decides a waiting run is drawn like `queued`
+ * and not like `needs_attention`.
  */
 const CONTRACT_TONES = {
   queued: 'signal',
+  awaiting_credential: 'signal',
   provisioning: 'amber',
   running: 'amber',
   paused: 'amber',
@@ -63,6 +68,24 @@ describe('WORKFLOW_STATE_PRESENTATION', () => {
     expect(pulsing.sort()).toStrictEqual(['provisioning', 'running'])
   })
 
+  /**
+   * A run waiting for an agent credential is admitted and alive and holds nothing (003/FR-024,
+   * FR-025). Drawing it in the failure or attention colours would say an engineer has to act, when
+   * the wait clears itself the moment a seat frees; so it is pinned to `queued`'s treatment rather
+   * than merely asserted to be `signal`, which would survive `queued` being repainted.
+   */
+  it('draws a run waiting for a credential exactly as it draws a queued one', () => {
+    expect(WORKFLOW_STATE_PRESENTATION.awaiting_credential).toStrictEqual(
+      WORKFLOW_STATE_PRESENTATION.queued,
+    )
+    expect(WORKFLOW_STATE_PRESENTATION.awaiting_credential.tone).not.toBe(
+      WORKFLOW_STATE_PRESENTATION.needs_attention.tone,
+    )
+    expect(WORKFLOW_STATE_PRESENTATION.awaiting_credential.tone).not.toBe(
+      WORKFLOW_STATE_PRESENTATION.failed.tone,
+    )
+  })
+
   it('uses the three state colours only for machine state, never for the idle case', () => {
     expect(IDLE_PRESENTATION.tone).toBe('graphite')
     expect(IDLE_PRESENTATION.pulse).toBe(false)
@@ -91,5 +114,23 @@ describe('readoutForState', () => {
 
   it('reads the absent state as idle', () => {
     expect(readoutForState()).toBe('idle')
+  })
+
+  /**
+   * 003/SC-006: the readout has to name the *cause* of the wait, because that is the only thing
+   * separating this state from `queued`. The assertion is on the words rather than on the string as
+   * a whole — "waiting", on its own, would pass a laxer test and tell an engineer nothing they could
+   * not already see.
+   */
+  it('names the agent credential a waiting run is queued behind, not just that it waits', () => {
+    const readout = readoutForState('awaiting_credential')
+
+    expect(readout).toContain('agent credential')
+    expect(readout).not.toBe('awaiting credential')
+    expect(readout).not.toContain('_')
+  })
+
+  it.each(WORKFLOW_STATES)('gives %s a readout with no enum punctuation left in it', (state) => {
+    expect(readoutForState(state)).not.toContain('_')
   })
 })

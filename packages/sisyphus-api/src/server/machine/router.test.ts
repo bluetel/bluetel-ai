@@ -74,6 +74,10 @@ describe('machineSurfaceRouter', () => {
       'acknowledgeCommand',
       'acknowledgeCorrection',
       'appendLogSegment',
+      // The two credential calls, and the only two shapes on this surface that carry material
+      // (003/FR-012, 003/FR-020, 003/FR-032). Neither has a parameter for naming a seat — see
+      // `./agent-credential.ts` and its suite.
+      'fetchAgentCredential',
       'heartbeat',
       // The two polls. Mutations rather than queries, so nothing on this surface can be served
       // from a cacheable GET — see the note on each procedure.
@@ -83,6 +87,7 @@ describe('machineSurfaceRouter', () => {
       'registerSnapshot',
       'renewCredential',
       'reportBootstrapPhase',
+      'reportCredentialRotation',
       'reportEntryCheckout',
       'reportEntryResult',
       // The durable half of FR-076. Called *before* the action, so its response is what decides

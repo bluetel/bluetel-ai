@@ -1,3 +1,4 @@
+import type * as SisyphusApiServer from '@bluetel-ai/sisyphus-api/server'
 import { describe, expect, it, vi } from 'vitest'
 
 /**
@@ -18,7 +19,14 @@ const createCaller = vi.fn((ctx: unknown) => ({ ctx }))
 const headers = vi.fn(() => Promise.resolve(new Headers({ 'x-test': 'yes' })))
 const getAuthDatabase = vi.fn(() => ({ handle: 'database' }))
 
-vi.mock('@bluetel-ai/sisyphus-api/server', () => ({ createCaller, createTRPCContext }))
+// Partially mocked rather than replaced: the panel's own dependencies now reach for
+// `createRefusingLoginEnvironments` from this module, and a bare factory mock would leave that
+// export undefined — a failure about the mock rather than about the caller.
+vi.mock('@bluetel-ai/sisyphus-api/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof SisyphusApiServer>()),
+  createCaller,
+  createTRPCContext,
+}))
 vi.mock('next/headers', () => ({ headers }))
 vi.mock('@sisyphus-admin/lib/auth', () => ({ auth: vi.fn(), getAuthDatabase }))
 

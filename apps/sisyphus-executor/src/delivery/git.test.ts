@@ -1,7 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+
+import { stripAmbientGitEnvironment } from '../git-fixture-environment'
 
 import type { GitCommand, GitRunner } from './git'
 import {
@@ -13,6 +15,17 @@ import {
 } from './git'
 import type { TestRepository } from './test-repository'
 import { createTestRepository } from './test-repository'
+
+/**
+ * `createProcessGitRunner` is the **production** runner, and it spawns `git` with the environment
+ * it was started in. The fixture below composes a clean one for its own calls, but the reader under
+ * test cannot — so the ambient repository is removed from this process instead, or a run from
+ * inside a git hook would have the reader answering about the hook's repository while the fixture
+ * asserted about a temporary one. See `../git-fixture-environment.ts`.
+ */
+const restoreGitEnvironment = stripAmbientGitEnvironment()
+
+afterAll(restoreGitEnvironment)
 
 let repository: TestRepository | undefined
 

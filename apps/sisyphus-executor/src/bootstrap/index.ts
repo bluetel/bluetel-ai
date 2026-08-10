@@ -35,6 +35,18 @@ export {
 export type { BundleBootstrapOptions, BundleBootstrapResult, SetupBundleReference } from './bundle'
 
 export {
+  AGENT_CREDENTIAL_FILE_NAME,
+  agentCredentialPath,
+  installAgentCredential,
+} from './credential-install'
+export type {
+  AgentCredentialSource,
+  FetchedAgentCredential,
+  InstallAgentCredentialOptions,
+  InstalledAgentCredential,
+} from './credential-install'
+
+export {
   BOOTSTRAP_PHASES,
   BootstrapPhaseError,
   DEFAULT_PHASE_TIMEOUTS,
@@ -55,7 +67,9 @@ export type { CommandResult, RunCommandOptions } from './run-command'
 
 export {
   AGENT_CONFIG_DIR_NAME,
+  AGENT_CREDENTIAL_DIR_NAME,
   agentConfigDir,
+  agentCredentialDir,
   checkoutEntry,
   checkoutWorkspace,
   PINNED_WORKSPACE_ROOT,

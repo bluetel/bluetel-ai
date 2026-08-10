@@ -36,6 +36,13 @@ function.
 | 4   | Pinned workspace is archived                              | `workspace_version` | The workspace name                            |
 | 5   | Pinned workspace version holds no entries                 | `workspace_version` | The workspace name and version                |
 
+> **Extended by `specs/003-agent-credential-pool` (003/FR-065).** Two further conditions now feed the same
+> refusal list, on a sixth element `credential_group`: the profile has no attached credential group at all, or
+> every group attached to it is disabled or archived. They are checked **first and unconditionally** — even
+> for a profile with no published version — because attachments hang off the mutable `execution_profiles` row
+> rather than off a version. Both are still local and still pure; the "no outbound call" property above is
+> unchanged.
+
 **Rules that survive verbatim:**
 
 - **Archived beats disabled.** Conditions 3 and 3' are mutually exclusive for one bundle — an archived bundle
@@ -81,11 +88,17 @@ action.
 | `E_PROFILE_ENABLE_SETUP_BUNDLE`      | Unchanged                          |
 | `E_PROFILE_ENABLE_WORKSPACE_VERSION` | Unchanged                          |
 | `E_PROFILE_ENABLE_WORKSPACE_ENTRY`   | **Removed** — no longer producible |
+| `E_PROFILE_ENABLE_CREDENTIAL_GROUP`  | **Added** by 003/FR-065            |
 | `E_PROFILE_ENABLE_UNCLASSIFIED`      | Retained — the graceful fallback   |
 | `E_PROFILE_ENABLE_REFUSED`           | Unchanged whole-request refusal    |
 
 The classifier remains a _narrowing_: a line matching no known phrasing becomes `unclassified` and still
 carries its own text, a code and an action. No refusal line is ever dropped.
+
+`E_PROFILE_ENABLE_CREDENTIAL_GROUP` is classified **before** `E_PROFILE_ENABLE_SETUP_BUNDLE`, because
+003/FR-065's "every attached group is unavailable" sentence would otherwise fall through to the catch-all.
+Its next action names the credential-groups screen rather than the profile editor: attachments are not part of
+a version, so publishing a new one does not clear the refusal.
 
 ## What the platform no longer claims
 

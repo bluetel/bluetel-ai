@@ -26,12 +26,37 @@ export interface KnownSecret {
   readonly value: string
 }
 
+/**
+ * Where an index gets its values from: a fixed list, or something that can be
+ * asked again (003/T054, 003/FR-014).
+ *
+ * The fixed list was the whole story while every known value was installed by
+ * the setup bundle before the first byte of output existed. The agent's own
+ * credential is not like that: it is installed in bootstrap phase
+ * `credential_install`, and it is **rotated by the agent mid-run**, at a moment
+ * nobody chose, long after every sanitiser in the process was constructed. A
+ * redactor whose values were frozen at construction would therefore know the
+ * material the run started with and not the material it is actually using — and
+ * the one it does not know is the one a rotation could echo into a log.
+ *
+ * So the source may be a function. It is re-read on every use and the index is
+ * rebuilt only when the array it answers with is a different array, which is why
+ * {@link createSecretRegistry} hands back a stable reference until something is
+ * added: expanding a value into every encoding is not free, and doing it per
+ * chunk would make redaction the most expensive thing in the output path.
+ */
+export type SecretSource = readonly KnownSecret[] | (() => readonly KnownSecret[])
+
 export interface SecretIndex {
   readonly redact: (text: string) => string
   /**
    * Length of the longest form the index can match. A streaming caller must
    * hold back this much minus one character, or a secret split across a chunk
    * boundary is emitted in two halves that individually match nothing.
+   *
+   * A getter rather than a value, because a source that gains a secret gains a
+   * longer form with it. A caller that read this once and cached it would hold
+   * back too little for the value added after it read.
    */
   readonly longestMatchLength: number
   readonly isEmpty: boolean
@@ -47,14 +72,8 @@ interface IndexedForm {
   readonly placeholder: string
 }
 
-/**
- * Build a redactor over the credentials the bundle installed.
- *
- * Forms are applied longest-first so a value that is a prefix of another does
- * not shadow it, and so a base64 fragment is not partially consumed by a
- * shorter overlapping form.
- */
-export const buildSecretIndex = (secrets: readonly KnownSecret[]): SecretIndex => {
+/** The expanded forms of one snapshot of a source, longest first. */
+const expand = (secrets: readonly KnownSecret[]): readonly IndexedForm[] => {
   const forms: IndexedForm[] = []
 
   for (const secret of secrets) {
@@ -71,13 +90,42 @@ export const buildSecretIndex = (secrets: readonly KnownSecret[]): SecretIndex =
 
   forms.sort((left, right) => right.form.length - left.form.length)
 
-  const longestMatchLength = forms.length === 0 ? 0 : forms[0].form.length
+  return forms
+}
+
+/**
+ * Build a redactor over the values this run knows about.
+ *
+ * Forms are applied longest-first so a value that is a prefix of another does
+ * not shadow it, and so a base64 fragment is not partially consumed by a
+ * shorter overlapping form.
+ *
+ * A `SecretSource` that is an array behaves exactly as it always did: the array
+ * reference never changes, so the expansion happens once, on the first use. A
+ * source that is a function is re-read on every use and re-expanded only when it
+ * answers with a different array — see {@link SecretSource} for why anything is
+ * allowed to change after construction at all.
+ */
+export const buildSecretIndex = (source: SecretSource): SecretIndex => {
+  let expandedFrom: readonly KnownSecret[] | undefined
+  let forms: readonly IndexedForm[] = []
+
+  const current = (): readonly IndexedForm[] => {
+    const secrets = typeof source === 'function' ? source() : source
+
+    if (secrets !== expandedFrom) {
+      expandedFrom = secrets
+      forms = expand(secrets)
+    }
+
+    return forms
+  }
 
   return {
     redact: (text: string): string => {
       let output = text
 
-      for (const { form, placeholder } of forms) {
+      for (const { form, placeholder } of current()) {
         if (output.includes(form)) {
           output = output.split(form).join(placeholder)
         }
@@ -85,7 +133,13 @@ export const buildSecretIndex = (secrets: readonly KnownSecret[]): SecretIndex =
 
       return output
     },
-    longestMatchLength,
-    isEmpty: forms.length === 0,
+    get longestMatchLength() {
+      const indexed = current()
+
+      return indexed.length === 0 ? 0 : (indexed[0]?.form.length ?? 0)
+    },
+    get isEmpty() {
+      return current().length === 0
+    },
   }
 }

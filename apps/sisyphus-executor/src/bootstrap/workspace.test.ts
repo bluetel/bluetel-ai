@@ -2,7 +2,9 @@ import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
+
+import { GIT_FIXTURE_ENVIRONMENT, stripAmbientGitEnvironment } from '../git-fixture-environment'
 
 import { BootstrapPhaseError, nullPhaseReporter } from './phases'
 import type { BootstrapPhaseFinished, BootstrapPhaseReporter } from './phases'
@@ -36,14 +38,16 @@ afterEach(async () => {
   )
 })
 
-const GIT_ENV = {
-  GIT_AUTHOR_NAME: 'Sisyphus Test',
-  GIT_AUTHOR_EMAIL: 'test@example.invalid',
-  GIT_COMMITTER_NAME: 'Sisyphus Test',
-  GIT_COMMITTER_EMAIL: 'test@example.invalid',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
-}
+/**
+ * Every fixture below shells out to real `git`, so the ambient repository has to go first — see
+ * `../git-fixture-environment.ts` for what a git hook exports into this process and why an
+ * inherited `GIT_DIR` makes `git init` operate on the caller's own repository.
+ */
+const restoreGitEnvironment = stripAmbientGitEnvironment()
+
+afterAll(restoreGitEnvironment)
+
+const GIT_ENV = GIT_FIXTURE_ENVIRONMENT
 
 /**
  * A throwaway origin repository on the local filesystem.

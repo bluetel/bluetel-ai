@@ -43,6 +43,13 @@ export const ENABLE_FAILURE_ELEMENTS = [
   'profile_version',
   'setup_bundle',
   'workspace_version',
+  /**
+   * The profile's attached credential groups (003/FR-065). Its own element rather than folded into
+   * `profile_version`, because attachments hang off the **mutable profile row** rather than off a
+   * version — so this is the one failure in the list that is fixed on a different screen from the
+   * editor, and publishing a new version does not touch it. The action therefore names that screen.
+   */
+  'credential_group',
   'unclassified',
 ] as const
 
@@ -65,6 +72,8 @@ const ACTIONS: Readonly<Record<EnableFailureElement, string>> = {
     'Enable the setup bundle this profile pins, or publish a profile version that pins one that is enabled.',
   workspace_version:
     'Publish a workspace version that contains at least one repository, then point this profile at it.',
+  credential_group:
+    'Open this profile’s credential groups screen and attach a group, or re-enable one already attached. Publishing a new version will not clear this — attachments are not part of a version.',
   unclassified: 'Fix what the line names, then enable again.',
 }
 
@@ -74,6 +83,9 @@ export const enableFailureCode = (element: EnableFailureElement): string =>
 
 /** Which element one line is about, read from the phrasing the gate uses. */
 export const classifyEnableFailure = (line: string): EnableFailureElement => {
+  // Checked first: 003/FR-065's two sentences are the only ones that name a credential group, and
+  // the one about an unavailable group would otherwise fall through to the catch-all.
+  if (line.includes('credential group')) return 'credential_group'
   if (line.includes('setup bundle')) return 'setup_bundle'
   if (line.includes('no published version') || line.includes('could not be read')) {
     return 'profile_version'

@@ -278,3 +278,25 @@ export type {
   BranchLockTransaction,
   BranchLockWriter,
 } from './branch-lock'
+
+/**
+ * The workflow row lock, published (T094, FR-049, FR-081, 003/FR-057).
+ *
+ * Every read-decide-write over `workflows.state` inside this directory already went through
+ * {@link runWorkflowTransition}; the administrative surface now has one too, because 003/FR-057
+ * resolves a force-released run to a recorded state and that is the same read-decide-write with a
+ * different trigger. Exporting the primitive is what stops `admin/credential-leases.ts` growing a
+ * second locking convention — the failure mode being a force-release and a concurrent `stop` both
+ * reading `running` and writing two outcomes for one run, which FR-064 forbids.
+ *
+ * Only the lock and the terminal predicate cross the barrel. The supervision vocabulary around them
+ * — the already-finished response, the sequence allocators — stays behind it, because it is about
+ * commands an executor collects and there are none of those here.
+ */
+export {
+  isTerminalState,
+  lockWorkflowForTransition,
+  runWorkflowTransition,
+  workflowGoneError,
+} from './transition'
+export type { LockedWorkflowState, TransitionWriter } from './transition'

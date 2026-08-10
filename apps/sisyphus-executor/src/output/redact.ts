@@ -23,12 +23,17 @@
 
 import { createKeyBlockFilter, stripPrivateKeyBlocks } from './key-blocks'
 import { redactPatterns } from './secret-patterns'
-import type { KnownSecret } from './secret-values'
+import type { SecretSource } from './secret-values'
 import { buildSecretIndex } from './secret-values'
 
 export interface RedactorOptions {
-  /** Every credential the bundle installed (FR-072). */
-  readonly secrets?: readonly KnownSecret[]
+  /**
+   * Every value this run knows: the credentials the bundle installed (FR-072),
+   * and — when the caller passes a re-readable source — the agent's own
+   * credential as it stands after any mid-run rotation (003/FR-014). See
+   * {@link SecretSource}.
+   */
+  readonly secrets?: SecretSource
 }
 
 export interface Redactor {
@@ -60,40 +65,69 @@ export const createRedactor = (options: RedactorOptions = {}): Redactor => {
 export const createStreamingRedactor = (options: RedactorOptions = {}): StreamingRedactor => {
   const index = buildSecretIndex(options.secrets ?? [])
   const keyBlocks = createKeyBlockFilter()
-  const holdBack = Math.max(index.longestMatchLength - 1, 0)
   let pending = ''
 
   /**
    * How much of `pending` must stay held. Whole lines are preferred because
    * most patterns are line-scoped, but the known-value window is the part that
    * is load-bearing: it is what makes a boundary-split secret impossible.
+   *
+   * The window is read from the index on every call rather than cached at
+   * construction. A run that learns a longer value part-way through — a rotated
+   * agent credential (003/FR-014) — needs the hold-back to grow with it, and a
+   * value cached here would hold back the window of the values known before the
+   * one that matters arrived.
    */
   const heldLength = (): number => {
+    const holdBack = Math.max(index.longestMatchLength - 1, 0)
     const afterLastLine = pending.length - (pending.lastIndexOf('\n') + 1)
     const lineHold = Math.min(afterLastLine, MAX_LINE_HOLD)
 
     return Math.min(Math.max(lineHold, holdBack), pending.length)
   }
 
-  const release = (upTo: number): string => {
+  /**
+   * Remove known values from the **whole** buffer, then release what is settled.
+   *
+   * The order matters and it is the one thing here that is not obvious. Redacting
+   * only the slice about to be released would leave the release boundary free to
+   * fall *inside* a value that is wholly present in the buffer: the head would go
+   * out unredacted and the tail would be held, and neither half would ever match
+   * anything again. The hold-back does not prevent that on its own — it bounds
+   * how much is kept, not where the cut lands — and the case is reachable as soon
+   * as the buffer grows past the hold-back window, which is every busy run.
+   *
+   * Redacting first makes the question moot: every complete occurrence in the
+   * buffer is already a placeholder, so the only thing a cut can now split is a
+   * value the rest of the stream has not finished delivering — and the hold-back
+   * is exactly the window that keeps such a head in the buffer until it has.
+   *
+   * Re-redacting the held tail on the next push costs a scan of at most the
+   * hold-back window and is idempotent: a placeholder contains no value's
+   * encoding, so nothing matches twice.
+   */
+  const release = (settle: boolean): string => {
+    pending = index.redact(pending)
+
+    const upTo = settle ? pending.length : pending.length - heldLength()
     const releasable = pending.slice(0, upTo)
 
     pending = pending.slice(upTo)
 
-    return redactPatterns(index.redact(releasable))
+    return redactPatterns(releasable)
   }
 
   return {
     push: (chunk: string): string => {
       pending += keyBlocks.push(chunk)
 
-      return release(pending.length - heldLength())
+      return release(false)
     },
 
     flush: (): string => {
       pending += keyBlocks.flush()
 
-      return release(pending.length)
+      return release(true)
     },
   }
 }

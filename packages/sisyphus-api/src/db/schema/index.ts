@@ -8,6 +8,7 @@
 
 export * from './bundle'
 export * from './columns'
+export * from './credential'
 export * from './enums'
 export * from './identity'
 export * from './introspect'

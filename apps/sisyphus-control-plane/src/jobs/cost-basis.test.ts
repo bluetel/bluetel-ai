@@ -1,4 +1,4 @@
-import { computeLeases, workflows } from '@bluetel-ai/sisyphus-api/db'
+import { computeLeases, workflowEvents, workflows } from '@bluetel-ai/sisyphus-api/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
@@ -7,6 +7,8 @@ import {
   computeCost,
   COST_BASIS_JOB_NAME,
   createRateCard,
+  pausedMsWithin,
+  pauseWindowsFrom,
   rateCardKey,
   recordCostBasis,
   runRecordCostBasis,
@@ -41,7 +43,18 @@ const RATES = {
   'fixture.small:on_demand': '0.2000',
 } as const
 
-const rateCard = createRateCard(RATES)
+/**
+ * Storage priced at a twentieth of compute, and deliberately not a round fraction of it.
+ *
+ * FR-042's whole point is that the two are different numbers, so a test in which they happened to
+ * coincide would pass against an implementation that charged compute for the paused hours.
+ */
+const STORAGE_RATES = {
+  'fixture.small:spot': '0.0025',
+  'fixture.small:on_demand': '0.0100',
+} as const
+
+const rateCard = createRateCard(RATES, STORAGE_RATES)
 
 const at = (isoDate: string): Date => new Date(isoDate)
 
@@ -119,6 +132,101 @@ describe('pricing a lifetime', () => {
   })
 })
 
+/**
+ * **The pause windows, from a timeline that is not guaranteed to be tidy (003/FR-042).**
+ *
+ * There is no `paused_ms` column and there should not be one: the timeline already records every
+ * `paused` and `resumed` row. What the timeline does not promise is that they alternate — a pause
+ * observed twice, or a resume of something this process did not see the start of, are both things
+ * that happen — so the pairing has to be total over any sequence, and neither case may open a
+ * window that swallows hours the run spent working.
+ */
+describe('pairing pauses with resumes', () => {
+  const at2 = (hour: number): Date => at(`2026-08-05T${String(hour).padStart(2, '0')}:00:00.000Z`)
+
+  it('pairs each pause with the resume that follows it', () => {
+    expect(
+      pauseWindowsFrom([
+        { event: 'paused', at: at2(9) },
+        { event: 'resumed', at: at2(10) },
+        { event: 'paused', at: at2(12) },
+        { event: 'resumed', at: at2(13) },
+      ]),
+    ).toStrictEqual([
+      { from: at2(9), to: at2(10) },
+      { from: at2(12), to: at2(13) },
+    ])
+  })
+
+  it('leaves the last window open when the run is still paused', () => {
+    expect(pauseWindowsFrom([{ event: 'paused', at: at2(9) }])).toStrictEqual([
+      { from: at2(9), to: undefined },
+    ])
+  })
+
+  it('treats a repeated pause as one pause, not two overlapping ones', () => {
+    // Overlapping windows would double-count the same hours and could subtract more than the
+    // lease's whole lifetime.
+    expect(
+      pauseWindowsFrom([
+        { event: 'paused', at: at2(9) },
+        { event: 'paused', at: at2(10) },
+        { event: 'resumed', at: at2(11) },
+      ]),
+    ).toStrictEqual([{ from: at2(9), to: at2(11) }])
+  })
+
+  it('ignores a resume with no pause open before it', () => {
+    expect(pauseWindowsFrom([{ event: 'resumed', at: at2(9) }])).toStrictEqual([])
+  })
+})
+
+describe('how much of a billable window was paused', () => {
+  const window = {
+    from: at('2026-08-05T09:00:00.000Z'),
+    to: at('2026-08-05T13:00:00.000Z'),
+  }
+
+  it('counts a window that sits inside the lease', () => {
+    expect(
+      pausedMsWithin(window, [
+        { from: at('2026-08-05T10:00:00.000Z'), to: at('2026-08-05T11:00:00.000Z') },
+      ]),
+    ).toBe(HOUR_MS)
+  })
+
+  it('clamps a window that overruns the lease at both ends', () => {
+    expect(
+      pausedMsWithin(window, [
+        { from: at('2026-08-05T08:00:00.000Z'), to: at('2026-08-05T14:00:00.000Z') },
+      ]),
+    ).toBe(4 * HOUR_MS)
+  })
+
+  it('counts an open window up to the end of the lease and no further', () => {
+    expect(pausedMsWithin(window, [{ from: at('2026-08-05T12:00:00.000Z'), to: undefined }])).toBe(
+      HOUR_MS,
+    )
+  })
+
+  it('counts nothing for a window entirely outside the lease — the spot shape', () => {
+    expect(
+      pausedMsWithin(window, [
+        { from: at('2026-08-05T14:00:00.000Z'), to: at('2026-08-05T15:00:00.000Z') },
+      ]),
+    ).toBe(0)
+  })
+
+  it('adds up several pauses of one run', () => {
+    expect(
+      pausedMsWithin(window, [
+        { from: at('2026-08-05T09:30:00.000Z'), to: at('2026-08-05T10:00:00.000Z') },
+        { from: at('2026-08-05T11:00:00.000Z'), to: at('2026-08-05T12:00:00.000Z') },
+      ]),
+    ).toBe(HOUR_MS * 1.5)
+  })
+})
+
 describe('summarising one lease', () => {
   const lease = {
     instanceType: 'fixture.small',
@@ -135,10 +243,79 @@ describe('summarising one lease', () => {
       instanceType: 'fixture.small',
       purchaseMode: 'spot',
       billableMs: 2 * HOUR_MS,
+      // A run that was never paused: the lifetime is all compute, and the storage figure is the
+      // zero it genuinely is rather than an absence.
+      pausedMs: 0,
+      computeMs: 2 * HOUR_MS,
       hourlyRate: '0.0500',
       cost: '0.1000',
+      storageHourlyRate: '0.0025',
+      pausedStorageCost: '0.0000',
       settled: true,
     })
+  })
+
+  /**
+   * **SC-008 as a figure: a paused workflow's compute cost is zero for the duration of the pause.**
+   *
+   * The lease is held for four hours and the instance is stopped for two of them, so the assertion
+   * that carries the requirement is that the cost is the two-hour figure and not the four-hour one.
+   * `billableMs` deliberately still reports four: "we billed you for two of the four hours you held
+   * this lease" is a statement somebody can check, and "we billed you for two hours" is not.
+   */
+  it('bills compute for the hours the instance was running and storage for the rest (FR-042)', () => {
+    const basis = summariseComputeCost({
+      lease: {
+        ...lease,
+        purchaseMode: 'on_demand',
+        releasedAt: at('2026-08-05T13:00:00.000Z'),
+      },
+      rateCard,
+      now: at('2026-08-05T14:00:00.000Z'),
+      pauseWindows: [{ from: at('2026-08-05T10:00:00.000Z'), to: at('2026-08-05T12:00:00.000Z') }],
+    })
+
+    expect(basis).toMatchObject({
+      billableMs: 4 * HOUR_MS,
+      pausedMs: 2 * HOUR_MS,
+      computeMs: 2 * HOUR_MS,
+      // Two hours of on-demand at 0.20, not four. Four would be 0.8000 — the exact number FR-039
+      // was implemented to stop producing.
+      cost: '0.4000',
+      // And what the pause did cost: two hours of retained disk.
+      pausedStorageCost: '0.0200',
+    })
+  })
+
+  it('declines to price the paused hours rather than calling them free', () => {
+    const basis = summariseComputeCost({
+      lease,
+      rateCard: createRateCard(RATES),
+      now: at('2026-08-05T12:00:00.000Z'),
+      pauseWindows: [{ from: at('2026-08-05T09:30:00.000Z'), to: at('2026-08-05T10:00:00.000Z') }],
+    })
+
+    // The hours are still reported; only the price is missing, and a zero here would present a
+    // configuration gap as the fact that pausing costs nothing.
+    expect(basis).toMatchObject({
+      pausedMs: HOUR_MS / 2,
+      storageHourlyRate: undefined,
+      pausedStorageCost: undefined,
+    })
+  })
+
+  it('subtracts nothing for a pause that began after the lease was released', () => {
+    // The `spot` shape: the pause terminated the instance and released the lease in the same
+    // breath, so the pause window lies outside the billable lifetime entirely. Nothing here
+    // special-cases the purchase mode — the clamping does it.
+    const basis = summariseComputeCost({
+      lease,
+      rateCard,
+      now: at('2026-08-05T14:00:00.000Z'),
+      pauseWindows: [{ from: at('2026-08-05T11:00:00.000Z'), to: undefined }],
+    })
+
+    expect(basis).toMatchObject({ billableMs: 2 * HOUR_MS, pausedMs: 0, cost: '0.1000' })
   })
 
   it('marks a live lease unsettled, so a running figure is not mistaken for a final one', () => {
@@ -297,6 +474,111 @@ describe.skipIf(connectionString === undefined)('recording the basis on the work
     expect(outcome).toMatchObject({ outcome: 'unpriced', instanceType: 'fixture.enormous' })
     // A zero here would present a configuration gap as the fact that the run was free.
     await expect(basisOf(workflowId)).resolves.toBe(null)
+  })
+
+  /**
+   * **FR-042 and SC-008, end to end and off the timeline.**
+   *
+   * Nothing is passed in: the pause windows are read from the `paused` and `resumed` rows the
+   * platform already writes, which is what makes this work for a run paused and resumed several
+   * times without anybody maintaining a counter.
+   */
+  describe('a paused run costs storage and not compute (FR-042, SC-008)', () => {
+    /** Write the timeline rows a pause and a resume leave, at chosen instants. */
+    const recordPause = async (
+      workflowId: string,
+      windows: readonly { readonly from: string; readonly to?: string }[],
+    ): Promise<void> => {
+      for (const window of windows) {
+        await fixtures
+          .db()
+          .insert(workflowEvents)
+          .values({
+            workflowId,
+            event: 'paused',
+            actorType: 'executor',
+            createdAt: at(window.from),
+            detail: { pausePath: 'stopped' },
+          })
+
+        if (window.to !== undefined) {
+          await fixtures
+            .db()
+            .insert(workflowEvents)
+            .values({
+              workflowId,
+              event: 'resumed',
+              actorType: 'control_plane',
+              createdAt: at(window.to),
+            })
+        }
+      }
+    }
+
+    it('writes the compute figure with the paused hours taken out', async () => {
+      const workflowId = await seedLeasedWorkflow({
+        label: 'paused-od',
+        hours: 4,
+        purchaseMode: 'on_demand',
+      })
+      await recordPause(workflowId, [
+        { from: '2026-08-05T10:00:00.000Z', to: '2026-08-05T12:00:00.000Z' },
+      ])
+
+      const outcome = await recordCostBasis({ db: fixtures.db(), rateCard, workflowId })
+
+      expect(outcome).toMatchObject({
+        outcome: 'recorded',
+        basis: { billableMs: 4 * HOUR_MS, pausedMs: 2 * HOUR_MS, pausedStorageCost: '0.0200' },
+      })
+      // Two hours of on-demand at 0.20. Held for four; billed for two.
+      await expect(basisOf(workflowId)).resolves.toBe('0.4000')
+    })
+
+    it('takes out every pause, for a run paused more than once', async () => {
+      const workflowId = await seedLeasedWorkflow({
+        label: 'paused-twice',
+        hours: 4,
+        purchaseMode: 'on_demand',
+      })
+      await recordPause(workflowId, [
+        { from: '2026-08-05T09:30:00.000Z', to: '2026-08-05T10:00:00.000Z' },
+        { from: '2026-08-05T11:00:00.000Z', to: '2026-08-05T12:00:00.000Z' },
+      ])
+
+      await recordCostBasis({ db: fixtures.db(), rateCard, workflowId })
+
+      // Two and a half of the four hours ran: 2.5 × 0.20.
+      await expect(basisOf(workflowId)).resolves.toBe('0.5000')
+    })
+
+    it('bills a spot run for its whole lease, because its pause released it', async () => {
+      // The pause terminated the instance and released the lease at the same instant, so there are
+      // no stopped hours inside the lease to subtract. No branch here says so — the clamping does.
+      const workflowId = await seedLeasedWorkflow({ label: 'paused-spot', hours: 2 })
+      await recordPause(workflowId, [{ from: '2026-08-05T11:00:00.000Z' }])
+
+      await recordCostBasis({ db: fixtures.db(), rateCard, workflowId })
+
+      await expect(basisOf(workflowId)).resolves.toBe('0.1000')
+    })
+
+    it('bills nothing at all for a run that has been paused since it became usable', async () => {
+      const workflowId = await seedLeasedWorkflow({
+        label: 'paused-throughout',
+        hours: 2,
+        purchaseMode: 'on_demand',
+      })
+      await recordPause(workflowId, [{ from: '2026-08-05T09:00:00.000Z' }])
+
+      const outcome = await recordCostBasis({ db: fixtures.db(), rateCard, workflowId })
+
+      // SC-008 at its limit: compute cost is zero for the duration of the pause, and here the
+      // pause is the whole duration. The storage the run went on paying for is reported beside it,
+      // which is the half of FR-042 that says the cost must be *visible*.
+      expect(outcome).toMatchObject({ basis: { computeMs: 0, pausedStorageCost: '0.0200' } })
+      await expect(basisOf(workflowId)).resolves.toBe('0.0000')
+    })
   })
 
   it('fails loudly for a workflow that does not exist', async () => {
