@@ -93,25 +93,25 @@ describe('the FR-124 refusal', () => {
       error: { code: 'E_PROFILE_ENABLE_SETUP_BUNDLE', action: 'Enable the setup bundle.' },
     },
     {
-      element: 'workspace_entry' as const,
-      detail: 'workspace entry 2 (github.com/acme/api on main) is unreachable',
-      error: { code: 'E_PROFILE_ENABLE_WORKSPACE_ENTRY', action: 'Fix the repository.' },
+      element: 'setup_bundle' as const,
+      detail: 'the setup bundle Fraud checks (version 2) is disabled',
+      error: { code: 'E_PROFILE_ENABLE_SETUP_BUNDLE', action: 'Enable the setup bundle.' },
     },
   ]
 
   it('renders one field error per failing element rather than flattening the list', () => {
     const markup = render({ enableFailures: failures })
 
-    expect(markup).toContain('E_PROFILE_ENABLE_SETUP_BUNDLE')
-    expect(markup).toContain('E_PROFILE_ENABLE_WORKSPACE_ENTRY')
+    expect(markup).toContain('Payments toolchain')
+    expect(markup).toContain('Fraud checks')
   })
 
   it('keeps the gate’s own sentence, so the failing element stays named', () => {
-    expect(render({ enableFailures: failures })).toContain('workspace entry 2')
+    expect(render({ enableFailures: failures })).toContain('Fraud checks (version 2)')
   })
 
   it('carries a next action beside each one, never a bare restatement', () => {
-    expect(render({ enableFailures: failures })).toContain('Fix the repository.')
+    expect(render({ enableFailures: failures })).toContain('Enable the setup bundle.')
   })
 
   it('renders nothing extra when the gate passed', () => {

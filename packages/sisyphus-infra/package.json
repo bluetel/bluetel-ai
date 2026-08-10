@@ -7,7 +7,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./scripts": "./src/scripts/index.ts"
+    "./scripts": "./src/scripts/index.ts",
+    "./lib": "./src/lib.ts",
+    "./sst-app": "./src/sst-app.ts"
   },
   "scripts": {
     "postinstall": "sst install --config sst-install.config.ts --stage install"

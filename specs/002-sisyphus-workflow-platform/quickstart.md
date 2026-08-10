@@ -31,6 +31,35 @@ pnpm nx run sisyphus-admin:bootstrap --configuration=staging   # once per accoun
 SISYPHUS_DATABASE_URL='postgres://…' pnpm nx run sisyphus-api:migrate
 ```
 
+**The panel's domain.** The two deploy stages are served from the `bluetel.co.uk` hosted zone this account already
+holds:
+
+| Stage        | Origin                                   |
+| ------------ | ---------------------------------------- |
+| `production` | `https://sisyphus.bluetel.co.uk`         |
+| `staging`    | `https://staging.sisyphus.bluetel.co.uk` |
+
+No DNS setup is needed — `createPanelDomain` resolves the zone and creates the panel's alias and ACM's validation
+records on deploy. The one manual step is **Google OAuth**: add each origin's `/api/auth/callback/google` to the
+client's authorised redirect URIs, or sign-in fails on the new domain while the site itself serves fine.
+
+That zone also carries the company's main site and others, which is why the records are created under three
+constraints rather than by handing the deployment tool a domain and trusting it:
+
+- **The zone id is pinned.** Given none, the tool's Route 53 adapter searches upwards from the domain for a zone
+  containing it. It lands here anyway; pinning makes the target a decision rather than a search result.
+- **Only names under `sisyphus.bluetel.co.uk`.** `assertPanelDnsZone` refuses anything else before a record is
+  declared. Without it a stage domain typed as `www.bluetel.co.uk` is a valid record in a valid zone, aimed at the
+  front page.
+- **Create, never replace.** `override` is off, so a name that already exists fails the deploy instead of being
+  taken over. The zone is looked up and never declared as a resource, so no stack holds it in state and no
+  teardown can remove it or a record this repository did not create.
+
+A deploy stage's origin is **derived from the stage**, not read from the stage configuration: `getPanelUrl` sets
+both `NEXT_PUBLIC_SITE_URL` and `SISYPHUS_PANEL_URL`, so the certificate, the DNS record, the Auth.js callback
+origin and the Slack link target cannot disagree. Whatever those two keys hold in `/sisyphus/<stage>/admin/env`
+is ignored on `staging` and `production`. A personal stage has no domain and still reads both from the parameter.
+
 **The first admin.** Set `SISYPHUS_BOOTSTRAP_ADMIN_EMAILS` to your own address before the first deploy. Without
 it there is no admin, and since every route to `admin` requires an existing admin, no configuration can be
 performed at all — scenario 1 cannot start (FR-174). Verify a `role_changes` row exists with a `system` actor.
@@ -318,10 +347,11 @@ SC-027). Time the interaction: under 30 seconds (SC-027).
 
 **Check:** refused with the reason shown — not silently ignored (FR-123).
 
-5. Attempt to enable a profile whose bundle is disabled, then one whose repository is unreachable.
+5. Attempt to enable a profile whose bundle is disabled, then one whose workspace version holds no repositories.
 
-**Check:** both refused **naming the failing element** (FR-124, SC-029). This is the gate that prevents a run
-launching with a bundle that does not match its repositories.
+**Check:** both refused **naming the failing element** (FR-124, SC-029). Then enable a profile naming a
+repository that does not exist: it **succeeds**. Reachability is not checked at enable time
+(`specs/004-remove-reachability-gate`); a bad repository fails at `entry_checkout` instead, naming the entry.
 
 6. As a non-admin, attempt an ad hoc launch.
 

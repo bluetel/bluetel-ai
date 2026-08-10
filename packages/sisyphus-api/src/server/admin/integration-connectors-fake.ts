@@ -17,9 +17,9 @@ import type {
 /**
  * Recording fakes for the two outbound seams, so no test in this package makes a network call.
  *
- * Shipped beside the ports for the same reason `reachability-fake.ts` is: every suite that needs
- * one takes this rather than inventing a stub apiece, and the record — which configs were asked
- * for, whether the credential ARN ever reached the connector — is most of what is worth asserting.
+ * Shipped beside the ports rather than left to each suite: every test that needs one takes this
+ * instead of inventing a stub apiece, and the record — which configs were asked for, whether the
+ * credential ARN ever reached the connector — is most of what is worth asserting.
  */
 
 export interface FakeConnectorOptions {

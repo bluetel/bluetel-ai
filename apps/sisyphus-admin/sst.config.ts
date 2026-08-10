@@ -8,9 +8,10 @@
  * exactly one owner, or two stacks fight over it — and three configs each
  * declaring their own artifacts bucket are three chances to disagree about
  * retention, a disagreement that surfaces as evidence vanishing early. The panel
- * creates the four buckets and the database. The control plane and the executor
- * derive the same names from the same helpers in `sisyphus-infra`, and neither
- * declares a bucket of its own.
+ * creates the four buckets, the database, and the one VPC every deployable's
+ * compute lives in. The control plane and the executor derive the same names
+ * from the same helpers in `sisyphus-infra`, and neither declares a bucket, a
+ * subnet or a security group of its own — they read what this stack publishes.
  *
  * Everything structural comes from `sisyphus-infra`, and it comes as a function
  * call: nothing sits between the import and the resource (FR-066).
@@ -93,11 +94,19 @@ export default $config({
 
   run: async () => {
     const {
+      buildPanelBundlesPolicy,
       createBuckets,
       createDatabase,
       createNextjsWebsite,
+      createPanelDomain,
+      createSisyphusVpc,
+      getAppSecurityGroupIdParameterName,
+      getAppSubnetIdsParameterName,
       getBucketNames,
       getEnvSecret,
+      getExecutorSecurityGroupIdsParameterName,
+      getExecutorSubnetIdsParameterName,
+      getPanelUrl,
       getStackScope,
       readEnvRecord,
       // The package barrel — never a module inside it.
@@ -127,6 +136,27 @@ export default $config({
      */
     const wrapSecret = (value: string): $util.Output<string> => $util.secret(value)
 
+    /**
+     * The panel's public domain, and the origin every link to it is built from.
+     *
+     * A deploy stage is served from `sisyphus.bluetel.co.uk` — `staging.` below
+     * it — with its records created in the `bluetel.co.uk` zone this account
+     * already hosts. That zone carries the company's live sites, so the domain
+     * is not assembled here: `sisyphus-infra` decides it, pins the zone, refuses
+     * any name outside the `sisyphus.` namespace, and leaves overwrite off so a
+     * collision fails the deploy rather than replacing a record.
+     *
+     * Where a domain exists, the origin is *derived* rather than read from the
+     * stage configuration, and the parameter's own `NEXT_PUBLIC_SITE_URL` and
+     * `SISYPHUS_PANEL_URL` are ignored. One string decides the certificate, the
+     * DNS record, the Auth.js callback origin and the Slack link target, so they
+     * cannot disagree — an operator-edited parameter left on last month's
+     * CloudFront URL would otherwise break sign-in while the site itself served
+     * fine. A stage without a domain still reads both from the parameter.
+     */
+    const panelDomain = await createPanelDomain({ sstStage: $app.stage })
+    const panelUrl = getPanelUrl($app.stage)
+
     // ----------------------------------------------------------------------
     // The shared data plane, then the panel on top of it.
     // ----------------------------------------------------------------------
@@ -134,15 +164,84 @@ export default $config({
 
     const bucketNames = getBucketNames(scope)
 
+    /**
+     * Registering a bundle writes into `bucketNames.bundles`, a bucket this stack creates but
+     * that `createNextjsWebsite` below cannot see: it is referenced only by name, never `link`ed,
+     * so none of SST's automatic resource-permission wiring reaches it. `permissions` on the site
+     * below is what grants it explicitly — see `buildPanelBundlesPolicy` for exactly what it may
+     * do and, as importantly, what it may not (FR-084).
+     */
+    const { accountId } = await aws.getCallerIdentity()
+    const panelBundlesPolicy = buildPanelBundlesPolicy({
+      region,
+      accountId,
+      bundlesBucketName: bucketNames.bundles,
+    })
+
+    /**
+     * The one VPC every deployable's compute lives in: public subnets for the
+     * executor's EC2 instances, private subnets for this site's own server
+     * function and the control plane's Lambda, and the security groups that
+     * decide what may reach the database. See `createSisyphusVpc` in
+     * `vpc.ts` for why there are three separate groups rather than the VPC's
+     * own default, and why NAT is the cheaper `fck-nat` EC2 form rather than a
+     * managed NAT gateway.
+     */
+    const network = createSisyphusVpc()
+
+    new aws.ssm.Parameter('SisyphusExecutorSubnetIds', {
+      name: getExecutorSubnetIdsParameterName(stage),
+      type: 'String',
+      value: network.publicSubnetIds.apply((ids) => ids.join(',')),
+      description: `Sisyphus executor subnet ids for stage "${stage}"`,
+    })
+
+    new aws.ssm.Parameter('SisyphusExecutorSecurityGroupIds', {
+      name: getExecutorSecurityGroupIdsParameterName(stage),
+      type: 'String',
+      value: network.executorSecurityGroup.id,
+      description: `Sisyphus executor security group id for stage "${stage}"`,
+    })
+
+    new aws.ssm.Parameter('SisyphusAppSubnetIds', {
+      name: getAppSubnetIdsParameterName(stage),
+      type: 'String',
+      value: network.privateSubnetIds.apply((ids) => ids.join(',')),
+      description: `Sisyphus app (VPC-attached Lambda) subnet ids for stage "${stage}"`,
+    })
+
+    new aws.ssm.Parameter('SisyphusAppSecurityGroupId', {
+      name: getAppSecurityGroupIdParameterName(stage),
+      type: 'String',
+      value: network.appSecurityGroup.id,
+      description: `Sisyphus app (VPC-attached Lambda) security group id for stage "${stage}"`,
+    })
+
     const database = createDatabase({
       scope,
       stage,
       username: DATABASE_USERNAME,
       password: requireClearValue('SISYPHUS_DATABASE_PASSWORD'),
+      subnetIds: network.privateSubnetIds,
+      securityGroupIds: [network.databaseSecurityGroup.id],
     })
 
     const site = createNextjsWebsite({
       path: '.',
+      vpc: {
+        privateSubnets: network.privateSubnetIds,
+        securityGroups: [network.appSecurityGroup.id],
+      },
+      // Maps `panelBundlesPolicy`'s statements onto the shape SST's own `permissions` prop takes
+      // rather than restating them — the same reasoning as `sisyphus-control-plane`'s mapping of
+      // `controlPlanePolicy`. Neither of this policy's statements uses a `Condition`, so nothing
+      // is lost in the mapping.
+      permissions: panelBundlesPolicy.Statement.map((statement) => ({
+        effect: statement.Effect === 'Allow' ? ('allow' as const) : ('deny' as const),
+        actions: [...statement.Action],
+        resources: [...(statement.Resource ?? [])],
+      })),
+      domain: panelDomain,
       environment: {
         AWS_REGION: region,
         SISYPHUS_STAGE: stage,
@@ -160,10 +259,16 @@ export default $config({
         // outcome an executor reports. Same two variables the control plane reads, from the same
         // stage configuration: one Slack app, and one origin that run links point at.
         SISYPHUS_SLACK_BOT_TOKEN: getEnvSecret(wrapSecret, environment, 'SISYPHUS_SLACK_BOT_TOKEN'),
-        SISYPHUS_PANEL_URL: requireClearValue('SISYPHUS_PANEL_URL'),
+        SISYPHUS_PANEL_URL: panelUrl ?? requireClearValue('SISYPHUS_PANEL_URL'),
+        // Auth.js reads this exact name from `process.env` (not from the validated `env` module) to
+        // pin its callback origin and to derive `trustHost`. Without it, Auth.js falls back to the
+        // request's `Host` header, which it refuses in production — `UntrustedHost` — because
+        // nothing here tells it that host is expected. Same origin as `SISYPHUS_PANEL_URL`, because
+        // it is the same fact: the one domain `createPanelDomain` provisioned.
+        AUTH_URL: panelUrl ?? requireClearValue('SISYPHUS_PANEL_URL'),
         // Inlined into the browser bundle at build time, so never secrets.
         NEXT_PUBLIC_NODE_ENV: requireClearValue('NEXT_PUBLIC_NODE_ENV'),
-        NEXT_PUBLIC_SITE_URL: requireClearValue('NEXT_PUBLIC_SITE_URL'),
+        NEXT_PUBLIC_SITE_URL: panelUrl ?? requireClearValue('NEXT_PUBLIC_SITE_URL'),
         SISYPHUS_LOGS_BUCKET: bucketNames.logs,
         SISYPHUS_SNAPSHOTS_BUCKET: bucketNames.snapshots,
         SISYPHUS_BUNDLES_BUCKET: bucketNames.bundles,
@@ -178,6 +283,9 @@ export default $config({
       bundlesBucket: bucketNames.bundles,
       logsBucket: bucketNames.logs,
       snapshotsBucket: bucketNames.snapshots,
+      vpcId: network.vpc.id,
+      executorSubnetIds: network.publicSubnetIds,
+      appSubnetIds: network.privateSubnetIds,
     }
   },
 })

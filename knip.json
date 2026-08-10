@@ -175,6 +175,11 @@
         // command against the CI database before any suite. It is reached by path, not by import,
         // so it is a production entry even though no `exports` subpath names it.
         "src/db/migrations/cli.ts!",
+        // `nx run sisyphus-api:migrate --configuration=staging|production` runs `tsx
+        // src/db/migrations/deploy.ts` the same way — reached by path, not by import. It is the
+        // sole production caller of `bastion-tunnel.ts`, `dns-fallback.ts` and
+        // `find-monorepo-root.ts`, so without this entry all four would report as orphans.
+        "src/db/migrations/deploy.ts!",
         "drizzle.config.{ts,js}"
       ],
       "project": [
@@ -186,7 +191,6 @@
         // callers. Each seeds or fakes something a production caller would never construct.
         "!src/server/admin/test-database.ts!",
         "!src/server/admin/integration-connectors-fake.ts!",
-        "!src/server/admin/reachability-fake.ts!",
         "!src/server/machine/test-support.ts!",
         "!src/server/notify/test-support.ts!",
         "!src/server/workflow/test-support.ts!",

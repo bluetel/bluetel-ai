@@ -442,13 +442,14 @@ for that one run, and the override is recorded next to the profile it came from.
 
 **Why this priority**: Launch friction is the single most likely reason an engineer goes back to running the
 agent locally. It also removes the three fields nobody has a basis to answer — instance size, caps, and which
-setup bundle matches the repository — and the execution profile's validation is what prevents a run being launched with
-a setup bundle that does not match its repositories at all.
+setup bundle matches the repository — by having an admin who does know encode the answers once, into a preset
+that cannot be enabled while the bundle it pins is disabled or its workspace is empty.
 
 **Independent Test**: Create an execution profile, then start a run supplying only a prompt, and confirm the
 workflow ran with every value the profile carried and recorded the profile and version. Override one value on
-a second run and confirm both the override and the originating profile are recorded. Attempt to enable a
-execution profile whose setup bundle is disabled or whose repository is unreachable and confirm it is refused.
+a second run and confirm both the override and the originating profile are recorded. Attempt to enable an
+execution profile whose setup bundle is disabled, and one whose workspace version holds no repositories, and
+confirm both are refused naming the failing element.
 
 **Acceptance Scenarios**:
 
@@ -461,9 +462,10 @@ execution profile whose setup bundle is disabled or whose repository is unreacha
    changed value and the workflow records both the override and the profile it derived from.
 4. **Given** a profile that marks a field locked, **When** an engineer attempts to override it, **Then** the
    override is refused and the reason is shown.
-5. **Given** an execution profile whose setup bundle is disabled, or one of whose workspace entries is
-   unreachable with the available credentials, **When** enabling is attempted, **Then** it is refused naming
-   the failing element.
+5. **Given** an execution profile whose setup bundle is disabled, or whose pinned workspace version holds no
+   repositories, **When** enabling is attempted, **Then** it is refused naming the failing element. A profile
+   whose repositories are merely wrong enables — that is discovered at checkout, not at enable time
+   (`specs/004-remove-reachability-gate`).
 6. **Given** an ad hoc launch with no profile selected, **When** the run is started, **Then** it proceeds
    normally, records that it was ad hoc, and offers to save the entered configuration as a new profile.
 7. **Given** an execution profile edited while a workflow launched from it is running, **When** the edit is
@@ -1282,10 +1284,20 @@ runs a one-field operation.
 - **FR-123**: A user MUST be able to override an individual prefilled value for one run, unless the profile
   marks that field as locked. Every override MUST be recorded on the workflow alongside the profile it
   derived from, so a run's configuration is explicable.
-- **FR-124**: An execution profile MUST NOT be enableable until validation confirms that its setup bundle is
-  enabled, and that every workspace entry's repository and base branch are reachable with the credentials
-  available. This validation is what prevents a run being launched with a setup bundle that does not match
-  its repositories.
+- **FR-124**: An execution profile MUST NOT be enableable until validation confirms that it has a published
+  version, that the bundle and workspace versions that version pins are still readable, that its setup bundle
+  is enabled and not archived, and that its workspace is not archived and holds at least one repository. Every
+  failing element MUST be named, and all of them MUST be reported together rather than one per attempt.
+
+  **Amended by `specs/004-remove-reachability-gate`.** This requirement originally also demanded that every
+  workspace entry's repository and base branch be confirmed reachable with the available credentials. That half
+  was withdrawn as unimplementable: the repository-host credential is installed onto an ephemeral executor
+  instance by a client-authored setup bundle, in a format `contracts/setup-bundle.md` deliberately leaves
+  unspecified, and it never leaves that instance — so the panel cannot hold the credential the check would
+  need. Repository input is accepted unverified at enable time; a wrong repository or branch surfaces at
+  bootstrap phase 6 (`entry_checkout`), which already fails the run naming the entry, the repository, the
+  branch and git's own error (FR-112).
+
 - **FR-125**: Execution profiles and workspaces MUST be versioned: editing either creates a new version
   rather than mutating the existing one, and an in-flight workflow MUST be unaffected by an edit.
 - **FR-126**: A workflow MUST record which execution profile and profile version it was launched from, or that
@@ -1727,8 +1739,14 @@ from its board, and the ticket carries the actual task. Nobody has to restate wh
 - **SC-028**: An engineer who has never worked on a given repository can start a correct run against it without
   knowing its instance size, caps or setup bundle, in 100% of cases where an enabled execution profile exists
   for it.
-- **SC-029**: Zero workflows run with a setup bundle that does not match their workspace, because no execution
-  profile can be enabled until that pairing is validated.
+- **SC-029**: Zero workflows run from an execution profile whose setup bundle is disabled or archived, or whose
+  workspace is archived or holds no repositories, because no profile can be enabled while any of those is true.
+
+  **Amended by `specs/004-remove-reachability-gate`.** This criterion previously claimed zero workflows run with
+  a setup bundle "that does not match their workspace". That was never what the gate measured — it checked that
+  the bundle was enabled and that the repositories answered, neither of which establishes that a bundle's
+  tooling suits a given repository set. The criterion now states what the gate actually guarantees.
+
 - **SC-030**: 100% of workflows are attributable to either an execution profile and version or an explicit ad
   hoc launch, with every per-run override recorded.
 - **SC-031**: For a multi-entry workspace, 100% of changed repositories produce a pull request, unchanged
@@ -1870,7 +1888,9 @@ from its board, and the ticket carries the actual task. Nobody has to restate wh
   execution profiles. "Bundle" names the packaged artifact, "profile" names the reusable configuration, and
   the two words MUST NOT be used interchangeably in the schema, the interface or the documentation.
 - **Workspaces**: All entries in a workspace are assumed to live on the same repository host and be reachable
-  with the same credentials, which the setup bundle installs. Entries are checked out as independent
+  with the same credentials, which the setup bundle installs. That assumption is **not verified** by the
+  platform — the credential exists only on the executor instance, so an entry that breaks it is discovered at
+  checkout (`specs/004-remove-reachability-gate`). Entries are checked out as independent
   repositories side by side — this is not a submodule, subtree or monorepo mechanism, and no attempt is made to
   make a cross-repository change atomic at the version-control level. Ordering and coupling of cross-repository
   merges is skill-defined (FR-117). A single-entry workspace is expected to remain the common case, and the

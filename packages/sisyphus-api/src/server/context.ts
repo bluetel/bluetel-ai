@@ -1,7 +1,6 @@
 import type { SisyphusDatabase } from '../db'
 import type { UserRole } from '../enums'
 
-import type { RepositoryReachabilityProbe } from './admin/reachability'
 import { memoiseAsync } from './memoise'
 import type { WorkflowEventEmitter } from './notify'
 import type { ScopeResolver } from './scope'
@@ -92,15 +91,6 @@ export interface SisyphusDependencies {
   /** Records a refusal. Failures here must not mask the refusal itself. */
   readonly recordDenial: (denial: AuthorisationDenial) => Promise<void>
   /**
-   * The outbound half of FR-124's profile-enable gate: can this deployment's credential reach a
-   * repository and its base branch?
-   *
-   * Optional, and a deployment that omits it gets a probe that **refuses** every enable rather
-   * than one that waves them through — an unchecked gate is worse than an absent one, because it
-   * reports a check that did not happen. See `server/admin/reachability.ts`.
-   */
-  readonly repositoryReachability?: RepositoryReachabilityProbe
-  /**
    * Where FR-136's notifications go — a port, not a Slack client (FR-140, FR-141).
    *
    * Four of FR-136's events plus `review_iteration_failed` are set on the machine surface in this
@@ -108,10 +98,11 @@ export interface SisyphusDependencies {
    * this package depend on an app. This is that seam; see `server/notify/emitter.ts` for why it is
    * a port and what a holder of one deliberately cannot do.
    *
-   * Optional, and unlike {@link SisyphusDependencies.repositoryReachability} an omitted notifier is
-   * a **silent no-op** rather than a refusal. The asymmetry is deliberate: an unwired gate reports
-   * a check that did not happen, whereas an unwired notifier withholds a message and breaks
-   * nothing — and FR-140 already requires that an unnotifiable recipient never fails a run.
+   * Optional, and an omitted notifier is a **silent no-op** rather than a refusal. That is the
+   * right default only because the refusal would be survivable: a withheld message costs a
+   * recipient their notification and nothing else, and FR-140 already requires that an
+   * unnotifiable recipient never fails a run. A seam on a path where refusing would take the
+   * product down does not get the same treatment — it does not get to be optional at all.
    */
   readonly notifier?: WorkflowEventEmitter
 }

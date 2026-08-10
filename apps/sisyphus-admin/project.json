@@ -17,8 +17,14 @@
         "cwd": "apps/sisyphus-admin"
       },
       "configurations": {
-        "production": { "command": "sst deploy --stage production --config sst.config.ts" },
-        "staging": { "command": "sst deploy --stage staging --config sst.config.ts" }
+        "production": {
+          "command": "sst deploy --stage production --config sst.config.ts",
+          "env": { "NEXT_PUBLIC_NODE_ENV": "production" }
+        },
+        "staging": {
+          "command": "sst deploy --stage staging --config sst.config.ts",
+          "env": { "NEXT_PUBLIC_NODE_ENV": "production" }
+        }
       },
       "dependsOn": ["^build"],
       "cache": false

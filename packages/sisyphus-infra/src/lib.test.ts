@@ -4,10 +4,15 @@ import { getPlainStage } from './get-plain-stage'
 import {
   POLICY_VERSION,
   SISYPHUS_PROJECT,
+  getAppSecurityGroupIdParameterName,
+  getAppSubnetIdsParameterName,
   getBucketName,
   getBucketNames,
   getConnectionUrlParameterName,
   getEnvSecret,
+  getExecutorInstanceProfileParameterName,
+  getExecutorSecurityGroupIdsParameterName,
+  getExecutorSubnetIdsParameterName,
   getResourceIdentifier,
   getStackScope,
   readEnvRecord,
@@ -104,6 +109,67 @@ describe('getConnectionUrlParameterName', () => {
     )
     expect(getConnectionUrlParameterName(getPlainStage('staging-website'))).toBe(
       getConnectionUrlParameterName('staging'),
+    )
+  })
+})
+
+describe('getExecutorInstanceProfileParameterName', () => {
+  it('namespaces the parameter under the stage', () => {
+    expect(getExecutorInstanceProfileParameterName('staging')).toBe(
+      '/sisyphus/staging/executor/instance-profile-arn',
+    )
+  })
+
+  it('resolves to the same path from every auxiliary stage', () => {
+    expect(getExecutorInstanceProfileParameterName('staging-website')).toBe(
+      getExecutorInstanceProfileParameterName('staging'),
+    )
+  })
+})
+
+describe('getExecutorSubnetIdsParameterName and getExecutorSecurityGroupIdsParameterName', () => {
+  it('namespace each parameter under the stage, and keep them distinct from each other', () => {
+    expect(getExecutorSubnetIdsParameterName('staging')).toBe(
+      '/sisyphus/staging/executor/subnet-ids',
+    )
+    expect(getExecutorSecurityGroupIdsParameterName('staging')).toBe(
+      '/sisyphus/staging/executor/security-group-ids',
+    )
+    expect(getExecutorSubnetIdsParameterName('staging')).not.toBe(
+      getExecutorSecurityGroupIdsParameterName('staging'),
+    )
+  })
+
+  it('resolve to the same path from every auxiliary stage', () => {
+    expect(getExecutorSubnetIdsParameterName('staging-website')).toBe(
+      getExecutorSubnetIdsParameterName('staging'),
+    )
+    expect(getExecutorSecurityGroupIdsParameterName('staging-website')).toBe(
+      getExecutorSecurityGroupIdsParameterName('staging'),
+    )
+  })
+})
+
+describe('getAppSubnetIdsParameterName and getAppSecurityGroupIdParameterName', () => {
+  it('namespace each parameter under the stage, distinct from the executor pair and from each other', () => {
+    expect(getAppSubnetIdsParameterName('staging')).toBe('/sisyphus/staging/app/subnet-ids')
+    expect(getAppSecurityGroupIdParameterName('staging')).toBe(
+      '/sisyphus/staging/app/security-group-id',
+    )
+    expect(getAppSubnetIdsParameterName('staging')).not.toBe(
+      getAppSecurityGroupIdParameterName('staging'),
+    )
+    expect(getAppSubnetIdsParameterName('staging')).not.toBe(
+      getExecutorSubnetIdsParameterName('staging'),
+    )
+  })
+
+  it('resolve to the same path from every auxiliary stage', () => {
+    expect(getAppSubnetIdsParameterName('staging-website')).toBe(
+      getAppSubnetIdsParameterName('staging'),
+    )
+    expect(getAppSecurityGroupIdParameterName('staging-website')).toBe(
+      getAppSecurityGroupIdParameterName('staging'),
     )
   })
 })

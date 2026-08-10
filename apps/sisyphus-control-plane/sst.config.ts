@@ -9,11 +9,15 @@
  * ---------------------------------------------------------------------------
  * What this config deliberately does not create
  * ---------------------------------------------------------------------------
- * No bucket and no database. The panel's stack owns both; this config derives
- * bucket names from the same `sisyphus-infra` helper, so the two stacks cannot
- * disagree about what a bucket is called or how long it retains an object, and
- * it reads the database's connection URL straight from the SSM parameter the
- * panel's stack publishes, so there is exactly one place that value comes from.
+ * No bucket, no database and no VPC. The panel's stack owns all three; this
+ * config derives bucket names from the same `sisyphus-infra` helper, so the
+ * two stacks cannot disagree about what a bucket is called or how long it
+ * retains an object, and it reads the database's connection URL and the
+ * shared VPC's subnet and security-group ids straight from the SSM parameters
+ * the panel's stack publishes, so there is exactly one place each value comes
+ * from. This function attaches itself to the VPC's private subnets on the
+ * shared app security group in order to reach that database, since a database
+ * that is not publicly accessible is only reachable from inside the VPC.
  * Nor does it create the per-integration schedules: those are created and
  * removed by the control plane itself whenever an integration changes
  * (FR-100), which is why `createScheduler` provisions only the group and the
@@ -106,13 +110,22 @@ export default $config({
 
   run: async () => {
     const {
+      EXECUTOR_RUNNER_ROLE_NAME,
       POLICY_VERSION,
+      buildControlPlanePolicy,
       createScheduler,
+      getAppSecurityGroupIdParameterName,
+      getAppSubnetIdsParameterName,
       getBucketNames,
       getConnectionUrlParameterName,
       getEnvSecret,
+      getExecutorInstanceProfileParameterName,
+      getExecutorSecurityGroupIdsParameterName,
+      getExecutorSubnetIdsParameterName,
+      getPanelUrl,
       getResourceIdentifier,
       getStackScope,
+      omitReservedLambdaEnv,
       readEnvRecord,
       // The package barrel — never a module inside it.
     } = await import('@bluetel-ai/sisyphus-infra')
@@ -148,6 +161,42 @@ export default $config({
     const { value: databaseConnectionUrl } = await aws.ssm.getParameter({
       name: getConnectionUrlParameterName(stage),
       withDecryption: true,
+    })
+
+    // Same reasoning, for the same failure mode: the executor's stack creates
+    // the instance profile (fleet-wide today — see the caveat on
+    // `createRunnerRole`) and publishes its ARN here, so a profile it recreates
+    // cannot leave this deployable pointed at one that no longer exists. Not a
+    // secret, so no decryption to ask for.
+    const { value: executorInstanceProfileArn } = await aws.ssm.getParameter({
+      name: getExecutorInstanceProfileParameterName(stage),
+    })
+
+    // Same reasoning again, and this time the publisher is the panel's stack:
+    // it creates the one shared VPC every deployable's compute lives in
+    // (`createSisyphusVpc` in `vpc.ts`) alongside the buckets and the database,
+    // so this deployable already depends on the panel's stack deploying first —
+    // reading the VPC's published ids from here adds no new ordering
+    // requirement beyond that existing one.
+    //
+    // Two different pairs, for two different tenants of that VPC: the
+    // executor's public subnets and its security group go into this function's
+    // own environment, for the EC2 instances it launches — the exact shape
+    // `SISYPHUS_EXECUTOR_SUBNET_IDS` and `SISYPHUS_EXECUTOR_SECURITY_GROUP_IDS`
+    // already take at runtime. The app's private subnets and security group,
+    // below, are what this function attaches *itself* to, so it can reach the
+    // database.
+    const { value: executorSubnetIds } = await aws.ssm.getParameter({
+      name: getExecutorSubnetIdsParameterName(stage),
+    })
+    const { value: executorSecurityGroupIds } = await aws.ssm.getParameter({
+      name: getExecutorSecurityGroupIdsParameterName(stage),
+    })
+    const { value: appSubnetIds } = await aws.ssm.getParameter({
+      name: getAppSubnetIdsParameterName(stage),
+    })
+    const { value: appSecurityGroupId } = await aws.ssm.getParameter({
+      name: getAppSecurityGroupIdParameterName(stage),
     })
 
     /**
@@ -189,6 +238,15 @@ export default $config({
     const { accountId } = await aws.getCallerIdentity()
     const functionArn = `arn:aws:lambda:${region}:${accountId}:function:${functionName}`
 
+    // Composed rather than read back from the executor's stack output, for the
+    // same reason `functionArn` above is: `iam:PassRole` needs the role behind
+    // the instance profile, not the profile itself, and the executor's stack
+    // publishes only the profile's ARN (see `getExecutorInstanceProfileParameterName`
+    // in `lib.ts`). `EXECUTOR_RUNNER_ROLE_NAME` is the one place both stacks read
+    // the role's name suffix from, so this and `createRunnerRole` in
+    // `runner-role.ts` cannot name the role differently.
+    const executorRunnerRoleArn = `arn:aws:iam::${accountId}:role/${getResourceIdentifier(scope, EXECUTOR_RUNNER_ROLE_NAME)}`
+
     const schedulerRoleName = getResourceIdentifier(scope, 'scheduler-invoke')
     const schedulerRoleArn = `arn:aws:iam::${accountId}:role/${schedulerRoleName}`
 
@@ -208,13 +266,44 @@ export default $config({
       target: { functionArn, roleArn: schedulerRoleArn },
     })
 
+    const controlPlanePolicy = buildControlPlanePolicy({
+      region,
+      accountId,
+      executorRunnerRoleArn,
+      schedulerGroupName: scheduler.groupName,
+      schedulerRoleArn,
+    })
+
     new sst.aws.Function('SisyphusControlPlane', {
       name: functionName,
       handler: CONTROL_PLANE_HANDLER,
       runtime: CONTROL_PLANE_RUNTIME,
       timeout: CONTROL_PLANE_TIMEOUT,
       memory: CONTROL_PLANE_MEMORY,
-      environment: {
+      // Inside the shared VPC's private subnets, on the one app security group
+      // the database's own security group admits — the same pair the panel's
+      // server function attaches to, and for the same reason: this Lambda has
+      // to be inside the VPC to reach a database that is not publicly
+      // accessible (FR-072's `publiclyAccessible: false` in `database.ts`).
+      vpc: {
+        privateSubnets: appSubnetIds.split(','),
+        securityGroups: [appSecurityGroupId],
+      },
+      // `buildControlPlanePolicy` is the asserted source of truth for what this
+      // function may do (FR-200); this maps its statements onto the shape SST's
+      // own `permissions` prop takes rather than restating them. `Condition` has
+      // no equivalent there — none of `controlPlanePolicy`'s statements use one,
+      // so nothing is lost in the mapping.
+      permissions: controlPlanePolicy.Statement.map((statement) => ({
+        effect: statement.Effect === 'Allow' ? ('allow' as const) : ('deny' as const),
+        actions: [...statement.Action],
+        resources: [...(statement.Resource ?? [])],
+      })),
+      // AWS_REGION is injected into every Lambda's runtime automatically;
+      // declaring it too is rejected at deploy time, so it is filtered rather
+      // than simply omitted below — the value still comes from `region` for
+      // any reader that expects it to be present in this object's shape.
+      environment: omitReservedLambdaEnv({
         AWS_REGION: region,
         SISYPHUS_STAGE: stage,
         DATABASE_URL: wrapSecret(databaseConnectionUrl),
@@ -226,7 +315,12 @@ export default $config({
         ),
         SISYPHUS_SLACK_BOT_TOKEN: getEnvSecret(wrapSecret, environment, 'SISYPHUS_SLACK_BOT_TOKEN'),
         SISYPHUS_BOOTSTRAP_ADMIN_EMAILS: requireClearValue('SISYPHUS_BOOTSTRAP_ADMIN_EMAILS'),
-        SISYPHUS_PANEL_URL: requireClearValue('SISYPHUS_PANEL_URL'),
+        // Same derivation the panel's own stack uses, for the same reason the
+        // variable exists at all: both hosts write run links for the same run,
+        // and a stage whose panel is served from `sisyphus.bluetel.co.uk` must
+        // not have the sweep linking to whatever origin this deployable's env
+        // blob was last edited with. A stage with no domain still reads it.
+        SISYPHUS_PANEL_URL: getPanelUrl($app.stage) ?? requireClearValue('SISYPHUS_PANEL_URL'),
         SISYPHUS_LOGS_BUCKET: bucketNames.logs,
         SISYPHUS_SNAPSHOTS_BUCKET: bucketNames.snapshots,
         SISYPHUS_BUNDLES_BUCKET: bucketNames.bundles,
@@ -235,20 +329,17 @@ export default $config({
         SISYPHUS_SCHEDULER_TARGET_ARN: functionArn,
         SISYPHUS_SCHEDULER_ROLE_ARN: schedulerRoleArn,
         SISYPHUS_EXECUTOR_AMI_ID: requireClearValue('SISYPHUS_EXECUTOR_AMI_ID'),
-        SISYPHUS_EXECUTOR_INSTANCE_PROFILE_ARN: requireClearValue(
-          'SISYPHUS_EXECUTOR_INSTANCE_PROFILE_ARN',
-        ),
-        SISYPHUS_EXECUTOR_SUBNET_IDS: requireClearValue('SISYPHUS_EXECUTOR_SUBNET_IDS'),
-        SISYPHUS_EXECUTOR_SECURITY_GROUP_IDS: requireClearValue(
-          'SISYPHUS_EXECUTOR_SECURITY_GROUP_IDS',
-        ),
-      },
+        SISYPHUS_EXECUTOR_INSTANCE_PROFILE_ARN: executorInstanceProfileArn,
+        SISYPHUS_EXECUTOR_SUBNET_IDS: executorSubnetIds,
+        SISYPHUS_EXECUTOR_SECURITY_GROUP_IDS: executorSecurityGroupIds,
+      }),
     })
 
     return {
       controlPlaneArn: functionArn,
       scheduleGroup: scheduler.groupName,
       databaseParameter: getConnectionUrlParameterName(stage),
+      executorInstanceProfileArn,
     }
   },
 })

@@ -62,7 +62,7 @@ jobs:
     # application code, and a fake proves nothing about any of them.
     #
     # 17 matches the engine version the deployed instance runs
-    # (`buildDatabaseSpecification` in packages/sisyphus-infra/src/database.ts pins `17.4`), so a
+    # (`createDatabase` in packages/sisyphus-infra/src/database.ts pins `17.5`), so a
     # constraint or a lock that behaves differently across majors is caught here rather than on a
     # stage. The image's superuser is what lets the fixtures `create database` a private scratch
     # database per suite and `drop … with (force)` it afterwards.

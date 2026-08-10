@@ -22,9 +22,7 @@ import { createCallerFactory } from '../procedures'
 import { memoiseScope } from '../scope'
 
 import { findProfileVersion } from './profile-store'
-import { createProfilesRouter, profilesRouter, profileTargetNotFoundError } from './profiles'
-import type { FakeReachabilityProbe } from './reachability-fake'
-import { createFakeReachabilityProbe } from './reachability-fake'
+import { profilesRouter, profileTargetNotFoundError } from './profiles'
 import { createGate, createUserFixtures, readTestDatabaseUrl } from './test-database'
 
 /**
@@ -122,9 +120,12 @@ describe('profileTargetNotFoundError', () => {
 const liveDatabaseUrl = readTestDatabaseUrl()
 
 /**
- * The router against a real Postgres, on a private scratch database, with the recording
- * reachability fake in place of a network. Skipped — not failed — without
- * `SISYPHUS_TEST_DATABASE_URL`.
+ * The router against a real Postgres, on a private scratch database. Skipped — not failed —
+ * without `SISYPHUS_TEST_DATABASE_URL`.
+ *
+ * The router mounted here is the one production mounts. Nothing is substituted for it: the enable
+ * gate makes no outbound call, so there is no seam left to fake, and a test that exercised a
+ * differently-wired router than the deployment would be the exact hazard this feature removed.
  */
 describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live database', () => {
   const fixtures = createUserFixtures(liveDatabaseUrl ?? '')
@@ -134,20 +135,18 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
   let engineer: CallerIdentity
 
   /**
-   * The router under test, wired to the recording fake rather than a network.
-   *
-   * Built here rather than in `beforeAll` so its inferred procedure types survive: a router held in
-   * an annotated `let` loses them, and the caller's methods stop being type-checked against their
-   * inputs — which is most of what a contract test is for.
+   * Built here rather than in `beforeAll` so the router's inferred procedure types survive: a
+   * router held in an annotated `let` loses them, and the caller's methods stop being type-checked
+   * against their inputs — which is most of what a contract test is for.
    */
-  const probe: FakeReachabilityProbe = createFakeReachabilityProbe()
-  const createCaller = createCallerFactory(createProfilesRouter({ reachability: probe }))
+  const createCaller = createCallerFactory(profilesRouter)
 
   /** Ids seeded once and shared: an enabled bundle version and a two-entry workspace version. */
   let enabledBundleVersionId = ''
   let disabledBundleVersionId = ''
   let workspaceVersionId = ''
   let emptyWorkspaceVersionId = ''
+  let nonexistentRepoWorkspaceVersionId = ''
 
   const asAdmin = () => createCaller(contextFor(fixtures.db(), admin, denials))
   const asEngineer = () => createCaller(contextFor(fixtures.db(), engineer, denials))
@@ -284,6 +283,11 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
       'github.com/acme/web',
     ])
     emptyWorkspaceVersionId = await seedWorkspaceVersion('profiles-empty-workspace', [])
+    // A repository that certainly does not exist. The gate must not care — see the enable test
+    // that uses it.
+    nonexistentRepoWorkspaceVersionId = await seedWorkspaceVersion('profiles-nonexistent-repo', [
+      `github.com/acme/does-not-exist-${fixtures.suffix}`,
+    ])
   }, 60_000)
 
   afterAll(async () => {
@@ -359,8 +363,7 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
     ).rejects.toMatchObject({ code: 'CONFLICT' })
   })
 
-  it('enables a profile when the bundle is enabled and every entry is reachable (FR-124)', async () => {
-    const callsBefore = probe.calls.length
+  it('enables a profile pinning an enabled bundle and a non-empty workspace (FR-124)', async () => {
     const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
     const alpha = page.items.find((item) => item.name === `alpha-${fixtures.suffix}`)
 
@@ -371,14 +374,49 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
 
     expect(result.profile.enabled).toBe(true)
     expect(result.check?.passed).toBe(true)
-    // Both halves of FR-124 were actually exercised — every entry, with its branch.
-    expect(probe.calls.slice(callsBefore)).toStrictEqual([
-      { repositoryUrl: 'github.com/acme/api', baseBranch: 'main' },
-      { repositoryUrl: 'github.com/acme/web', baseBranch: 'main' },
-    ])
+
+    const enablement = (await auditFor(alpha?.id ?? '')).find((row) => row.action === 'enabled')
+    expect(enablement?.detail).toMatchObject({
+      validatedAgainstVersionId: expect.any(String) as unknown as string,
+    })
 
     const actions = (await auditFor(alpha?.id ?? '')).map((row) => row.action).sort()
     expect(actions).toStrictEqual(['enabled', 'registered'])
+  })
+
+  it('enables a profile whose workspace names a repository that does not exist', async () => {
+    // The platform makes no attempt to verify the repository. It cannot: the credential that could
+    // read it is installed by the setup bundle onto the executor instance and never leaves it. A
+    // bad URL is caught at bootstrap phase 6, which fails the run naming the entry (FR-112).
+    const created = await asAdmin().create({
+      ...launchValues(),
+      workspaceVersionId: nonexistentRepoWorkspaceVersionId,
+      name: `nonexistent-repo-${fixtures.suffix}`,
+    })
+
+    const result = await asAdmin().setEnabled({
+      executionProfileId: created.profile.id,
+      enabled: true,
+    })
+
+    expect(result.profile.enabled).toBe(true)
+    expect(result.check?.passed).toBe(true)
+  })
+
+  it('re-enabling an already-enabled profile succeeds and writes no second audit entry', async () => {
+    const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
+    const alpha = page.items.find((item) => item.name === `alpha-${fixtures.suffix}`)
+    const before = (await auditFor(alpha?.id ?? '')).length
+
+    const result = await asAdmin().setEnabled({
+      executionProfileId: alpha?.id ?? '',
+      enabled: true,
+    })
+
+    expect(result.profile.enabled).toBe(true)
+    expect(result.check?.passed).toBe(true)
+    // Nothing changed, and a trail padded with non-events is harder to read.
+    expect(await auditFor(alpha?.id ?? '')).toHaveLength(before)
   })
 
   it('refuses to enable against a disabled setup bundle, naming it (FR-124)', async () => {
@@ -400,32 +438,6 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
     expect(page.items.find((item) => item.id === created.profile.id)?.enabled).toBe(false)
   })
 
-  it('refuses to enable when a workspace entry is unreachable, naming the entry (FR-124)', async () => {
-    const created = await asAdmin().create({
-      ...launchValues(),
-      name: `unreachable-${fixtures.suffix}`,
-    })
-
-    probe.setOutcome('github.com/acme/web', {
-      reachable: false,
-      reason: 'the credential cannot read this repository',
-    })
-
-    try {
-      const refusal = await refusalOf(
-        asAdmin().setEnabled({ executionProfileId: created.profile.id, enabled: true }),
-      )
-
-      expect(refusal.code).toBe('CONFLICT')
-      // "This profile cannot be enabled" would leave an admin comparing repositories by eye.
-      expect(refusal.message).toContain(
-        'workspace entry 2 (github.com/acme/web on main) is unreachable: the credential cannot read this repository',
-      )
-    } finally {
-      probe.setOutcome('github.com/acme/web', { reachable: true })
-    }
-  })
-
   it('refuses to enable a profile whose workspace version has no repositories', async () => {
     const created = await asAdmin().create({
       ...launchValues(),
@@ -439,40 +451,28 @@ describe.skipIf(liveDatabaseUrl === undefined)('admin.profiles against a live da
 
     expect(refusal.code).toBe('CONFLICT')
     expect(refusal.message).toContain('contains no repositories')
+
+    // Refused means refused: the flag did not move.
+    const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
+    expect(page.items.find((item) => item.id === created.profile.id)?.enabled).toBe(false)
   })
 
-  it('never gates disabling — a broken profile must still be removable from circulation', async () => {
-    const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
-    const alpha = page.items.find((item) => item.name === `alpha-${fixtures.suffix}`)
+  it('never gates disabling — a profile that could not be enabled must still be withdrawable', async () => {
+    // FR-009: the escape hatch stays open. Built on the empty-workspace profile precisely because
+    // it is one the gate currently refuses to enable — disabling must not consult the gate at all.
+    const created = await asAdmin().create({
+      ...launchValues(),
+      workspaceVersionId: emptyWorkspaceVersionId,
+      name: `disable-always-allowed-${fixtures.suffix}`,
+    })
 
-    probe.setOutcome('github.com/acme/api', { reachable: false, reason: 'the repository has gone' })
+    const result = await asAdmin().setEnabled({
+      executionProfileId: created.profile.id,
+      enabled: false,
+    })
 
-    try {
-      const result = await asAdmin().setEnabled({
-        executionProfileId: alpha?.id ?? '',
-        enabled: false,
-      })
-
-      expect(result.profile.enabled).toBe(false)
-      expect(result.check).toBeUndefined()
-    } finally {
-      probe.setOutcome('github.com/acme/api', { reachable: true })
-    }
-  })
-
-  it('refuses every enable when the deployment has wired no probe', async () => {
-    // The default `profilesRouter` is wired to the refusing probe. A deployment that has not
-    // supplied a real one genuinely cannot confirm what FR-124 requires, so it enables nothing.
-    const unwired = createCallerFactory(profilesRouter)(contextFor(fixtures.db(), admin, denials))
-    const page = await asAdmin().list({ enabledOnly: false, includeArchived: false, limit: 50 })
-    const alpha = page.items.find((item) => item.name === `alpha-${fixtures.suffix}`)
-
-    const refusal = await refusalOf(
-      unwired.setEnabled({ executionProfileId: alpha?.id ?? '', enabled: true }),
-    )
-
-    expect(refusal.code).toBe('CONFLICT')
-    expect(refusal.message).toContain('no repository reachability checker')
+    expect(result.profile.enabled).toBe(false)
+    expect(result.check).toBeUndefined()
   })
 
   /**

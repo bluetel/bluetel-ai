@@ -110,7 +110,7 @@ using the system surfaced eleven frictions; nine were addressed by requirement c
 | ------------------------------------------------------- | ---------------------------------------------------------- |
 | Eleven fields per launch                                | Execution profiles — prompt is the only required input     |
 | No basis to choose instance size, caps, setup bundle    | Encoded in the execution profile by someone who knows      |
-| Setup bundle could mismatch the repositories            | FR-124 validation gate before a profile can be enabled     |
+| A disabled or archived bundle could be launched against | FR-124 validation gate before a profile can be enabled     |
 | One repo per run, and per integration                   | Workspaces (multi-entry) + integration profile mappings    |
 | No notifications anywhere                               | Slack direct message only (FR-136..FR-141)                 |
 | Integration-started workflows had no owner              | FR-132..FR-135, integration default owner mandatory        |

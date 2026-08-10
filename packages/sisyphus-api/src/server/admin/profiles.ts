@@ -32,8 +32,6 @@ import {
   readProfileReferences,
   updateProfile,
 } from './profile-store'
-import type { RepositoryReachabilityProbe } from './reachability'
-import { createRefusingReachabilityProbe } from './reachability'
 import type { Page } from './user-queries'
 
 /**
@@ -43,14 +41,15 @@ import type { Page } from './user-queries'
  * ## `setEnabled(true)` is the gate, and the gate is the point
  *
  * Everything else here is bookkeeping around one rule: a profile may not be enabled until FR-124's
- * validation passes. The bundle it pins must be enabled, and every entry of the workspace version it
- * pins must be reachable. That check is what stops a setup bundle written for one repository set
- * being attached to another and discovered by an agent halfway through a run.
+ * validation passes. The bundle it pins must be enabled and unarchived, the workspace unarchived,
+ * and the workspace version must hold at least one repository. That check is what stops a setup
+ * bundle taken out of circulation staying attached to a profile and being discovered by an agent
+ * halfway through a run.
  *
- * The check itself lives in `profile-gate.ts` and its outbound half behind
- * {@link RepositoryReachabilityProbe}, so it is testable against every answer a git host can give.
- * The refusal **names the failing element** — see that module for why "profile cannot be enabled"
- * is not an acceptable message.
+ * The check itself lives in `profile-gate.ts` and is a pure function of what the store already
+ * read, so it makes no call of its own. The refusal **names the failing element** — see that
+ * module for why "profile cannot be enabled" is not an acceptable message, and for which check
+ * FR-124 no longer makes and why.
  *
  * `setEnabled(false)` is never gated. Disabling is what FR-128 offers instead of deletion, and a
  * profile whose repositories have gone is precisely the one an admin most needs to be able to take
@@ -213,7 +212,6 @@ const valuesFromVersion = (version: ExecutionProfileVersion): ProfileVersionValu
 const runEnableGate = async (
   writer: ProfileStoreWriter,
   profile: ExecutionProfile,
-  probe: RepositoryReachabilityProbe,
 ): Promise<ProfileEnableCheck> => {
   if (profile.currentVersionId === null) {
     return noPublishedVersionCheck()
@@ -229,327 +227,287 @@ const runEnableGate = async (
     return unreadableSubjectCheck()
   }
 
-  return checkProfileCanBeEnabled(subject, probe)
+  return checkProfileCanBeEnabled(subject)
 }
 
-/** How the router is wired. The probe is an argument because FR-124's check is an outbound call. */
-export interface ProfilesRouterOptions {
+/** `admin.profiles` as it is mounted. */
+export const profilesRouter = createTRPCRouter({
+  /** Every profile with the version a launch would pin (FR-127). */
+  list: adminProcedure.input(listProfilesInput).query(
+    async ({ ctx, input }): Promise<Page<ProfileListing>> =>
+      listProfiles(ctx.db, {
+        enabledOnly: input.enabledOnly,
+        includeArchived: input.includeArchived,
+        limit: input.limit,
+        cursor: input.cursor,
+      }),
+  ),
+
   /**
-   * The outbound half of the FR-124 gate.
+   * Create a profile and publish its first version (FR-121, FR-127).
    *
-   * Supplied rather than imported so a deployment chooses its own — and so the tests get the
-   * recording fake in `reachability-fake.ts` instead of a network.
+   * Created **disabled** and granted to nobody. Enabling runs the FR-124 gate; granting is its
+   * own separately audited act (FR-184). A profile that arrived enabled would be a launch preset
+   * that skipped the one check standing between a preset and a fleet of runs that cannot check
+   * out their repositories.
    */
-  readonly reachability: RepositoryReachabilityProbe
-}
+  create: adminProcedure.input(createProfileInput).mutation(
+    async ({ ctx, input }): Promise<PublishedProfile> =>
+      ctx.db.transaction(async (tx) => {
+        const values: ProfileVersionValues = {
+          workspaceVersionId: input.workspaceVersionId,
+          setupBundleVersionId: input.setupBundleVersionId,
+          model: input.model,
+          instanceType: input.instanceType,
+          purchaseMode: input.purchaseMode,
+          turnCap: input.turnCap ?? null,
+          spendCap: input.spendCap ?? null,
+          defaultWorkflowType: input.defaultWorkflowType,
+          promptPreamble: input.promptPreamble ?? null,
+          lockedFields: input.lockedFields,
+        }
 
-/**
- * Build `admin.profiles` over one reachability probe.
- *
- * @param options - See {@link ProfilesRouterOptions}.
- */
-export const createProfilesRouter = (options: ProfilesRouterOptions) =>
-  createTRPCRouter({
-    /** Every profile with the version a launch would pin (FR-127). */
-    list: adminProcedure.input(listProfilesInput).query(
-      async ({ ctx, input }): Promise<Page<ProfileListing>> =>
-        listProfiles(ctx.db, {
-          enabledOnly: input.enabledOnly,
-          includeArchived: input.includeArchived,
-          limit: input.limit,
-          cursor: input.cursor,
-        }),
-    ),
+        await requirePinnedVersions(tx, values)
 
-    /**
-     * Create a profile and publish its first version (FR-121, FR-127).
-     *
-     * Created **disabled** and granted to nobody. Enabling runs the FR-124 gate; granting is its
-     * own separately audited act (FR-184). A profile that arrived enabled would be a launch preset
-     * that skipped the one check standing between a preset and a fleet of runs that cannot check
-     * out their repositories.
-     */
-    create: adminProcedure.input(createProfileInput).mutation(
-      async ({ ctx, input }): Promise<PublishedProfile> =>
-        ctx.db.transaction(async (tx) => {
-          const values: ProfileVersionValues = {
-            workspaceVersionId: input.workspaceVersionId,
-            setupBundleVersionId: input.setupBundleVersionId,
-            model: input.model,
-            instanceType: input.instanceType,
-            purchaseMode: input.purchaseMode,
-            turnCap: input.turnCap ?? null,
-            spendCap: input.spendCap ?? null,
-            defaultWorkflowType: input.defaultWorkflowType,
-            promptPreamble: input.promptPreamble ?? null,
-            lockedFields: input.lockedFields,
-          }
+        if ((await findProfileByName(tx, input.name)) !== undefined) {
+          throw duplicateProfileNameError(input.name)
+        }
 
-          await requirePinnedVersions(tx, values)
+        const created = await insertProfile(tx, {
+          name: input.name,
+          description: input.description,
+        })
 
-          if ((await findProfileByName(tx, input.name)) !== undefined) {
-            throw duplicateProfileNameError(input.name)
-          }
+        const published = await publishVersion(tx, {
+          executionProfileId: created.id,
+          version: 1,
+          createdByUserId: ctx.user.id,
+          values,
+        })
 
-          const created = await insertProfile(tx, {
-            name: input.name,
-            description: input.description,
-          })
+        await recordConfigurationChange(tx, {
+          actorUserId: ctx.user.id,
+          entityType: 'execution_profile',
+          entityId: published.profile.id,
+          entityVersion: 1,
+          action: 'registered',
+          detail: { name: published.profile.name, ...versionAuditDetail(published.version) },
+        })
 
-          const published = await publishVersion(tx, {
-            executionProfileId: created.id,
-            version: 1,
-            createdByUserId: ctx.user.id,
-            values,
-          })
+        return published
+      }),
+  ),
 
-          await recordConfigurationChange(tx, {
-            actorUserId: ctx.user.id,
-            entityType: 'execution_profile',
-            entityId: published.profile.id,
-            entityVersion: 1,
-            action: 'registered',
-            detail: { name: published.profile.name, ...versionAuditDetail(published.version) },
-          })
+  /**
+   * Edit a profile, which **publishes a new version** (FR-125).
+   *
+   * Workflows already running keep the version they launched with, so an edit mid-run cannot
+   * change the model, the caps or the repositories of a run in flight.
+   *
+   * Recorded as `replaced` rather than `updated`, because the two are different events: one
+   * created an immutable version and the other edited a row in place.
+   */
+  update: adminProcedure.input(updateProfileInput).mutation(
+    async ({ ctx, input }): Promise<PublishedProfile> =>
+      ctx.db.transaction(async (tx) => {
+        const values: ProfileVersionValues = {
+          workspaceVersionId: input.workspaceVersionId,
+          setupBundleVersionId: input.setupBundleVersionId,
+          model: input.model,
+          instanceType: input.instanceType,
+          purchaseMode: input.purchaseMode,
+          turnCap: input.turnCap ?? null,
+          spendCap: input.spendCap ?? null,
+          defaultWorkflowType: input.defaultWorkflowType,
+          promptPreamble: input.promptPreamble ?? null,
+          lockedFields: input.lockedFields,
+        }
 
-          return published
-        }),
-    ),
+        await requirePinnedVersions(tx, values)
 
-    /**
-     * Edit a profile, which **publishes a new version** (FR-125).
-     *
-     * Workflows already running keep the version they launched with, so an edit mid-run cannot
-     * change the model, the caps or the repositories of a run in flight.
-     *
-     * Recorded as `replaced` rather than `updated`, because the two are different events: one
-     * created an immutable version and the other edited a row in place.
-     */
-    update: adminProcedure.input(updateProfileInput).mutation(
-      async ({ ctx, input }): Promise<PublishedProfile> =>
-        ctx.db.transaction(async (tx) => {
-          const values: ProfileVersionValues = {
-            workspaceVersionId: input.workspaceVersionId,
-            setupBundleVersionId: input.setupBundleVersionId,
-            model: input.model,
-            instanceType: input.instanceType,
-            purchaseMode: input.purchaseMode,
-            turnCap: input.turnCap ?? null,
-            spendCap: input.spendCap ?? null,
-            defaultWorkflowType: input.defaultWorkflowType,
-            promptPreamble: input.promptPreamble ?? null,
-            lockedFields: input.lockedFields,
-          }
-
-          await requirePinnedVersions(tx, values)
-
-          const locked = await lockProfileForVersioning(tx, input.executionProfileId)
-          if (locked === undefined) {
-            throw profileTargetNotFoundError()
-          }
-
-          if (locked.profile.archivedAt !== null) {
-            throw profileStateError(
-              'That execution profile has been archived and cannot be edited.',
-            )
-          }
-
-          if (input.name !== undefined && input.name !== locked.profile.name) {
-            if ((await findProfileByName(tx, input.name)) !== undefined) {
-              throw duplicateProfileNameError(input.name)
-            }
-          }
-
-          const published = await publishVersion(tx, {
-            executionProfileId: locked.profile.id,
-            version: locked.highestVersion + 1,
-            createdByUserId: ctx.user.id,
-            values,
-          })
-
-          // Name and description live on the parent row, so editing them really is an update. The
-          // launch values never are.
-          const profile = await updateProfile(tx, locked.profile.id, {
-            ...(input.name === undefined ? {} : { name: input.name }),
-            ...(input.description === undefined ? {} : { description: input.description ?? null }),
-          })
-
-          if (profile === undefined) {
-            throw profileTargetNotFoundError()
-          }
-
-          await recordConfigurationChange(tx, {
-            actorUserId: ctx.user.id,
-            entityType: 'execution_profile',
-            entityId: profile.id,
-            entityVersion: published.version.version,
-            action: 'replaced',
-            detail: {
-              name: profile.name,
-              previousVersion: locked.highestVersion,
-              ...versionAuditDetail(published.version),
-            },
-          })
-
-          return { profile, version: published.version }
-        }),
-    ),
-
-    /**
-     * Copy a profile's current version into a new profile (FR-127).
-     *
-     * The clone starts disabled at version 1, holding nothing but configuration: no grants are
-     * copied, because access is granted to a profile and not inherited by one that resembles it
-     * (FR-179, FR-184).
-     */
-    clone: adminProcedure.input(cloneProfileInput).mutation(
-      async ({ ctx, input }): Promise<PublishedProfile> =>
-        ctx.db.transaction(async (tx) => {
-          const source = await findProfile(tx, input.executionProfileId)
-          if (source === undefined) {
-            throw profileTargetNotFoundError()
-          }
-
-          if (source.currentVersionId === null) {
-            throw profileStateError('That execution profile has no published version to clone.')
-          }
-
-          const sourceVersion = await findProfileVersion(tx, source.currentVersionId)
-          if (sourceVersion === undefined) {
-            throw profileTargetNotFoundError()
-          }
-
-          if ((await findProfileByName(tx, input.name)) !== undefined) {
-            throw duplicateProfileNameError(input.name)
-          }
-
-          const created = await insertProfile(tx, {
-            name: input.name,
-            description: source.description ?? undefined,
-          })
-
-          const published = await publishVersion(tx, {
-            executionProfileId: created.id,
-            version: 1,
-            createdByUserId: ctx.user.id,
-            values: valuesFromVersion(sourceVersion),
-          })
-
-          await recordConfigurationChange(tx, {
-            actorUserId: ctx.user.id,
-            entityType: 'execution_profile',
-            entityId: published.profile.id,
-            entityVersion: 1,
-            action: 'registered',
-            detail: {
-              name: published.profile.name,
-              clonedFromExecutionProfileId: source.id,
-              clonedFromExecutionProfileVersionId: sourceVersion.id,
-              ...versionAuditDetail(published.version),
-            },
-          })
-
-          return published
-        }),
-    ),
-
-    /**
-     * Enable or disable a profile. **Enabling runs the FR-124 gate** (FR-124, FR-128).
-     *
-     * The gate reads the bundle and workspace the profile's current version pins, probes every
-     * entry, and refuses naming what failed. It runs inside the transaction that would flip the
-     * flag, so a profile cannot be enabled on the strength of a check taken before a concurrent
-     * edit re-pointed it.
-     *
-     * Disabling is never gated, and a no-op writes no audit entry: nothing changed, and a trail
-     * padded with non-events is harder to read.
-     */
-    setEnabled: adminProcedure.input(setProfileEnabledInput).mutation(
-      async ({ ctx, input }): Promise<ProfileEnableResult> =>
-        ctx.db.transaction(async (tx) => {
-          const existing = await findProfile(tx, input.executionProfileId)
-          if (existing === undefined) {
-            throw profileTargetNotFoundError()
-          }
-
-          if (!input.enabled) {
-            if (!existing.enabled) {
-              return { profile: existing, check: undefined }
-            }
-
-            const disabled = await updateProfile(tx, existing.id, { enabled: false })
-            if (disabled === undefined) {
-              throw profileTargetNotFoundError()
-            }
-
-            await recordConfigurationChange(tx, {
-              actorUserId: ctx.user.id,
-              entityType: 'execution_profile',
-              entityId: disabled.id,
-              action: 'disabled',
-            })
-
-            return { profile: disabled, check: undefined }
-          }
-
-          // A per-request probe from the host wins over the one this router was built with.
-          // FR-124's check is an outbound call, and which credential makes it is a property of the
-          // deployment, not of the router — so `SisyphusDependencies`, which every host already
-          // builds per request, is the right place for it. The constructor argument stays as the
-          // fallback so the tests keep injecting the recording fake directly.
-          const check = await runEnableGate(
-            tx,
-            existing,
-            ctx.dependencies.repositoryReachability ?? options.reachability,
-          )
-          if (!check.passed) {
-            throw profileCannotBeEnabledError(check)
-          }
-
-          // Already enabled and still passing: report the verdict, write nothing.
-          if (existing.enabled) {
-            return { profile: existing, check }
-          }
-
-          const enabled = await updateProfile(tx, existing.id, { enabled: true })
-          if (enabled === undefined) {
-            throw profileTargetNotFoundError()
-          }
-
-          await recordConfigurationChange(tx, {
-            actorUserId: ctx.user.id,
-            entityType: 'execution_profile',
-            entityId: enabled.id,
-            action: 'enabled',
-            detail: { validatedAgainstVersionId: existing.currentVersionId },
-          })
-
-          return { profile: enabled, check }
-        }),
-    ),
-
-    /** What would break if this profile went away, and whether it may be archived (FR-128). */
-    references: adminProcedure
-      .input(profileIdInput)
-      .query(async ({ ctx, input }): Promise<ProfileReferences> => {
-        if ((await findProfile(ctx.db, input.executionProfileId)) === undefined) {
+        const locked = await lockProfileForVersioning(tx, input.executionProfileId)
+        if (locked === undefined) {
           throw profileTargetNotFoundError()
         }
-        return readProfileReferences(ctx.db, input.executionProfileId)
-      }),
-  })
 
-/**
- * `admin.profiles` as it is mounted.
- *
- * Wired to {@link createRefusingReachabilityProbe}, which refuses every enable. That is the
- * safe default and the honest one: until a deployment supplies a real probe, the platform genuinely
- * cannot confirm what FR-124 requires it to confirm, and a router that enabled profiles anyway
- * would be reporting a check it had not made. Supply a probe through
- * {@link createProfilesRouter} to make enabling possible.
- */
-export const profilesRouter = createProfilesRouter({
-  reachability: createRefusingReachabilityProbe(),
+        if (locked.profile.archivedAt !== null) {
+          throw profileStateError('That execution profile has been archived and cannot be edited.')
+        }
+
+        if (input.name !== undefined && input.name !== locked.profile.name) {
+          if ((await findProfileByName(tx, input.name)) !== undefined) {
+            throw duplicateProfileNameError(input.name)
+          }
+        }
+
+        const published = await publishVersion(tx, {
+          executionProfileId: locked.profile.id,
+          version: locked.highestVersion + 1,
+          createdByUserId: ctx.user.id,
+          values,
+        })
+
+        // Name and description live on the parent row, so editing them really is an update. The
+        // launch values never are.
+        const profile = await updateProfile(tx, locked.profile.id, {
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.description === undefined ? {} : { description: input.description ?? null }),
+        })
+
+        if (profile === undefined) {
+          throw profileTargetNotFoundError()
+        }
+
+        await recordConfigurationChange(tx, {
+          actorUserId: ctx.user.id,
+          entityType: 'execution_profile',
+          entityId: profile.id,
+          entityVersion: published.version.version,
+          action: 'replaced',
+          detail: {
+            name: profile.name,
+            previousVersion: locked.highestVersion,
+            ...versionAuditDetail(published.version),
+          },
+        })
+
+        return { profile, version: published.version }
+      }),
+  ),
+
+  /**
+   * Copy a profile's current version into a new profile (FR-127).
+   *
+   * The clone starts disabled at version 1, holding nothing but configuration: no grants are
+   * copied, because access is granted to a profile and not inherited by one that resembles it
+   * (FR-179, FR-184).
+   */
+  clone: adminProcedure.input(cloneProfileInput).mutation(
+    async ({ ctx, input }): Promise<PublishedProfile> =>
+      ctx.db.transaction(async (tx) => {
+        const source = await findProfile(tx, input.executionProfileId)
+        if (source === undefined) {
+          throw profileTargetNotFoundError()
+        }
+
+        if (source.currentVersionId === null) {
+          throw profileStateError('That execution profile has no published version to clone.')
+        }
+
+        const sourceVersion = await findProfileVersion(tx, source.currentVersionId)
+        if (sourceVersion === undefined) {
+          throw profileTargetNotFoundError()
+        }
+
+        if ((await findProfileByName(tx, input.name)) !== undefined) {
+          throw duplicateProfileNameError(input.name)
+        }
+
+        const created = await insertProfile(tx, {
+          name: input.name,
+          description: source.description ?? undefined,
+        })
+
+        const published = await publishVersion(tx, {
+          executionProfileId: created.id,
+          version: 1,
+          createdByUserId: ctx.user.id,
+          values: valuesFromVersion(sourceVersion),
+        })
+
+        await recordConfigurationChange(tx, {
+          actorUserId: ctx.user.id,
+          entityType: 'execution_profile',
+          entityId: published.profile.id,
+          entityVersion: 1,
+          action: 'registered',
+          detail: {
+            name: published.profile.name,
+            clonedFromExecutionProfileId: source.id,
+            clonedFromExecutionProfileVersionId: sourceVersion.id,
+            ...versionAuditDetail(published.version),
+          },
+        })
+
+        return published
+      }),
+  ),
+
+  /**
+   * Enable or disable a profile. **Enabling runs the FR-124 gate** (FR-124, FR-128).
+   *
+   * The gate reads the bundle and workspace the profile's current version pins, probes every
+   * entry, and refuses naming what failed. It runs inside the transaction that would flip the
+   * flag, so a profile cannot be enabled on the strength of a check taken before a concurrent
+   * edit re-pointed it.
+   *
+   * Disabling is never gated, and a no-op writes no audit entry: nothing changed, and a trail
+   * padded with non-events is harder to read.
+   */
+  setEnabled: adminProcedure.input(setProfileEnabledInput).mutation(
+    async ({ ctx, input }): Promise<ProfileEnableResult> =>
+      ctx.db.transaction(async (tx) => {
+        const existing = await findProfile(tx, input.executionProfileId)
+        if (existing === undefined) {
+          throw profileTargetNotFoundError()
+        }
+
+        if (!input.enabled) {
+          if (!existing.enabled) {
+            return { profile: existing, check: undefined }
+          }
+
+          const disabled = await updateProfile(tx, existing.id, { enabled: false })
+          if (disabled === undefined) {
+            throw profileTargetNotFoundError()
+          }
+
+          await recordConfigurationChange(tx, {
+            actorUserId: ctx.user.id,
+            entityType: 'execution_profile',
+            entityId: disabled.id,
+            action: 'disabled',
+          })
+
+          return { profile: disabled, check: undefined }
+        }
+
+        const check = await runEnableGate(tx, existing)
+        if (!check.passed) {
+          throw profileCannotBeEnabledError(check)
+        }
+
+        // Already enabled and still passing: report the verdict, write nothing.
+        if (existing.enabled) {
+          return { profile: existing, check }
+        }
+
+        const enabled = await updateProfile(tx, existing.id, { enabled: true })
+        if (enabled === undefined) {
+          throw profileTargetNotFoundError()
+        }
+
+        await recordConfigurationChange(tx, {
+          actorUserId: ctx.user.id,
+          entityType: 'execution_profile',
+          entityId: enabled.id,
+          action: 'enabled',
+          detail: { validatedAgainstVersionId: existing.currentVersionId },
+        })
+
+        return { profile: enabled, check }
+      }),
+  ),
+
+  /** What would break if this profile went away, and whether it may be archived (FR-128). */
+  references: adminProcedure
+    .input(profileIdInput)
+    .query(async ({ ctx, input }): Promise<ProfileReferences> => {
+      if ((await findProfile(ctx.db, input.executionProfileId)) === undefined) {
+        throw profileTargetNotFoundError()
+      }
+      return readProfileReferences(ctx.db, input.executionProfileId)
+    }),
 })
 
 export type ProfilesRouter = typeof profilesRouter

@@ -34,7 +34,8 @@ describe('emitWorkflowEvent', () => {
 
   it('is a silent no-op when the deployment has wired no notifier', async () => {
     // Absent is not an error. A platform whose Slack app is not installed yet must still be able
-    // to finish a workflow — contrast `admin/reachability.ts`, whose absent probe refuses.
+    // to finish a workflow: refusing by default is only right where the refusal is survivable, and
+    // withholding one Slack message is — it breaks nothing downstream.
     const emission = await emitWorkflowEvent(undefined, notification)
 
     expect(emission).toStrictEqual({ emitted: false })

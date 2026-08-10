@@ -160,8 +160,10 @@ confirm the existence of — a workflow outside their permitted scope, and an ou
 
 **Rules.** `bundles.list` is the one exception to admin-only: any authenticated user may read the **enabled**
 list, because selecting a bundle is part of building a profile (FR-086). `profiles.setEnabled(true)` runs the
-FR-124 validation gate — bundle enabled **and** every workspace entry reachable — and refuses naming the failing
-element. `integrations.previewPrompt` renders the assembled prompt for a sample ticket before enable (FR-160).
+FR-124 validation gate — published version present, pinned rows readable, bundle enabled and unarchived,
+workspace unarchived and non-empty — and refuses naming every failing element. It makes **no** outbound call:
+repository reachability is not checked (`specs/004-remove-reachability-gate`).
+`profiles.setEnabled(false)` is unconditional and never runs the gate. `integrations.previewPrompt` renders the assembled prompt for a sample ticket before enable (FR-160).
 `users.setRole` / `setActive` re-count active admins inside the transaction so the never-zero-admins invariant
 cannot race (FR-173).
 

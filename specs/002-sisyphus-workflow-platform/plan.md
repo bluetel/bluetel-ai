@@ -93,6 +93,29 @@ tested, and mounted nowhere.
 The generalisation worth carrying to the next feature: **every gate should be tested against a known failure
 before it is trusted.** Each of the three above passed convincingly while measuring nothing.
 
+**A fourth finding, and it is the second layer again.** _Added 2026-08-09; see
+`specs/004-remove-reachability-gate`._ FR-124's enable gate had two halves. The local half — bundle enabled,
+workspace non-empty, pinned rows readable — worked. The outbound half, "every workspace entry's repository and
+base branch are reachable with the credentials available", shipped as `RepositoryReachabilityProbe`: an
+interface, a recording fake, a documented seam, a colocated test suite, and a `createRefusingReachabilityProbe`
+default that reports every repository unreachable. No deployment ever supplied a real one, because **none
+can**. The repository-host credential is installed by a client-authored `setup.sh` onto an ephemeral instance
+at bootstrap phase 5, in a format `contracts/setup-bundle.md` deliberately leaves unspecified; it never leaves
+that instance. The panel cannot hold it. The result was that `setEnabled(true)` refused **every** profile in
+every deployment, making the platform's primary launch path unreachable — the exact failure the paragraph above
+describes, except that here the fake was not merely indistinguishable from a working implementation but
+indistinguishable from a _possible_ one.
+
+Two things generalise. First: **a seam is a claim that both sides can exist.** `DeveloperPort` and `Forge` were
+unimplemented; this one was unimplementable, and nothing in the type, the fake or the test distinguished the
+two cases. When a seam's real implementation needs a credential, name which component will hold it and how it
+gets there _before_ writing the interface — if that sentence cannot be written, the requirement is wrong rather
+than pending. Second: **a refuse-by-default stub is only safe if the refusal is survivable.** Refusing closed
+was the right instinct for an unwired check, but it was applied to the gate on the primary path, so "safe
+default" and "product is inoperable" were the same state. Two modules — `notify/emitter.ts` and the control
+plane's `jobs/prompt-redact.ts` — cite this probe as the precedent for their own defaults; both are on paths
+where an absent implementation degrades rather than blocks, which is the distinction that was missed here.
+
 ## Technical Context
 
 **Language/Version**: TypeScript 5.x, `strict` (inherited from `tsconfig.base.json`, must not be relaxed).

@@ -131,14 +131,27 @@ export interface RunnerPolicyConfig {
   /**
    * Workflow the instance is running. Every S3 grant is scoped to this
    * workflow's partition; a fleet-wide role would defeat FR-071's partitioning.
+   *
+   * Omitted for the fleet-wide profile the executor's own stack creates at
+   * deploy time — see the caveat on `createRunnerRole` in `runner-role.ts`.
+   * Grants then fall back to the whole bucket. An **empty string** is not this:
+   * it is a caller holding a workflow id it forgot to read, and it still
+   * throws, the same as before.
    */
-  readonly workflowId: string
+  readonly workflowId?: string
 }
 
 const bucketArn = (bucketName: string): string => `arn:aws:s3:::${bucketName}`
 
-const workflowObjectArn = (bucketName: string, workflowId: string): string =>
-  `${bucketArn(bucketName)}/${getWorkflowObjectPrefix(workflowId)}*`
+/**
+ * The S3 resource ARN a grant is scoped to: one workflow's partition when
+ * `workflowId` is given, or the whole bucket when it is not — the fleet-wide
+ * shape documented on {@link RunnerPolicyConfig.workflowId}.
+ */
+const runnerObjectArn = (bucketName: string, workflowId: string | undefined): string =>
+  workflowId === undefined
+    ? `${bucketArn(bucketName)}/*`
+    : `${bucketArn(bucketName)}/${getWorkflowObjectPrefix(workflowId)}*`
 
 /**
  * The trust policy: only the EC2 service may assume the runner role, and only by
@@ -173,12 +186,149 @@ export const buildRunnerTrustPolicy = (): PolicyDocument => ({
  *   parameter.
  * - **No Secrets Manager and no Parameter Store.** Every credential the job
  *   needs arrives in the user-data envelope, scoped to one workflow.
- * - **No bucket-wide access.** Each S3 grant is scoped to that workflow's
- *   partition, so one workflow cannot read another's logs or snapshots
- *   (FR-071), and no grant can list a bucket, so it cannot enumerate the others.
+ * - **No bucket-wide access — when a workflow id is known.** Each S3 grant is
+ *   scoped to that workflow's partition, so one workflow cannot read another's
+ *   logs or snapshots (FR-071), and no grant can list a bucket, so it cannot
+ *   enumerate the others. Without a workflow id — the fleet-wide profile the
+ *   executor's own stack creates, see `createRunnerRole` in `runner-role.ts` —
+ *   a grant is the whole bucket instead, and this isolation does not hold.
  * - **No delete.** Removing a durable object is the lifecycle policy's job.
  * - **No EC2 mutation.** Teardown is the control plane's job (FR-038).
  */
+// ---------------------------------------------------------------------------
+// The control plane — the one identity allowed to move the fleet
+// ---------------------------------------------------------------------------
+
+export interface ControlPlanePolicyConfig {
+  /** Region every EC2 resource ARN below is scoped to. */
+  readonly region: string
+  /** Account every EC2 resource ARN below is scoped to. */
+  readonly accountId: string
+  /**
+   * ARN of the runner role the executor's instances launch with — the exact
+   * role `iam:PassRole` is scoped to, and nothing else. A control plane that
+   * could pass any role could hand a launched instance whatever privilege it
+   * liked, which would make `buildRunnerPolicy`'s careful omissions pointless.
+   */
+  readonly executorRunnerRoleArn: string
+  /**
+   * Name of the stage's schedule group (`getSchedulerGroupName` in
+   * `schedule-name.ts`) — the exact group `scheduler:CreateSchedule`,
+   * `UpdateSchedule` and `DeleteSchedule` are scoped to, so `syncSchedules`
+   * (FR-100) can register and remove per-integration schedules without
+   * reaching another stage's group.
+   */
+  readonly schedulerGroupName: string
+  /**
+   * ARN of the role EventBridge Scheduler assumes to invoke the control plane
+   * (`schedulerRoleArn` in `sst.config.ts`) — the exact role `iam:PassRole` is
+   * scoped to here, since every `CreateSchedule`/`UpdateSchedule` call passes
+   * it as the schedule's target role.
+   */
+  readonly schedulerRoleArn: string
+}
+
+/**
+ * The control plane's own permission policy: launch an instance (FR-036),
+ * destroy one at teardown (FR-038), and enumerate the fleet to reconcile it
+ * (FR-039) — see `compute.ts`'s `ComputeProvisioner`, which this policy exists
+ * to make deployable. Nothing else: no S3, no Secrets Manager, no database
+ * IAM action, because the control plane already reaches those through
+ * `DATABASE_URL` and the buckets' own bucket policies, not through this role.
+ *
+ * `ec2:DescribeInstances` has no resource-level permissions at all — AWS
+ * requires `Resource: ['*']` for it regardless of how narrowly the rest of
+ * the policy is scoped, so the fleet-visibility statement below is not a
+ * missed opportunity to narrow it.
+ *
+ * `ec2:RunInstances` is scoped to this account and region's `instance`
+ * resource so `Ec2ComputeConfiguration.stage` in `compute.ts` never launches
+ * outside the stage's own account — but the call also touches every resource
+ * a new instance references (its AMI, subnet, security groups, network
+ * interface and root volume), and AWS evaluates permission on each of those
+ * too. `ec2:CreateTags` is required alongside it for exactly one reason:
+ * tagging a resource **at creation** needs the tagging action in addition to
+ * the creating one, and `WORKFLOW_ID_TAG` in `compute.ts` is set through
+ * `RunInstances`'s own `TagSpecifications`, not a separate call.
+ *
+ * `syncSchedules` (`jobs/sync-schedules.ts`) needs the control plane to keep
+ * EventBridge Scheduler in lockstep with the `integrations` table (FR-100):
+ * `scheduler:ListSchedules` finds the sweep's orphans, and
+ * `Create`/`Update`/`DeleteSchedule` bring one integration's schedule to the
+ * row's desired state. `ListSchedules` has no resource-level permissions —
+ * like `ec2:DescribeInstances` above, AWS evaluates it against the literal
+ * `schedule/*` /`*` pattern regardless of how narrowly the rest of the policy
+ * is scoped — so that statement cannot be narrowed to this stage's group the
+ * way the mutating actions are. `CreateSchedule`/`UpdateSchedule` also pass
+ * `schedulerRoleArn` as the schedule's target role, which is why
+ * `iam:PassRole` is granted on exactly that role and nothing else, mirroring
+ * `PassExecutorRunnerRoleToLaunchedInstances` below.
+ */
+export const buildControlPlanePolicy = (config: ControlPlanePolicyConfig): PolicyDocument => {
+  const ec2Resource = (resourceType: string): string =>
+    `arn:aws:ec2:${config.region}:${config.accountId}:${resourceType}/*`
+
+  const schedulerGroupResource = `arn:aws:scheduler:${config.region}:${config.accountId}:schedule/${config.schedulerGroupName}/*`
+
+  return {
+    Version: POLICY_VERSION,
+    Statement: [
+      {
+        Sid: 'ReconcileFleetVisibility',
+        Effect: 'Allow',
+        Action: ['ec2:DescribeInstances'],
+        Resource: ['*'],
+      },
+      {
+        Sid: 'LaunchAndTerminateExecutorInstances',
+        Effect: 'Allow',
+        Action: ['ec2:RunInstances', 'ec2:TerminateInstances', 'ec2:CreateTags'],
+        Resource: [ec2Resource('instance')],
+      },
+      {
+        Sid: 'RunInstancesResourceDependencies',
+        Effect: 'Allow',
+        Action: ['ec2:RunInstances'],
+        Resource: [
+          `arn:aws:ec2:${config.region}::image/*`,
+          ec2Resource('subnet'),
+          ec2Resource('network-interface'),
+          ec2Resource('security-group'),
+          ec2Resource('volume'),
+        ],
+      },
+      {
+        Sid: 'PassExecutorRunnerRoleToLaunchedInstances',
+        Effect: 'Allow',
+        Action: ['iam:PassRole'],
+        Resource: [config.executorRunnerRoleArn],
+      },
+      {
+        Sid: 'ListRegisteredSchedules',
+        Effect: 'Allow',
+        Action: ['scheduler:ListSchedules'],
+        Resource: [`arn:aws:scheduler:${config.region}:${config.accountId}:schedule/*/*`],
+      },
+      {
+        Sid: 'ManageIntegrationSchedules',
+        Effect: 'Allow',
+        Action: [
+          'scheduler:CreateSchedule',
+          'scheduler:UpdateSchedule',
+          'scheduler:DeleteSchedule',
+        ],
+        Resource: [schedulerGroupResource],
+      },
+      {
+        Sid: 'PassSchedulerInvokeRoleToScheduler',
+        Effect: 'Allow',
+        Action: ['iam:PassRole'],
+        Resource: [config.schedulerRoleArn],
+      },
+    ],
+  }
+}
+
 export const buildRunnerPolicy = (config: RunnerPolicyConfig): PolicyDocument => ({
   Version: POLICY_VERSION,
   Statement: [
@@ -193,15 +343,15 @@ export const buildRunnerPolicy = (config: RunnerPolicyConfig): PolicyDocument =>
       Effect: 'Allow',
       Action: ['s3:AbortMultipartUpload', 's3:PutObject'],
       Resource: [
-        workflowObjectArn(config.bucketNames.logs, config.workflowId),
-        workflowObjectArn(config.bucketNames.artifacts, config.workflowId),
+        runnerObjectArn(config.bucketNames.logs, config.workflowId),
+        runnerObjectArn(config.bucketNames.artifacts, config.workflowId),
       ],
     },
     {
       Sid: 'ReadWriteOwnSnapshots',
       Effect: 'Allow',
       Action: ['s3:AbortMultipartUpload', 's3:GetObject', 's3:PutObject'],
-      Resource: [workflowObjectArn(config.bucketNames.snapshots, config.workflowId)],
+      Resource: [runnerObjectArn(config.bucketNames.snapshots, config.workflowId)],
     },
     {
       Sid: 'SessionManagerChannel',
@@ -213,6 +363,52 @@ export const buildRunnerPolicy = (config: RunnerPolicyConfig): PolicyDocument =>
         'ssmmessages:OpenDataChannel',
       ],
       Resource: ['*'],
+    },
+  ],
+})
+
+// ---------------------------------------------------------------------------
+// The panel — registers the archives the executor above only ever reads
+// ---------------------------------------------------------------------------
+
+export interface PanelBundlesPolicyConfig {
+  /** Region the bundles bucket's KMS key lives in. */
+  readonly region: string
+  /** Account the bundles bucket's KMS key lives in. */
+  readonly accountId: string
+  /** Name of the bundles bucket `uploadBundleArchive` writes into. */
+  readonly bundlesBucketName: string
+}
+
+/**
+ * The AWS-managed key S3 encrypts under when a caller asks for `aws:kms` without naming a key of
+ * its own — exactly what `ARCHIVE_ENCRYPTION` in `apps/sisyphus-admin/src/lib/bundles/upload.ts`
+ * does. Granting this alias, rather than `Resource: ['*']`, is what keeps this statement scoped to
+ * the one key an upload can ever touch.
+ */
+const kmsAwsManagedS3KeyArn = (region: string, accountId: string): string =>
+  `arn:aws:kms:${region}:${accountId}:alias/aws/s3`
+
+/**
+ * What the panel's own server function may do to the bundles bucket: register an archive
+ * (`s3:PutObject`) and encrypt it under the same managed key the upload path asks for. Nothing
+ * reads a bundle back through the panel today — validation runs and executor boot both read
+ * through the runner role in {@link buildRunnerPolicy} — so this grants no `s3:GetObject`.
+ */
+export const buildPanelBundlesPolicy = (config: PanelBundlesPolicyConfig): PolicyDocument => ({
+  Version: POLICY_VERSION,
+  Statement: [
+    {
+      Sid: 'RegisterSetupBundleArchive',
+      Effect: 'Allow',
+      Action: ['s3:PutObject'],
+      Resource: [`${bucketArn(config.bundlesBucketName)}/*`],
+    },
+    {
+      Sid: 'EncryptSetupBundleArchive',
+      Effect: 'Allow',
+      Action: ['kms:GenerateDataKey'],
+      Resource: [kmsAwsManagedS3KeyArn(config.region, config.accountId)],
     },
   ],
 })
