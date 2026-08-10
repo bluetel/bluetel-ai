@@ -107,6 +107,16 @@ export interface StartWorkflowDependencies {
    * instance configuration rather than job configuration — it is identical for every run on a
    * stage — so it reaches the instance through its own environment and not through here, and
    * provisioning neither knows nor needs to know it.
+   *
+   * **That environment now has a producer, which it did not when the paragraph above was written**
+   * (T238). `packages/sisyphus-infra/src/executor-instance-environment.ts` builds it and
+   * `apps/sisyphus-executor/sst.config.ts` publishes it to
+   * `/sisyphus/<stage>/executor/instance-environment` for the instance's launch unit to read, in
+   * the same way and at the same path prefix as the executor release the unit fetches. The forge
+   * URL is one entry in it, and a stage that has not supplied one fails that deploy naming the
+   * variable. So the boundary this comment draws is unchanged and is now load-bearing in both
+   * directions: the envelope carries job configuration, the published parameter carries instance
+   * configuration, and neither restates the other.
    */
   readonly machineSurfaceUrl: string
   /** `SISYPHUS_MACHINE_CREDENTIAL_SECRET`. Never in the envelope; only what it signs is. */

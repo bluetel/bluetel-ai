@@ -23,6 +23,7 @@ import type {
 } from '../report'
 import { createShutdownRegistry } from '../runtime'
 import type { InstanceMetadataReader, SnapshotPort } from '../session'
+import { createQuietMetadataReader } from '../session'
 
 import { frameText, runExecutor, supervisionTransportFor } from './execute'
 import type { WorkflowPortsFactory } from './execute'
@@ -447,6 +448,10 @@ const harness = async (overrides: { readonly badDigest?: boolean } = {}) => {
       supervisionIntervalMs: 5,
       interruptionPollMs: 5,
       heartbeatIntervalMs: 50,
+      // Since T197 the default is the real IMDS reader, and `interruptionPollMs: 5` would have
+      // every suite here attempting a link-local request two hundred times a second. The one test
+      // that cares about a notice overrides this with a scripted reader.
+      metadata: createQuietMetadataReader(),
     },
   }
 }

@@ -75,8 +75,8 @@ import type {
   SuspendResult,
 } from '../session'
 import {
+  createImdsMetadataReader,
   createPauseIdleCeiling,
-  createQuietMetadataReader,
   pauseIdleCeilingReason,
   suspend,
   watchForInterruption,
@@ -151,7 +151,16 @@ export interface RunExecutorOptions {
   readonly spendCapsEnforceable?: boolean
   /** Credentials the setup bundle installed, so every sanitiser knows them (FR-072). */
   readonly secrets?: readonly KnownSecret[]
-  /** Defaults to a reader that never reports a notice; see `session/interruption.ts`. */
+  /**
+   * Where a reclamation notice is read from (FR-054).
+   *
+   * Defaults to {@link createImdsMetadataReader}, the real instance metadata service — which
+   * matters more than a default usually does, because `spot` is the platform's default purchase
+   * mode (003/FR-039). It used to default to `createQuietMetadataReader()`, a reader that answers
+   * "no notice" forever, so on the configuration everybody gets the watch polled a stub and every
+   * reclamation arrived unannounced. Still injectable: tests pass a scripted reader, and an
+   * instance that genuinely has no metadata service can pass `createQuietMetadataReader()`.
+   */
   readonly metadata?: InstanceMetadataReader
   /** Hooks registered here run once, in reverse order, whatever ends the run. */
   readonly shutdown?: ShutdownRegistry
@@ -490,7 +499,7 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
     polling = poller.run()
 
     watching = watchForInterruption({
-      metadata: options.metadata ?? createQuietMetadataReader(),
+      metadata: options.metadata ?? createImdsMetadataReader(),
       suspension,
       signal: watchController.signal,
       ...(options.interruptionPollMs === undefined

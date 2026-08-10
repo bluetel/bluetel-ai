@@ -10,7 +10,7 @@ import { createFakeArchiveStore, runCommand, sha256Hex } from '../bootstrap'
 import { GIT_FIXTURE_ENVIRONMENT, stripAmbientGitEnvironment } from '../git-fixture-environment'
 import type { WorkflowJobEnvelope } from '../job-envelope'
 import { parseJobEnvelope } from '../job-envelope'
-import { createSecretRegistry, sanitise } from '../output'
+import { createSecretRegistry, createSegmentWriter, sanitise } from '../output'
 
 import { bootstrapRun, setupBundleReference, workspaceEntries } from './bootstrap'
 
@@ -182,8 +182,10 @@ const envelopeFor = (options: {
   ) as WorkflowJobEnvelope
 }
 
-const harness = async (options: { readonly secondOrigin?: boolean } = {}) => {
-  const archive = await buildArchive(SETUP)
+const harness = async (
+  options: { readonly secondOrigin?: boolean; readonly setup?: string } = {},
+) => {
+  const archive = await buildArchive(options.setup ?? SETUP)
   const digest = sha256Hex(archive)
   const store = createFakeArchiveStore()
   store.put({ bucket: 'bundles', key: 'acme/3/bundle.tar.gz' }, archive)
@@ -199,6 +201,7 @@ const harness = async (options: { readonly secondOrigin?: boolean } = {}) => {
   const adapter = recordingAdapter()
   const fetches: number[] = []
   const credentialSecrets = createSecretRegistry()
+  const setupOutput: string[] = []
 
   return {
     reporter,
@@ -207,7 +210,11 @@ const harness = async (options: { readonly secondOrigin?: boolean } = {}) => {
     root,
     fetches,
     credentialSecrets,
+    setupOutput,
     options: {
+      onSetupOutput: (text: string) => {
+        setupOutput.push(text)
+      },
       envelope,
       archives: store,
       bundlesBucket: 'bundles',
@@ -439,6 +446,130 @@ describe('bootstrapRun', () => {
 
     expect(world.adapter.started).toStrictEqual([])
     expect(world.reporter.finished.map((event) => event.phase)).not.toContain('entry_checkout')
+  })
+})
+
+/**
+ * **T239 (the residue of T231), FR-045, FR-072, FR-089, 003/FR-014.**
+ *
+ * The assertion that matters is the last one in the first test, and it is written the way it is on
+ * purpose. It plants a credential in the bundle, runs the real bootstrap sequence, and then puts
+ * that credential through the **segment writer** — the one thing in the executor that writes agent
+ * output anywhere durable — rather than through the registry or the index directly. A test that
+ * checked the registry's contents would still have passed on the day `assembleRun` passed no
+ * `secrets` at all, because the registry existed and was empty and nothing downstream noticed.
+ *
+ * The planted value is deliberately in no format `output/secret-patterns.ts` recognises — no
+ * `ghp_`, no `sk-`, no JWT — and the line it is written on names no credential-ish key. Both are
+ * required for the test to be evidence about this mechanism: with either one relaxed the pattern
+ * stage would redact the line on its own and the test would pass with the seeding removed, which
+ * is exactly the class of test this task exists because of.
+ */
+const PLANTED_CREDENTIAL = 'Zq7-K2mv9RtL4xPw8Nc3'
+
+/** A client's bundle installing its repository-host credential, in the commonest shape there is. */
+const SETUP_INSTALLING_A_CREDENTIAL = [
+  '#!/bin/sh',
+  'mkdir -p "$SISYPHUS_AGENT_CONFIG_DIR/credentials"',
+  `printf '%s\\n' "${PLANTED_CREDENTIAL}" > "$SISYPHUS_AGENT_CONFIG_DIR/credentials/forge-token"`,
+  'echo "installed"',
+  'exit 0',
+  '',
+].join('\n')
+
+describe('the credentials the setup bundle installs at phase 5 (T239)', () => {
+  const segments = (registry: ReturnType<typeof createSecretRegistry>, workflowId: string) => {
+    const stored: string[] = []
+
+    return {
+      stored,
+      writer: createSegmentWriter({
+        workflowId,
+        store: {
+          put: (input) => {
+            stored.push(input.body)
+
+            return Promise.resolve()
+          },
+        },
+        reporter: { appendLogSegment: () => Promise.resolve() },
+        secrets: registry.current,
+      }),
+    }
+  }
+
+  it('are removed from a log segment written after bootstrap', async () => {
+    const world = await harness({ setup: SETUP_INSTALLING_A_CREDENTIAL })
+    const log = segments(world.credentialSecrets, world.envelope.workflowId)
+
+    await bootstrapRun(world.options)
+
+    // The shape of the leak this closes: something on the instance — the agent reading a file, git
+    // reporting a failure, a delivery step quoting a response — puts the value into the run's
+    // output long after `setup.sh` has finished.
+    await log.writer.write(`the agent printed this while listing a file: ${PLANTED_CREDENTIAL}\n`)
+    await log.writer.flush()
+
+    expect(log.stored.join('')).not.toContain(PLANTED_CREDENTIAL)
+    expect(log.stored.join('')).toContain('[redacted:bundle.forge-token]')
+  })
+
+  it('are known to the registry under the file the bundle installed them in', async () => {
+    const world = await harness({ setup: SETUP_INSTALLING_A_CREDENTIAL })
+
+    await bootstrapRun(world.options)
+
+    expect(world.credentialSecrets.current()).toContainEqual({
+      name: 'bundle.forge-token',
+      value: PLANTED_CREDENTIAL,
+    })
+  })
+
+  it('are announced to the log as a count and a file, never as a value', async () => {
+    const world = await harness({ setup: SETUP_INSTALLING_A_CREDENTIAL })
+
+    await bootstrapRun(world.options)
+
+    const note = world.setupOutput.find((text) => text.startsWith('[bundle]'))
+
+    expect(note).toContain('.agent-config/credentials')
+    expect(note).toContain('1 value')
+    expect(world.setupOutput.join('')).not.toContain(PLANTED_CREDENTIAL)
+  })
+
+  it('says so when the bundle installed none, because that is when the log is least protected', async () => {
+    const world = await harness()
+
+    await bootstrapRun(world.options)
+
+    expect(world.setupOutput.find((text) => text.startsWith('[bundle]'))).toContain(
+      'no credential values were found',
+    )
+    expect(world.credentialSecrets.current()).toHaveLength(1)
+  })
+
+  /**
+   * A **stopped** instance still has the previous boot's agent credential on its disk when phase 5
+   * runs. It is the platform's material and phase 5a registers it under its own name; picking it up
+   * here would label an operator's placeholder with a bundle file it did not come from.
+   */
+  it('leaves the agent’s own credential to phase 5a, even when it is already on the disk', async () => {
+    const world = await harness({
+      setup: [
+        '#!/bin/sh',
+        'mkdir -p "$SISYPHUS_AGENT_CONFIG_DIR/credentials"',
+        `printf '%s' '${AGENT_CREDENTIAL.material.trim()}' ` +
+          '> "$SISYPHUS_AGENT_CONFIG_DIR/credentials/.credentials.json"',
+        'exit 0',
+        '',
+      ].join('\n'),
+    })
+
+    await bootstrapRun(world.options)
+
+    expect(world.credentialSecrets.current()).toStrictEqual([
+      { name: 'agent-credential', value: AGENT_CREDENTIAL.material },
+    ])
   })
 })
 

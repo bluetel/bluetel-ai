@@ -12,11 +12,14 @@ export type { AssembledRun, AssembleRunOptions, ExecutorEnvironment } from './as
 
 export {
   bootstrapRun,
+  BUNDLE_CREDENTIAL_SCAN_LIMITS,
+  bundleCredentialNote,
   DEFAULT_BUNDLE_SUBDIRECTORY,
+  registerBundleCredentials,
   setupBundleReference,
   workspaceEntries,
 } from './bootstrap'
-export type { BootstrappedRun, RunBootstrapOptions } from './bootstrap'
+export type { BootstrappedRun, BundleCredentialScan, RunBootstrapOptions } from './bootstrap'
 
 export {
   DELIVERY_ENTRY_STEP,

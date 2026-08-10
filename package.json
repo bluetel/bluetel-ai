@@ -12,6 +12,7 @@
     "lint": "nx --no-tui run-many -t lint --configuration=fix",
     "lint:check": "nx --no-tui run-many -t lint",
     "test": "nx --no-tui run-many -t test",
+    "audit:cspell": "node scripts/audit-cspell.mjs",
     "knip": "SKIP_ENV_VALIDATION=true knip --no-progress",
     "knip:orphans": "SKIP_ENV_VALIDATION=true knip --no-progress --production --include files",
     "qlty": "qlty check --no-formatters",

@@ -10,6 +10,7 @@
  * ```
  * prepareWorkspaceRoot          the config tree exists before setup.sh is promised it
  * 2-5  runBundleBootstrap       download, verify, unpack, run setup.sh
+ *      registerBundleCredentials  what setup.sh installed, into the run's redactor  (T239)
  * 5a   installAgentCredential   the leased seat's material, from the machine surface
  * 6    checkoutWorkspace        every entry, sequentially, or none
  * 7    startAgentPhase          against a ReadyWorkspace and nothing else
@@ -57,7 +58,9 @@
  * is what lets the whole sequence be exercised without a network.
  */
 
-import { join } from 'node:path'
+import type { Dirent } from 'node:fs'
+import { readdir, readFile } from 'node:fs/promises'
+import { join, relative } from 'node:path'
 
 import type { AgentAdapter } from '../agent'
 import type {
@@ -75,6 +78,8 @@ import type {
 } from '../bootstrap'
 import {
   agentConfigDir,
+  AGENT_CREDENTIAL_FILE_NAME,
+  agentCredentialDir,
   checkoutWorkspace,
   installAgentCredential,
   prepareWorkspaceRoot,
@@ -83,6 +88,7 @@ import {
 } from '../bootstrap'
 import type { EnvelopeSetupBundle, WorkflowJobEnvelope } from '../job-envelope'
 import type { KnownSecret, SanitisedText, SecretRegistry } from '../output'
+import { bundleCredentialSecrets, sanitise } from '../output'
 import type { SkillSource } from '../skills'
 import { primarySkillSource } from '../skills'
 
@@ -174,6 +180,215 @@ export interface BootstrappedRun {
 export const DEFAULT_BUNDLE_SUBDIRECTORY = '.setup-bundle'
 
 /**
+ * Bounds on the credential scan below.
+ *
+ * Not a judgement about content. Every registered value is expanded into every encoding
+ * `output/secret-encodings.ts` can derive and then matched against every chunk of agent output, so
+ * the cost of the scan is paid on every byte of the run's log rather than once here. A directory
+ * that exceeds any of these is not the `credentials/` directory `contracts/setup-bundle.md`
+ * describes, and reading it as one would make redaction the most expensive thing in the pipeline.
+ */
+export const BUNDLE_CREDENTIAL_SCAN_LIMITS = {
+  maxFiles: 64,
+  maxFileBytes: 64 * 1024,
+  maxDepth: 4,
+} as const
+
+export interface BundleCredentialScan {
+  /** Files read. */
+  readonly files: number
+  /** Values registered, counted before the registry deduplicated them. */
+  readonly values: number
+  /** Files passed over for being too large, or binary. */
+  readonly skipped: number
+  /** Paths that exist and could not be read, relative to the credential directory. */
+  readonly unreadable: readonly string[]
+  /** Set when the scan itself failed, rather than one file within it. */
+  readonly failure?: string
+}
+
+const errorCode = (error: unknown): string | undefined => {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    return typeof error.code === 'string' ? error.code : undefined
+  }
+
+  return undefined
+}
+
+/**
+ * **Everything the bundle installed at phase 5, handed to the run's redactor (T239, T231, FR-072,
+ * FR-089, 003/FR-014).**
+ *
+ * `createSecretRegistry` gave the run a set of known values that can grow after the sanitisers were
+ * built, and the agent's own credential grows it — at `credential_install` and at every rotation.
+ * The **client's** credentials grew it not at all: `assembleRun` passes no `secrets` and
+ * `RunExecutorOptions.secrets` is an array snapshotted before bootstrap, so a value installed at
+ * phase 5 structurally cannot be in it. The registry was therefore empty of exactly the credentials
+ * FR-072 is about, and the only thing between a client's repository-host token and the log the panel
+ * streams was pattern matching — which by construction catches formats somebody anticipated, and a
+ * client-authored bundle is the case where nobody did.
+ *
+ * This is the seeding, done **where the values become knowable** rather than where the task that
+ * asked for it expected them: at the end of phase 5, against the registry `runExecutor` already
+ * threads in for phase 5a. Nothing about it is knowable at assembly time — see `./assemble.ts`.
+ *
+ * ## It reads the directory rather than being told what is in it
+ *
+ * `contracts/setup-bundle.md` gives the bundle `credentials/` and says only "whatever setup.sh
+ * needs". There is no manifest of installed values and inventing one would be a contract change
+ * every bundle already in a client's hands would fail — the argument `./forge-credential.ts` makes
+ * at length about not inventing a file name. So the values are read back off the disk the bundle
+ * just wrote to, and `output/bundle-secrets.ts` does the guessing about which strings in them are
+ * credentials.
+ *
+ * ## What it deliberately does not cover
+ *
+ * A bundle that installs a credential **outside** the pinned root — a git helper writing
+ * `~/.git-credentials`, a keyring, an environment variable exported into a shell — is not read
+ * here, and reading the whole file system to find it would be both unbounded and a way for a test
+ * to register the developer's own credentials. Nor does it protect `setup.sh`'s own output *during*
+ * phase 5: a script that echoes its token is redacted by the pattern stage alone, because the value
+ * is not knowable until the script that installs it has finished. What this closes is the long tail
+ * that follows — every line the agent, git and the delivery steps write for the rest of the run.
+ *
+ * ## It cannot fail the run
+ *
+ * A credential directory that cannot be read is reported and skipped rather than raised. This is a
+ * defence-in-depth layer over a pattern stage that still runs; failing bootstrap here would take
+ * runs that work today and stop them, which is a larger harm than the one it would prevent.
+ *
+ * @param options - The pinned workspace root, and the registry every redaction site reads.
+ * @returns What was read and what was registered, for the note the caller writes to the log.
+ */
+export const registerBundleCredentials = async (options: {
+  readonly workspaceRoot: string
+  readonly secrets: SecretRegistry
+}): Promise<BundleCredentialScan> => {
+  const root = agentCredentialDir(options.workspaceRoot)
+  const unreadable: string[] = []
+  let files = 0
+  let values = 0
+  let skipped = 0
+
+  const walk = async (directory: string, depth: number): Promise<void> => {
+    if (
+      depth > BUNDLE_CREDENTIAL_SCAN_LIMITS.maxDepth ||
+      files >= BUNDLE_CREDENTIAL_SCAN_LIMITS.maxFiles
+    ) {
+      return
+    }
+
+    let entries: Dirent[]
+
+    try {
+      entries = await readdir(directory, { withFileTypes: true })
+    } catch (error) {
+      // A bundle that installs no credentials at all is ordinary — the directory is created by
+      // phase 5a, which has not run yet — so its absence is not worth a line in anybody's log.
+      if (errorCode(error) !== 'ENOENT') {
+        unreadable.push(relative(root, directory) || '.')
+      }
+
+      return
+    }
+
+    for (const entry of entries) {
+      if (files >= BUNDLE_CREDENTIAL_SCAN_LIMITS.maxFiles) {
+        return
+      }
+
+      const path = join(directory, entry.name)
+
+      if (entry.isDirectory()) {
+        await walk(path, depth + 1)
+
+        continue
+      }
+
+      // The agent's own login is the platform's, not the bundle's, and phase 5a registers it under
+      // its own name. On a resumed instance last boot's copy is still on this disk; registering it
+      // a second time under a bundle name would mislabel the placeholder an operator reads.
+      if (!entry.isFile() || entry.name === AGENT_CREDENTIAL_FILE_NAME) {
+        continue
+      }
+
+      let bytes: Buffer
+
+      try {
+        bytes = await readFile(path)
+      } catch {
+        unreadable.push(relative(root, path))
+
+        continue
+      }
+
+      files += 1
+
+      // A key store, an archive, a binary blob: nothing with fields to find, and decoding it as
+      // UTF-8 would produce replacement characters rather than values.
+      if (bytes.byteLength > BUNDLE_CREDENTIAL_SCAN_LIMITS.maxFileBytes || bytes.includes(0)) {
+        skipped += 1
+
+        continue
+      }
+
+      for (const secret of bundleCredentialSecrets({
+        relativePath: relative(root, path),
+        text: bytes.toString('utf8'),
+      })) {
+        options.secrets.add(secret)
+        values += 1
+      }
+    }
+  }
+
+  await walk(root, 0)
+
+  return { files, values, skipped, unreadable }
+}
+
+/**
+ * One line of log saying what the run's redactor now knows — and never a value.
+ *
+ * Written on every boot, including the boot that found nothing, because "the bundle installed no
+ * credential this run knows about" is the condition under which the log is protected by pattern
+ * matching alone and an operator reading a leak afterwards should be able to see that it held.
+ *
+ * @param scan - What {@link registerBundleCredentials} read.
+ * @param directory - The credential directory, relative to the workspace root.
+ */
+export const bundleCredentialNote = (scan: BundleCredentialScan, directory: string): string => {
+  const trailer = [
+    ...(scan.skipped === 0 ? [] : [`${String(scan.skipped)} skipped as too large or not text`]),
+    ...(scan.unreadable.length === 0 ? [] : [`${scan.unreadable.join(', ')} could not be read`]),
+  ]
+  const suffix = trailer.length === 0 ? '' : ` (${trailer.join('; ')})`
+
+  if (scan.failure !== undefined) {
+    return (
+      `[bundle] ${directory} could not be examined, so whatever the setup bundle installed is ` +
+      `known to this run’s log only by the shape of it (FR-072, FR-089): ${scan.failure}\n`
+    )
+  }
+
+  if (scan.values === 0) {
+    return (
+      `[bundle] no credential values were found under ${directory}, so anything the setup bundle ` +
+      `installed is known to this run’s log only by the shape of it (FR-072, FR-089)${suffix}\n`
+    )
+  }
+
+  const one = scan.values === 1
+
+  return (
+    `[bundle] ${String(scan.values)} value${one ? '' : 's'} the setup bundle installed under ` +
+    `${directory} (${String(scan.files)} file${scan.files === 1 ? '' : 's'}) ` +
+    `${one ? 'is' : 'are'} now known to this run’s redactor and will be removed from this run’s ` +
+    `output wherever ${one ? 'it appears' : 'they appear'} (FR-072)${suffix}\n`
+  )
+}
+
+/**
  * Run bootstrap phases 2 through 7, including 5a on every boot (003/FR-050).
  *
  * @param options - The envelope, the object store, the phase reporter, the agent adapter and the
@@ -203,6 +418,35 @@ export const bootstrapRun = async (options: RunBootstrapOptions): Promise<Bootst
     ...(options.onSetupOutput === undefined ? {} : { onOutput: options.onSetupOutput }),
     ...(options.now === undefined ? {} : { now: options.now }),
   })
+
+  // Phase 5's residue, and the moment it becomes possible (T239, FR-072). `setup.sh` has just
+  // finished, so whatever credentials this client's bundle installs are now on the disk; before it
+  // ran there was nothing to read and no array taken at assembly time could have held them. Not a
+  // phase of its own: it reports no outcome, it cannot fail the run, and inserting a step into
+  // `BOOTSTRAP_PHASES` would change a table the control plane and the panel both read.
+  const scan = await registerBundleCredentials({
+    workspaceRoot,
+    secrets: options.credentialSecrets,
+  }).catch(
+    (error: unknown): BundleCredentialScan => ({
+      files: 0,
+      values: 0,
+      skipped: 0,
+      unreadable: [],
+      failure: error instanceof Error ? error.message : String(error),
+    }),
+  )
+
+  options.onSetupOutput?.(
+    sanitise(
+      bundleCredentialNote(scan, relative(workspaceRoot, agentCredentialDir(workspaceRoot))),
+      {
+        // Through the registry it just seeded: the note names files and counts, never values, and
+        // sanitising it anyway means there is no line in this module exempt from the pipeline.
+        secrets: options.credentialSecrets.current,
+      },
+    ),
+  )
 
   // Phase 5a. Unconditional — see the module note: this is the only boot path there is, so a
   // restore boot and a resumed-instance boot reach this line exactly as a first boot does

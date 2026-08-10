@@ -440,28 +440,46 @@ The outcome names are **FR-064's closed set, verbatim** — `succeeded`, `failed
 (FR-009), so there is one vocabulary and no translation layer.
 
 ```
-                 ┌────────────────────────────────────────────────┐
-                 ▼                                                │
-  queued ──> provisioning ──> running ──┬──> paused ──────────────┘  (resume)
-                   │             │       │      │
-                   │             │       │      └──> parked_resumable ──> provisioning  (resume, new instance)
-                   │             │       │
-                   │             │       ├──> succeeded
-                   │             │       ├──> capped
-                   │             │       ├──> cancelled            (Stop — FR-049)
-                   │             │       └──> needs_attention
-                   │             │
-                   └─────────────┴──> failed
+                    ┌────────────────────────────────────────────────┐
+                    ▼                                                │
+  queued ──┬──> provisioning ──> running ──┬──> paused ──────────────┘  (resume)
+           │          │             │       │      │
+           │          │             │       │      └──> parked_resumable ──> provisioning  (resume, new instance)
+           │          │             │       │
+           │          │             │       ├──> succeeded
+           │          │             │       ├──> capped
+           │          │             │       ├──> cancelled            (Stop — FR-049)
+           │          │             │       └──> needs_attention
+           │          │             │
+           │          └─────────────┴──> failed
+           │
+           └──> awaiting_credential ──┬──> provisioning       (a seat is granted — 003/FR-026)
+                                      ├──> cancelled          (Stop applied in place — 003/FR-027)
+                                      └──> failed             (the wait limit — 003/FR-028)
 ```
 
 | State                                                               | Meaning                                                                                                                                  | Valid exits                                                                                   |
 | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `queued`                                                            | Created, awaiting admission under the ceiling                                                                                            | `provisioning`, `failed`, `cancelled`                                                         |
+| `queued`                                                            | Created, awaiting admission under the ceiling                                                                                            | `awaiting_credential`, `provisioning`, `failed`, `cancelled`                                  |
+| `awaiting_credential`                                               | No agent credential in its profile's attached groups was free; holds no compute lease and no seat (`003/FR-024`, `003/FR-025`)           | `provisioning` (a seat is granted), `cancelled` (Stop), `failed` (the `003/FR-028` limit)     |
 | `provisioning`                                                      | Instance requested, bootstrap phases running                                                                                             | `running`, `failed`                                                                           |
 | `running`                                                           | Agent working                                                                                                                            | `paused`, `parked_resumable`, `succeeded`, `failed`, `capped`, `cancelled`, `needs_attention` |
 | `paused`                                                            | Turn consumption stopped, snapshot taken, instance stopped with its disk retained (`003/FR-039`; was "process alive" under `002/FR-049`) | `running`, `parked_resumable`, `cancelled`, `failed`                                          |
 | `parked_resumable`                                                  | Snapshot persisted, compute released, awaiting a human                                                                                   | `provisioning` (resume), or stays parked                                                      |
 | `succeeded` / `failed` / `capped` / `cancelled` / `needs_attention` | Absorbing                                                                                                                                | —                                                                                             |
+
+**`awaiting_credential` is a wait for a _seat_, not for the ceiling.** A run enters it from `queued` when
+admission finds no agent credential free in its execution profile's attached groups (`003/FR-024`), and it holds
+**no compute lease** for the whole wait — which is how `003/FR-025` is satisfied by construction rather than by
+releasing something afterwards. It holds no seat either: reserving one and moving on to `provisioning` are the
+same act, so the only moment a waiting row and a live agent-credential lease coexist is the instant a grant is
+being committed. It is deliberately not an overload of `queued`, which already means "waiting on the FR-040
+ceiling": the two scarcities have different remedies, `003/FR-029` must report which of them is biting, and
+every query filtering on `queued` would otherwise have silently changed meaning. There is no
+`awaiting_credential_since` column — the wait is a `workflow_events` row carrying the reason, and that entry is
+the clock `003/FR-028` counts from. The value sits between `queued` and `provisioning` in
+`packages/sisyphus-api/src/enums/workflow-state.ts` and therefore in the Postgres enum generated from it, so
+this table's order is the enum's order (FR-009).
 
 **`cancelled` is where Stop lands.** FR-049's Stop "ends the run cleanly after capturing everything" and
 previously had no outcome to record; a stopped run is not a failure and must not be counted as one.
@@ -484,6 +502,18 @@ time_; without that reading, FR-064 and FR-151 cannot both hold.
   leases rather than workflow rows, because a lease is what actually costs money. A workflow may sit `queued`
   indefinitely without that being a failure; the panel shows queue position so a wait is legible rather than
   looking like a stall.
+- **A waiting run counts as live even though it holds nothing.** `awaiting_credential` is a member of the
+  active-state list alongside `queued`, `provisioning`, `running` and `paused`, so the FR-039 sweep goes on
+  treating it as alive. That membership is load-bearing rather than tidy: the same sweep resolves agent
+  credential leases whose workflow is no longer live (`003/FR-022`), and a waiting run read as finished would
+  have the seat it has just been granted swept back out from under it.
+- **All three of `awaiting_credential`'s exits are decided elsewhere.** The drain re-offers every waiting run to
+  the same admission path on each pass, and a run that gets a seat is admitted by exactly the code that admits
+  everything else, straight to `provisioning` (`003/FR-026`) — there is no separate grant path that would
+  reimplement the ceiling, the row lock and the FR-078 index. A Stop is **applied in place** rather than queued
+  as a supervision command, because a waiting run has no executor to collect one and must terminate without
+  ever provisioning an instance (`003/FR-027`). Passing the configured wait limit fails it naming credential
+  exhaustion (`003/FR-028`). At the FR-040 ceiling it stays where it is rather than dropping back to `queued`.
 - **Starting the same workflow twice concurrently provisions at most one instance** (FR-078). Enforced by a
   partial unique index on `compute_leases (workflow_id) WHERE released_at IS NULL`, so the second admission
   loses on the index rather than on application timing. The loser returns the existing workflow, not an error —

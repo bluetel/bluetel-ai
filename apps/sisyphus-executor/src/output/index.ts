@@ -10,6 +10,11 @@
 
 export { AGENT_CREDENTIAL_SECRET_NAME, agentCredentialSecret } from './agent-credential'
 
+// Only the composition site's entry point. The parsing rules underneath it — which strings in a
+// credential file are values, and what they are named — are this directory's business and are
+// exercised by the module's own colocated suite.
+export { bundleCredentialSecrets } from './bundle-secrets'
+
 export { scanControlTokens } from './control-tokens'
 export type { ControlToken, ControlTokenScan, ControlTokenScanOptions } from './control-tokens'
 
