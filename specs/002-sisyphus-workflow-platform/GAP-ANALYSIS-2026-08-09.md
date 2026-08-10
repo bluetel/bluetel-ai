@@ -12,9 +12,12 @@ base: analysis/spec2-gap @ 467e088 (branched from feature/sisyphus-4)
 Where `tasks.md` and the source disagree, the source wins and the disagreement is called out. No source file
 was modified.
 
-> **Companion**: [SPEC-003-004-IMPACT-2026-08-09.md](./SPEC-003-004-IMPACT-2026-08-09.md) assesses how specs
-> 003 and 004 change this list, and revises the ordering in §8. It **corrects the A6 ranking below** and folds
-> T210 into spec 003's work. Read both before planning from this one.
+> **Companions, in order**:
+> [SPEC-003-004-IMPACT-2026-08-09.md](./SPEC-003-004-IMPACT-2026-08-09.md) assesses how specs 003 and 004
+> change this list and revises the ordering. It **corrects the A6 ranking below**.
+> [PR-19-IMPACT-2026-08-10.md](./PR-19-IMPACT-2026-08-10.md) re-runs that assessment against spec 003 **as
+> delivered** in PR #19: **T210 is done and can be ticked**, T231 is half done and needs re-scoping, and the
+> other 32 remain. Read the newest for current status; this document remains the underlying survey.
 
 **Scoreboard**: 232 tasks. **198 checked, 34 open.** The requirements checklist
 (`checklists/requirements.md`) has zero open items and the spec carries no `NEEDS CLARIFICATION` markers, so
