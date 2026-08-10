@@ -58,6 +58,14 @@ export const PROFILE_ENABLE_ELEMENTS = [
   'profile_version',
   'setup_bundle',
   'workspace_version',
+  /**
+   * The profile's attached credential groups (003/FR-065). Its own element rather than folded into
+   * `profile_version`, because attachments hang off the **mutable profile row** and not off a
+   * version — see {@link credentialGroupAttachmentCheck} — so a failure here is fixed on a
+   * different screen from every other element in this list, and publishing a new version does not
+   * touch it.
+   */
+  'credential_group',
 ] as const
 
 export type ProfileEnableElement = (typeof PROFILE_ENABLE_ELEMENTS)[number]
@@ -100,6 +108,90 @@ export const unreadableSubjectCheck = (): ProfileEnableCheck =>
         'the setup bundle version or workspace version this profile pins could not be read, so it cannot be validated',
     },
   ])
+
+/** One attached credential group, as far as this gate is concerned (003/FR-062). */
+export interface AttachedCredentialGroup {
+  readonly name: string
+  readonly enabled: boolean
+  readonly archivedAt: Date | null
+  readonly position: number
+}
+
+/**
+ * 003/FR-065's unlaunchable gate — an execution profile with no attached credential group.
+ *
+ * ## Why this is checked here and not at launch
+ *
+ * Every run performs its work as an agent credential, and a credential is only reachable through a
+ * group its profile is attached to (003/FR-063). A profile with no attachment therefore has no
+ * capacity it is allowed to draw on — not "none right now", but none that any future registration
+ * could give it without somebody editing this profile. Discovering that at admission would mean the
+ * run has already been accepted, has already told an engineer it is starting, and has to be failed
+ * or parked in `awaiting_credential` for a wait that can never end; 003/FR-029 would report it as
+ * exhaustion, which is exactly the wrong diagnosis for a configuration fault. **Refusing at
+ * configuration time is what turns that into a form error in front of the one person who can fix
+ * it**, which is the whole of what the requirement asks for.
+ *
+ * ## Why it names the missing attachment
+ *
+ * Same argument the module note makes about the other elements: "this profile cannot be enabled" is
+ * not actionable in a form holding a bundle, a workspace, a dozen repositories and a group list.
+ * The refusal says which of those is empty.
+ *
+ * ## Why an attachment can also be present and useless
+ *
+ * A group that has been archived, or disabled, withholds every member from selection (003/FR-006
+ * applied group-wide). A profile attached only to such groups satisfies "has an attachment" while
+ * having exactly the same launch behaviour as one with none, so it is refused too — and refused
+ * with a *different* sentence, because the fix is different: one administrator needs to attach a
+ * group, the other needs to re-enable the one already attached.
+ *
+ * @param attachments - The profile's attachments, from `readProfileCredentialGroups`. Read off the
+ *   **mutable `execution_profiles` row** rather than off a version; see `db/schema/credential.ts`
+ *   and data-model.md for why that deviates from 002's pattern deliberately.
+ */
+export const credentialGroupAttachmentCheck = (
+  attachments: readonly AttachedCredentialGroup[],
+): ProfileEnableCheck => {
+  if (attachments.length === 0) {
+    return verdict([
+      {
+        element: 'credential_group',
+        detail:
+          'this execution profile has no attached credential group, so a run launched from it would have no agent identity it is permitted to work as; attach at least one group before enabling it',
+      },
+    ])
+  }
+
+  const usable = attachments.filter(
+    (attachment) => attachment.enabled && attachment.archivedAt === null,
+  )
+
+  if (usable.length === 0) {
+    return verdict([
+      {
+        element: 'credential_group',
+        detail: `every credential group attached to this execution profile is unavailable (${attachments
+          .map((attachment) => attachment.name)
+          .join(', ')}), so no credential could ever be selected for a run launched from it`,
+      },
+    ])
+  }
+
+  return verdict([])
+}
+
+/**
+ * Combine independent verdicts into one, preserving the order the checks were given in.
+ *
+ * The gate reports **every** failure rather than the first, and that rule has to survive the gate
+ * being made of more than one function: an administrator with an unattached credential group *and*
+ * a disabled setup bundle should learn both in one attempt, not discover the second after fixing
+ * the first.
+ */
+export const mergeProfileEnableChecks = (
+  ...checks: readonly ProfileEnableCheck[]
+): ProfileEnableCheck => verdict(checks.flatMap((check) => check.failures))
 
 /**
  * Run the gate (FR-124).

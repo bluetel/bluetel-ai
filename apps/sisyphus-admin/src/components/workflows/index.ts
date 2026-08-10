@@ -64,6 +64,19 @@ export {
 } from './watch-toggle'
 export type { WatchNotice, WatchResult } from './watch-toggle'
 
+export { toCredentialWaitReadout } from './credential-wait'
+export type { CredentialWaitReadout } from './credential-wait'
+
+/**
+ * The park ahead of a paused run (003/FR-047).
+ *
+ * The ceiling comes with it because it is a *parameter* rather than a fact this application owns —
+ * see `parking-countdown.ts` on why the panel holds a third copy of a number the executor and the
+ * control plane also hold, and what would have to happen for it to hold none.
+ */
+export { PAUSE_IDLE_CEILING_MS, toParkingCountdownReadout } from './parking-countdown'
+export type { ParkingCountdownReadout } from './parking-countdown'
+
 export { formatRetryDelay, toStorageParkReadout } from './storage-park'
 export type { StorageParkReadout, StorageParkResult } from './storage-park'
 

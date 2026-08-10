@@ -25,9 +25,21 @@ describe('the machine barrel', () => {
       'reportReviewerSummary',
       'reportSkillReference',
       'reportExternalAction',
+      'fetchAgentCredential',
+      'reportCredentialRotation',
     ] as const) {
       expect(typeof barrel[name]).toBe('function')
     }
+  })
+
+  it('exports the machine-side material seam, which a host has to supply (003/FR-012)', () => {
+    expect(typeof barrel.agentCredentialMaterialStore).toBe('function')
+    expect(typeof barrel.createRefusingMaterialStore).toBe('function')
+    // An unwired deployment refuses in both directions rather than reading nothing or swallowing a
+    // write; see `./credential-material.ts` for why that asymmetry with the notifier is deliberate.
+    expect(barrel.MATERIAL_STORE_NOT_CONFIGURED_REASON).toContain(
+      'no agent credential material store',
+    )
   })
 
   it('exports the audit path the entry-result guard records under', () => {

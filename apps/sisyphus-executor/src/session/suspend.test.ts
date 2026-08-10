@@ -102,14 +102,22 @@ describe('suspensionPlanFor — the only difference between the three causes', (
     expect(suspensionPlanFor('stop').boundary).toBe('stop')
   })
 
-  it('holds compute for a pause and releases it immediately for the other two', () => {
-    expect(suspensionPlanFor('pause').computeRelease).toBe('on-idle-ceiling')
+  it('leaves a pause’s compute to the control plane and releases the other two here', () => {
+    // 003/FR-039. `on-instance-stop` is not "hold this for ever" and is not "release it": it is
+    // somebody else, from outside, stopping the instance with its disk retained. The executor
+    // cannot do that itself — the launch sets `InstanceInitiatedShutdownBehavior: 'terminate'`, so
+    // an executor that shut itself down would destroy the disk the pause exists to keep.
+    expect(suspensionPlanFor('pause').computeRelease).toBe('on-instance-stop')
     expect(suspensionPlanFor('interruption').computeRelease).toBe('immediate')
     expect(suspensionPlanFor('stop').computeRelease).toBe('immediate')
   })
 
-  it('keeps the agent alive on a pause and only on a pause', () => {
-    expect(suspensionPlanFor('pause').stopsAgent).toBe(false)
+  it('ends the agent on every cause, including a pause (003/FR-039)', () => {
+    // False for a pause under `002/FR-049`, when a pause held the process alive on a running
+    // instance. Now the instance is about to be frozen, and an agent still writing to the working
+    // tree after the snapshot of it was taken would leave the two disagreeing — silently, and
+    // unrecoverably on the FR-043 path where the snapshot is all that survives.
+    expect(suspensionPlanFor('pause').stopsAgent).toBe(true)
     expect(suspensionPlanFor('interruption').stopsAgent).toBe(true)
     expect(suspensionPlanFor('stop').stopsAgent).toBe(true)
   })
@@ -127,6 +135,9 @@ describe('suspend', () => {
       'registerSnapshot',
       'acknowledge',
       'markSuspended',
+      // Last, and last on every cause since 003/FR-039: the agent is ended only once everything
+      // that had to be captured and told has been.
+      'agent.stop',
     ])
     expect(harness.calls.indexOf('acknowledge')).toBeGreaterThan(
       harness.calls.indexOf('registerSnapshot'),
@@ -169,13 +180,132 @@ describe('suspend', () => {
     ])
   })
 
-  it('leaves the agent process alive on a pause', async () => {
-    const harness = harnessFor('pause')
+  /**
+   * 003/T060, FR-030, R3. The rotation flush is the difference between a seat that resumes and one
+   * needing an administrator to log in again, so the assertions here are about *when* it runs and
+   * about it running for **every** cause — the second of which is only true because `suspend()` is
+   * the single routine all three reach.
+   */
+  describe('the credential rotation flush (003/FR-030)', () => {
+    it('writes a rotation through for a pause, an interruption and a stop alike', async () => {
+      for (const reason of ['pause', 'interruption', 'stop'] as const) {
+        const harness = harnessFor(reason, {
+          flushCredentialRotation: () => Promise.resolve('reported'),
+        })
 
-    await suspend(harness.options)
+        // Substituted so the recorded order includes it; the harness's own
+        // callbacks push their names the same way.
+        const options = {
+          ...harness.options,
+          flushCredentialRotation: () => {
+            harness.calls.push('flushCredentialRotation')
 
-    expect(harness.calls).not.toContain('agent.stop')
+            return Promise.resolve('reported')
+          },
+        }
+
+        await suspend(options)
+
+        expect(harness.calls).toContain('flushCredentialRotation')
+      }
+    })
+
+    it('flushes after the turn boundary and before anything that can park', async () => {
+      const harness = harnessFor('pause')
+      const options = {
+        ...harness.options,
+        flushCredentialRotation: () => {
+          harness.calls.push('flushCredentialRotation')
+
+          return Promise.resolve('reported')
+        },
+      }
+
+      await suspend(options)
+
+      // After `quiesce`, because only then is the agent no longer writing the file. Before
+      // `capture`, because the capture can park for minutes against unreachable storage and a
+      // rotation must not be waiting behind it when the instance goes away.
+      expect(harness.calls.slice(0, 3)).toStrictEqual([
+        'quiesce',
+        'flushCredentialRotation',
+        'capture',
+      ])
+    })
+
+    it('does not flush when no turn boundary was reached', async () => {
+      const harness = harnessFor('pause', {
+        agent: {
+          quiesce: () => Promise.reject(new AgentAdapterError('quiesce-timeout', 'still working')),
+          stop: () => Promise.resolve({}),
+        },
+        flushCredentialRotation: () => {
+          harness.calls.push('flushCredentialRotation')
+
+          return Promise.resolve('reported')
+        },
+      })
+
+      await expect(suspend(harness.options)).rejects.toThrow()
+
+      // Nothing is lost by this: the suspension was refused, so the run carries on with its watcher
+      // still armed, and the next suspension flushes what this one did not.
+      expect(harness.calls).not.toContain('flushCredentialRotation')
+    })
+
+    it('does not fail the suspension when the flush fails', async () => {
+      const harness = harnessFor('stop', {
+        flushCredentialRotation: () => Promise.reject(new Error('machine surface unreachable')),
+      })
+
+      // Losing a rotation is bad. Losing the snapshot to it would be worse: the snapshot is the
+      // work, and the seat is recoverable by an administrator while the work is not.
+      const result = await suspend(harness.options)
+
+      expect(result.snapshot).toStrictEqual(CAPTURED)
+      expect(harness.calls).toContain('registerSnapshot')
+    })
+
+    it('suspends normally when no watcher was armed', async () => {
+      const harness = harnessFor('pause')
+
+      await expect(suspend(harness.options)).resolves.toMatchObject({ acknowledged: true })
+    })
+  })
+
+  /**
+   * **003/T098, FR-039 — the hold-alive path is gone, and the rotation flush is still ahead of it.**
+   *
+   * Both halves matter and the order of the recorded calls carries both: the agent is ended, so
+   * nothing writes to the working tree after the snapshot was captured; and `flushCredentialRotation`
+   * ran before the capture, so a rotation observed moments before the instance is frozen was
+   * written through rather than left in a debounce window on a disk about to stop being touched.
+   * A flush moved below the agent stop would be a flush of a file the agent may never have finished
+   * writing.
+   */
+  it('ends the agent on a pause and releases no compute itself (003/FR-039)', async () => {
+    const flushed: string[] = []
+    const harness = harnessFor('pause', {
+      flushCredentialRotation: () => {
+        flushed.push('flush')
+
+        return Promise.resolve()
+      },
+    })
+
+    const result = await suspend(harness.options)
+
+    expect(harness.calls).toContain('agent.stop')
+    // The control plane stops the instance, from outside, off the acknowledged pause. Nothing here
+    // hands compute back, and `computeReleased` says so.
     expect(harness.calls).not.toContain('releaseCompute')
+    expect(result.computeReleased).toBe(false)
+    expect(result.plan.computeRelease).toBe('on-instance-stop')
+
+    // The T060 flush, still ahead of the capture and therefore ahead of everything below it.
+    expect(flushed).toStrictEqual(['flush'])
+    expect(harness.calls.indexOf('quiesce')).toBeLessThan(harness.calls.indexOf('capture'))
+    expect(harness.calls.indexOf('capture')).toBeLessThan(harness.calls.indexOf('agent.stop'))
   })
 
   it('ends the agent and gives the compute back on an interruption', async () => {
@@ -270,6 +400,7 @@ describe('suspend', () => {
       'registerSnapshot',
       'acknowledge',
       'markSuspended',
+      'agent.stop',
     ])
   })
 

@@ -18,6 +18,11 @@ const EMPTY_WORKSPACE_LINE =
   'version 4 of the workspace Payments contains no repositories, so a run launched from this profile would have nothing to check out'
 const NO_VERSION_LINE =
   'this execution profile has no published version, so there is no configuration to validate'
+/** 003/FR-065's two sentences, exactly as `credentialGroupAttachmentCheck` composes them. */
+const NO_GROUP_LINE =
+  'this execution profile has no attached credential group, so a run launched from it would have no agent identity it is permitted to work as; attach at least one group before enabling it'
+const UNUSABLE_GROUP_LINE =
+  'every credential group attached to this execution profile is unavailable (Payments), so no credential could ever be selected for a run launched from it'
 const UNKNOWN_LINE = 'the launch template failed a check nobody has written a name for yet'
 
 describe('classifyEnableFailure (FR-124)', () => {
@@ -33,8 +38,32 @@ describe('classifyEnableFailure (FR-124)', () => {
     expect(classifyEnableFailure(NO_VERSION_LINE)).toBe('profile_version')
   })
 
+  it('recognises a profile with no attached credential group (003/FR-065)', () => {
+    expect(classifyEnableFailure(NO_GROUP_LINE)).toBe('credential_group')
+  })
+
+  it('recognises attached groups that are all unavailable, which is the same element', () => {
+    expect(classifyEnableFailure(UNUSABLE_GROUP_LINE)).toBe('credential_group')
+  })
+
   it('falls back rather than dropping a wording the gate grows tomorrow', () => {
     expect(classifyEnableFailure('something new went wrong')).toBe('unclassified')
+  })
+})
+
+describe('the 003/FR-065 element (credential groups)', () => {
+  it('sends the admin to the attachment screen, not to publishing another version', () => {
+    const failures = readEnableFailures(gateMessage(NO_GROUP_LINE))
+
+    expect(failures[0]?.error.code).toBe('E_PROFILE_ENABLE_CREDENTIAL_GROUP')
+    expect(failures[0]?.error.action).toContain('credential groups screen')
+    expect(failures[0]?.error.action).toContain('attachments are not part of a version')
+  })
+
+  it('is reported beside the other elements rather than instead of them', () => {
+    const failures = readEnableFailures(gateMessage(BUNDLE_LINE, NO_GROUP_LINE))
+
+    expect(failures.map((failure) => failure.element)).toEqual(['setup_bundle', 'credential_group'])
   })
 })
 

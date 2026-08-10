@@ -1,6 +1,6 @@
 import type { ComputeLease, SisyphusDatabase } from '@bluetel-ai/sisyphus-api/db'
-import { computeLeases, workflows } from '@bluetel-ai/sisyphus-api/db'
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { computeLeases, workflowEvents, workflows } from '@bluetel-ai/sisyphus-api/db'
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import type { JobOutcome } from './run-job'
 import { runJob } from './run-job'
@@ -48,6 +48,38 @@ import { runJob } from './run-job'
  * the clock for a lease that is still live — which is why {@link summariseComputeCost} is exposed
  * separately from the write: the panel can show a running figure for a live run without this job
  * committing one.
+ *
+ * ## A paused run costs storage and not compute (003/FR-042, SC-008)
+ *
+ * 002 held a paused run's instance alive, so the lease lifetime *was* the billed lifetime and this
+ * module could subtract nothing. 003/FR-039 stops the instance instead, and SC-008 states the
+ * consequence flatly: **"a paused workflow's compute cost is zero for the duration of the pause"**.
+ * A lease lifetime that still counted those hours would report the exact number the change was made
+ * to eliminate — and would report it as though nothing had changed, which is worse than reporting
+ * nothing, because it would look like the pause did not work.
+ *
+ * So the lifetime is split. {@link ComputeCostBasis.billableMs} still means what it meant — how long
+ * the lease held capacity — and {@link ComputeCostBasis.pausedMs} is how much of that the instance
+ * spent stopped, with {@link ComputeCostBasis.computeMs} the difference and the only thing
+ * {@link ComputeCostBasis.cost} is derived from. Keeping all three is what makes the figure
+ * auditable: "we billed you for four of the six hours you held this lease, and here are the two we
+ * did not" is a statement somebody can check, and "we billed you for four hours" is not.
+ *
+ * **Where the paused hours come from, and why not from a column.** The timeline already records
+ * every `paused` and every `resumed` row, written inside `acknowledgeSupervisionCommand`'s
+ * transaction and by `jobs/start-workflow.ts`'s resume. Pairing them gives the pause windows
+ * exactly, for a run paused and resumed any number of times. A `workflows.paused_ms` counter would
+ * be a second copy of a fact the timeline already holds, would have to be incremented by whichever
+ * of several paths ended a pause, and would disagree with the timeline the first time one of them
+ * did not — the same reasoning `reconcile.ts` gives for reading `paused_at` off the timeline rather
+ * than adding a column for it.
+ *
+ * **Storage is reported for the pause and only for the pause.** FR-042 asks for a paused run's
+ * storage to be *visible*, and what makes it visible is precisely that it is the cost that did not
+ * go away when compute did. {@link ComputeCostBasis.pausedStorageCost} is therefore the price of
+ * the retained disk over the paused hours, from a storage rate on the same injected card — not an
+ * attempt to attribute storage across the run's whole life, which would need a volume size this
+ * module has no business asking EC2 for.
  */
 
 export const COST_BASIS_JOB_NAME = 'record-cost-basis'
@@ -74,6 +106,15 @@ export interface ComputeRateKey {
  */
 export interface ComputeRateCard {
   readonly hourlyRate: (key: ComputeRateKey) => string | undefined
+  /**
+   * What the run's retained disk costs per hour while its instance is stopped (003/FR-042).
+   *
+   * Keyed the same way, because the disk a run keeps is the one its instance class was launched
+   * with — a configured pairing, not a fact this module can derive. Optional on the interface so
+   * every card written before pause existed is still a card; a card without one reports the paused
+   * hours and declines to price them, which is an honest gap rather than a zero.
+   */
+  readonly storageHourlyRate?: (key: ComputeRateKey) => string | undefined
 }
 
 /**
@@ -83,9 +124,15 @@ export interface ComputeRateCard {
  * environment variable, a parameter-store value — without needing a nested shape.
  *
  * @param rates - Hourly rates as decimal strings, so a price is never a float in transit.
+ * @param storageRates - What the retained disk costs per hour while the instance is stopped, keyed
+ *   identically (003/FR-042). Omitted for a deployment that has not priced its storage yet.
  */
-export const createRateCard = (rates: Readonly<Record<string, string>>): ComputeRateCard => ({
+export const createRateCard = (
+  rates: Readonly<Record<string, string>>,
+  storageRates: Readonly<Record<string, string>> = {},
+): ComputeRateCard => ({
   hourlyRate: (key) => rates[`${key.instanceType}:${key.purchaseMode}`],
+  storageHourlyRate: (key) => storageRates[`${key.instanceType}:${key.purchaseMode}`],
 })
 
 /** How the composite key is spelled, exposed so a caller building a card cannot guess wrong. */
@@ -124,13 +171,113 @@ export const computeCost = (hourlyRate: string, durationMs: number): string => {
   return (Math.round(exact * 10 ** MONEY_SCALE) / 10 ** MONEY_SCALE).toFixed(MONEY_SCALE)
 }
 
-/** The basis a figure was derived from — the three facts FR-041 names, plus the rate applied. */
+/**
+ * One stretch during which the run's instance was stopped (003/FR-039).
+ *
+ * `to` is `undefined` for a pause that is still in force. It is a distinct thing from a pause that
+ * ended at the clock, because the second is a measurement and the first is an open interval whose
+ * length depends on when you ask.
+ */
+export interface PauseWindow {
+  readonly from: Date
+  readonly to: Date | undefined
+}
+
+/** One timeline row, reduced to the two things the pause arithmetic reads. */
+export interface PauseEvent {
+  readonly event: 'paused' | 'resumed'
+  readonly at: Date
+}
+
+/**
+ * Pair `paused` and `resumed` rows into the windows the instance was stopped for.
+ *
+ * Tolerant of a malformed sequence in both directions, and deliberately: a second `paused` with no
+ * `resumed` between them is one pause observed twice, and a `resumed` with no open pause is a
+ * resume of something this lease did not see the start of. Neither is worth failing a cost
+ * calculation over, and neither may open a window that swallows hours the run was working.
+ *
+ * @param events - Rows in ascending time order.
+ * @returns Windows in the order they opened. The last may be open.
+ */
+export const pauseWindowsFrom = (events: readonly PauseEvent[]): readonly PauseWindow[] => {
+  const windows: PauseWindow[] = []
+  let openedAt: Date | undefined
+
+  for (const event of events) {
+    if (event.event === 'paused') {
+      openedAt ??= event.at
+      continue
+    }
+
+    if (openedAt !== undefined) {
+      windows.push({ from: openedAt, to: event.at })
+      openedAt = undefined
+    }
+  }
+
+  if (openedAt !== undefined) {
+    windows.push({ from: openedAt, to: undefined })
+  }
+
+  return windows
+}
+
+/**
+ * How much of a billable window the instance spent stopped (003/FR-042, SC-008).
+ *
+ * Every window is clamped to the lease's own lifetime before it is counted, which is what makes the
+ * two purchase modes come out right without either being special-cased. A `spot` pause releases its
+ * lease at the moment it terminates the instance, so the pause that follows lies entirely after
+ * `released_at` and contributes nothing — correctly, because the run was not holding capacity to be
+ * refunded for. An `on_demand` pause keeps its lease live, so the same arithmetic subtracts exactly
+ * the stopped hours.
+ *
+ * @param window - The billable lifetime: from `ready_at` (or `requested_at`), to `released_at` (or
+ *   the clock).
+ * @param windows - From {@link pauseWindowsFrom}.
+ * @returns Never more than the window it was clamped to, and never negative.
+ */
+export const pausedMsWithin = (
+  window: { readonly from: Date; readonly to: Date },
+  windows: readonly PauseWindow[],
+): number => {
+  const start = window.from.getTime()
+  const end = window.to.getTime()
+
+  return windows.reduce((total, paused) => {
+    const from = Math.max(start, paused.from.getTime())
+    const to = Math.min(end, (paused.to ?? window.to).getTime())
+    return total + Math.max(0, to - from)
+  }, 0)
+}
+
+/**
+ * The basis a figure was derived from — the three facts FR-041 names, the rate applied, and what
+ * the pause took out of it (003/FR-042).
+ */
 export interface ComputeCostBasis {
   readonly instanceType: string
   readonly purchaseMode: ComputeLease['purchaseMode']
+  /** How long the lease held capacity, pauses included. Unchanged in meaning since 002. */
   readonly billableMs: number
+  /** How much of {@link ComputeCostBasis.billableMs} the instance spent stopped (SC-008). */
+  readonly pausedMs: number
+  /** The difference, and the only thing {@link ComputeCostBasis.cost} is derived from. */
+  readonly computeMs: number
   readonly hourlyRate: string
+  /** Compute only. Zero for the duration of every pause, which is SC-008 stated as a figure. */
   readonly cost: string
+  /** `undefined` when the card has no storage price for this instance and mode. */
+  readonly storageHourlyRate: string | undefined
+  /**
+   * What the retained disk cost over the paused hours, or `undefined` when it cannot be priced.
+   *
+   * Undefined rather than `'0.0000'` for the same reason {@link UnpricedCostBasis} exists: a
+   * missing price is a configuration gap, and a zero would present the gap as the fact that pausing
+   * is free — which is the one wrong answer nobody would go looking for.
+   */
+  readonly pausedStorageCost: string | undefined
   /** False while the lease is still held: the figure is a running one, not a final one. */
   readonly settled: boolean
 }
@@ -150,27 +297,78 @@ export const summariseComputeCost = (options: {
   >
   readonly rateCard: ComputeRateCard
   readonly now: Date
+  /**
+   * When the instance was stopped, from {@link pauseWindowsFrom} (003/FR-042).
+   *
+   * Defaults to none, so a caller that knows the run was never paused — or one written before pause
+   * existed — gets 002's answer unchanged rather than a different one.
+   */
+  readonly pauseWindows?: readonly PauseWindow[]
 }): ComputeCostBasis | undefined => {
   const { lease, now, rateCard } = options
-  const hourlyRate = rateCard.hourlyRate({
-    instanceType: lease.instanceType,
-    purchaseMode: lease.purchaseMode,
-  })
+  const key = { instanceType: lease.instanceType, purchaseMode: lease.purchaseMode }
+  const hourlyRate = rateCard.hourlyRate(key)
 
   if (hourlyRate === undefined) {
     return undefined
   }
 
   const duration = billableMs(lease, now)
+  const pausedMs = pausedMsWithin(
+    { from: lease.readyAt ?? lease.requestedAt, to: lease.releasedAt ?? now },
+    options.pauseWindows ?? [],
+  )
+  // Never negative even under a clock that disagrees with itself: a pause window longer than the
+  // lease it sits inside would otherwise produce a credit, and a negative cost is not a fact.
+  const computeMs = Math.max(0, duration - pausedMs)
+  const storageHourlyRate = rateCard.storageHourlyRate?.(key)
 
   return {
     instanceType: lease.instanceType,
     purchaseMode: lease.purchaseMode,
     billableMs: duration,
+    pausedMs,
+    computeMs,
     hourlyRate,
-    cost: computeCost(hourlyRate, duration),
+    // The stopped hours are not in here, and that is SC-008: a paused workflow's compute cost is
+    // zero for the duration of the pause.
+    cost: computeCost(hourlyRate, computeMs),
+    storageHourlyRate,
+    pausedStorageCost:
+      storageHourlyRate === undefined ? undefined : computeCost(storageHourlyRate, pausedMs),
     settled: lease.releasedAt !== null,
   }
+}
+
+/**
+ * The pause windows one run's timeline records (003/FR-042).
+ *
+ * Read here rather than passed in, because the caller of {@link recordCostBasis} is a scheduler
+ * with a workflow id and no reason to know how a pause is recorded.
+ *
+ * @param db - The handle.
+ * @param workflowId - The run.
+ */
+export const pauseWindowsFor = async (
+  db: Pick<SisyphusDatabase, 'select'>,
+  workflowId: string,
+): Promise<readonly PauseWindow[]> => {
+  const rows = await db
+    .select({ event: workflowEvents.event, at: workflowEvents.createdAt })
+    .from(workflowEvents)
+    .where(
+      and(
+        eq(workflowEvents.workflowId, workflowId),
+        inArray(workflowEvents.event, ['paused', 'resumed']),
+      ),
+    )
+    .orderBy(asc(workflowEvents.createdAt), asc(workflowEvents.id))
+
+  return pauseWindowsFrom(
+    rows.flatMap((row) =>
+      row.event === 'paused' || row.event === 'resumed' ? [{ event: row.event, at: row.at }] : [],
+    ),
+  )
 }
 
 /** The basis was priced and written to the workflow. */
@@ -294,7 +492,15 @@ export const recordCostBasis = async (
     return { outcome: 'no_lease', workflowId }
   }
 
-  const basis = summariseComputeCost({ lease, rateCard, now })
+  const basis = summariseComputeCost({
+    lease,
+    rateCard,
+    now,
+    // FR-042. Read for every run rather than only for one currently paused: the figure being
+    // written is the run's whole lifetime, and a pause it has already come back from is exactly as
+    // much of that lifetime as one still in force.
+    pauseWindows: await pauseWindowsFor(db, workflowId),
+  })
 
   if (lease.releasedAt === null) {
     return { outcome: 'not_settled', workflowId, running: basis }

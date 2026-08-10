@@ -81,6 +81,39 @@ describe('serverSchemas', () => {
   })
 })
 
+describe('the credential-pool knobs', () => {
+  it('defaults the keep-alive idle window to the conservative 24h of research R2', () => {
+    expect(serverSchemas.SISYPHUS_KEEPALIVE_IDLE_HOURS.parse(undefined)).toBe(24)
+    expect(serverSchemas.SISYPHUS_KEEPALIVE_IDLE_HOURS.parse('6')).toBe(6)
+  })
+
+  it('defaults the remaining three durations rather than requiring them', () => {
+    expect(serverSchemas.SISYPHUS_CREDENTIAL_WAIT_LIMIT_MINUTES.parse(undefined)).toBe(60)
+    expect(serverSchemas.SISYPHUS_LEASE_HOLD_EXPECTATION_HOURS.parse(undefined)).toBe(12)
+    expect(serverSchemas.SISYPHUS_COOLING_OFF_RETRY_MINUTES.parse(undefined)).toBe(15)
+  })
+
+  it('refuses a non-positive duration — a zero window would exercise every seat continuously', () => {
+    for (const key of [
+      'SISYPHUS_KEEPALIVE_IDLE_HOURS',
+      'SISYPHUS_CREDENTIAL_WAIT_LIMIT_MINUTES',
+      'SISYPHUS_LEASE_HOLD_EXPECTATION_HOURS',
+      'SISYPHUS_COOLING_OFF_RETRY_MINUTES',
+    ] as const) {
+      expect(() => serverSchemas[key].parse('0')).toThrow()
+      expect(() => serverSchemas[key].parse('-1')).toThrow()
+    }
+  })
+
+  it('requires the secret prefix, so no credential is ever written to an unscoped name', () => {
+    expect(() => serverSchemas.SISYPHUS_AGENT_CREDENTIAL_SECRET_PREFIX.parse(undefined)).toThrow()
+    expect(() => serverSchemas.SISYPHUS_AGENT_CREDENTIAL_SECRET_PREFIX.parse('')).toThrow()
+    expect(
+      serverSchemas.SISYPHUS_AGENT_CREDENTIAL_SECRET_PREFIX.parse('sisyphus/stage/agent'),
+    ).toBe('sisyphus/stage/agent')
+  })
+})
+
 describe('the client schema', () => {
   it('is empty — the control plane has no browser bundle and no inbound surface', () => {
     expect(Object.keys(clientSchemas)).toEqual([])

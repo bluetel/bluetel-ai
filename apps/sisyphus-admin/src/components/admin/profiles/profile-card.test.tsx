@@ -71,6 +71,13 @@ describe('ProfileCard (FR-125, FR-126, FR-127, FR-128)', () => {
     expect(render()).toContain('/admin/profiles/profile-1/access')
   })
 
+  it('links to the credential groups it draws on, which are not part of a version (003/FR-062)', () => {
+    const markup = render()
+
+    expect(markup).toContain('href="/admin/profiles/profile-1"')
+    expect(markup).toContain('which credential groups it draws on')
+  })
+
   it('offers to read what depends on it rather than reading it for every card (FR-127)', () => {
     expect(render()).toContain('What depends on this')
   })

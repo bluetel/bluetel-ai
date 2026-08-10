@@ -20,6 +20,7 @@ import {
   timestampColumn,
   updatedAtColumn,
 } from './columns'
+import { agentCredentials } from './credential'
 import {
   actorTypeEnum,
   bootstrapPhaseEnum,
@@ -120,6 +121,24 @@ export const workflows = pgTable(
     predecessorWorkflowId: uuid('predecessor_workflow_id').references(
       (): AnyPgColumn => workflows.id,
     ),
+    /**
+     * The single agent credential this run used (003/FR-059).
+     *
+     * Null only while the run is in `awaiting_credential` and has never been granted one. Once set
+     * it is never changed — 003/FR-023 forbids substituting a different identity mid-run, and this
+     * is that rule as a property of the data rather than only of the code that writes it.
+     *
+     * **This one column is what makes per-credential spend a join rather than a second ledger**
+     * (003/FR-055). 002 already accrues `spend_used`, `turns_used` and `compute_cost_basis` per
+     * workflow; aggregating them by `agent_credential_id` answers "what has this identity cost"
+     * with no new table and no reconciliation. A separate per-credential ledger would be a second
+     * source of truth for a number this row already holds, and would eventually disagree with it.
+     * It lives here rather than being left implicit in `credential_leases` history because a lease
+     * says who held a seat, not what the run charged to it.
+     */
+    agentCredentialId: uuid('agent_credential_id').references(
+      (): AnyPgColumn => agentCredentials.id,
+    ),
     /** Platform-assigned before the agent starts, so a snapshot can be resumed (FR-052, R2). */
     sessionId: uuid('session_id').notNull(),
     currentSnapshotId: uuid('current_snapshot_id').references(
@@ -145,6 +164,22 @@ export const workflows = pgTable(
     index('workflows_integration_idx').on(table.originatingIntegrationId, table.createdAt.desc()),
     /** Successor chain traversal (FR-152). */
     index('workflows_predecessor_idx').on(table.predecessorWorkflowId),
+    /**
+     * The FR-054 credential queue, and the order seats are granted in (003/FR-026).
+     *
+     * **There is no queue table.** The queue is derived from this index: the workflows in
+     * `awaiting_credential`, oldest first, joined to their profile's attached groups. A table
+     * would be a second source of truth for something the workflow row already knows, and would
+     * need reconciling against it every time a run ended in a way the queue did not observe.
+     *
+     * Partial on the state, because the waiting set is small and short-lived while the table it
+     * lives in grows for the whole retention period — and because a partial index is also the
+     * cheapest way to make "grant strictly in arrival order" a scan of exactly the rows that are
+     * waiting.
+     */
+    index('workflows_awaiting_credential_idx')
+      .on(table.state, table.createdAt)
+      .where(sql`${table.state} = 'awaiting_credential'`),
   ],
 )
 

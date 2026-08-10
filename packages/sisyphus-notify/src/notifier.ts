@@ -65,6 +65,12 @@ import type { PanelLink } from './message'
 const EVENT_BY_STATE: Readonly<Record<WorkflowState, NotificationEvent | undefined>> = {
   // Lifecycle states. A run being picked up is not news; FR-136 names outcomes and attention.
   queued: undefined,
+  // Waiting on a free agent credential is deliberately silent (003/FR-079). It is engineer-facing
+  // state on the workflow view — the run is waiting, and for how long (003/SC-006) — and a run that
+  // waits and then starts normally has produced no outcome and needs nobody's attention. Notifying
+  // here would page a person about ordinary pool contention they cannot act on, and would do it
+  // once per waiting run every time the pool filled up.
+  awaiting_credential: undefined,
   provisioning: undefined,
   running: undefined,
   paused: undefined,

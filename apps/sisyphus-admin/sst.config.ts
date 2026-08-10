@@ -94,12 +94,13 @@ export default $config({
 
   run: async () => {
     const {
-      buildPanelBundlesPolicy,
+      buildPanelPolicy,
       createBuckets,
       createDatabase,
       createNextjsWebsite,
       createPanelDomain,
       createSisyphusVpc,
+      getAgentCredentialSecretPrefix,
       getAppSecurityGroupIdParameterName,
       getAppSubnetIdsParameterName,
       getBucketNames,
@@ -165,20 +166,6 @@ export default $config({
     const bucketNames = getBucketNames(scope)
 
     /**
-     * Registering a bundle writes into `bucketNames.bundles`, a bucket this stack creates but
-     * that `createNextjsWebsite` below cannot see: it is referenced only by name, never `link`ed,
-     * so none of SST's automatic resource-permission wiring reaches it. `permissions` on the site
-     * below is what grants it explicitly — see `buildPanelBundlesPolicy` for exactly what it may
-     * do and, as importantly, what it may not (FR-084).
-     */
-    const { accountId } = await aws.getCallerIdentity()
-    const panelBundlesPolicy = buildPanelBundlesPolicy({
-      region,
-      accountId,
-      bundlesBucketName: bucketNames.bundles,
-    })
-
-    /**
      * The one VPC every deployable's compute lives in: public subnets for the
      * executor's EC2 instances, private subnets for this site's own server
      * function and the control plane's Lambda, and the security groups that
@@ -226,22 +213,56 @@ export default $config({
       securityGroupIds: [network.databaseSecurityGroup.id],
     })
 
+    /**
+     * What the panel's server function is allowed to do (003/FR-012).
+     *
+     * This stack passed **no** `permissions` at all until this block existed,
+     * which meant two things were true of every deployed stage. The bundles
+     * grants `buildPanelBundlesPolicy` had described since 002 were never
+     * applied to anything — `bucketNames.bundles` is referenced by name and
+     * never `link`ed, so none of SST's automatic resource-permission wiring
+     * reaches it, and `permissions` here is the only thing that grants it
+     * (FR-084); and — since 003 — the machine surface mounted at
+     * `/api/machine` could not reach Secrets Manager, so every instance failed
+     * its `credential_install` bootstrap phase with an AWS authorisation error
+     * on a stage that had deployed cleanly. See
+     * `src/server/credential-material.ts`, which states the requirement from
+     * the application's side.
+     *
+     * The account id is read from the caller's own identity rather than from
+     * the stage's env blob, for the reason the control plane's config reads it
+     * the same way: an operator-edited account number is a way for a policy to
+     * be scoped to somebody else's account and still deploy.
+     *
+     * The mapping onto SST's `permissions` prop is the control plane's,
+     * verbatim. `buildPanelPolicy` is the asserted source of truth for the
+     * contents (FR-200); this only reshapes it, and none of its statements
+     * carries a `Condition`, so nothing is lost in the reshaping.
+     */
+    const { accountId } = await aws.getCallerIdentity()
+
+    const panelPolicy = buildPanelPolicy({
+      region,
+      accountId,
+      bundlesBucketName: bucketNames.bundles,
+      // Derived from the same scope the control plane derives it from, so the
+      // stack that writes a seat's material and the stack that reads it back
+      // cannot disagree about where it lives.
+      agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(scope),
+    })
+
     const site = createNextjsWebsite({
       path: '.',
       vpc: {
         privateSubnets: network.privateSubnetIds,
         securityGroups: [network.appSecurityGroup.id],
       },
-      // Maps `panelBundlesPolicy`'s statements onto the shape SST's own `permissions` prop takes
-      // rather than restating them — the same reasoning as `sisyphus-control-plane`'s mapping of
-      // `controlPlanePolicy`. Neither of this policy's statements uses a `Condition`, so nothing
-      // is lost in the mapping.
-      permissions: panelBundlesPolicy.Statement.map((statement) => ({
+      domain: panelDomain,
+      permissions: panelPolicy.Statement.map((statement) => ({
         effect: statement.Effect === 'Allow' ? ('allow' as const) : ('deny' as const),
         actions: [...statement.Action],
         resources: [...(statement.Resource ?? [])],
       })),
-      domain: panelDomain,
       environment: {
         AWS_REGION: region,
         SISYPHUS_STAGE: stage,

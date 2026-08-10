@@ -156,7 +156,11 @@
         // against a real database without an external system. No tick dispatches to them.
         "!src/jobs/connector-fake.ts!",
         "!src/jobs/integration-fixtures.ts!",
-        "!src/jobs/workflow-fixtures.ts!"
+        "!src/jobs/workflow-fixtures.ts!",
+        // A seeded credential pool, reached directly by 21 suites and by no production module — the
+        // same shape as the three above. Deliberately not exported from the `allocate` or `lease`
+        // barrels; both barrel tests assert it stays out of them (003/T128).
+        "!src/credentials/allocate/pool-fixtures.ts!"
       ]
     },
     // `packages/sisyphus-api` deliberately has no root `src/index.ts` and no root `.` export: the

@@ -184,6 +184,38 @@ export const isAlreadyFinishedFor = (
   return !(state === 'parked_resumable' && intent === 'resume')
 }
 
+/**
+ * **The one state a `stop` is applied in rather than queued** (003/FR-027).
+ *
+ * Every other supervision command is a row an executor collects, applies and acknowledges, and the
+ * workflow only reaches `cancelled` when `reportTerminal` says the run has ended. That loop is what
+ * stops the panel claiming a run is stopped while the agent is still mid-turn — and it depends on
+ * there being an executor.
+ *
+ * A run in `awaiting_credential` has none, and by construction never will until it is granted a
+ * seat: it holds no instance, spends nothing, and is waiting for a credential (003/FR-024, FR-025).
+ * A `stop` queued against it would sit uncollected for as long as the wait lasted, so the owner's
+ * cancellation would appear to do nothing until the pool freed up — at which point the platform
+ * would provision an instance for a run somebody cancelled an hour ago. FR-027 requires the
+ * opposite: a waiting run must be cancellable, *terminating without ever provisioning an instance*.
+ *
+ * So for this one state the platform applies the command itself, in the same locked transaction
+ * that decided it was admissible. Nothing is released, because nothing was held — a waiting run has
+ * no compute lease and no agent-credential lease, which is the entire point of the state.
+ *
+ * **`queued` is deliberately not a member.** A queued run has no executor either, and the same
+ * argument would extend to it, but that is 002's admission path and its own decision to make;
+ * widening this list would change the behaviour of every stop pressed on a queued run as a side
+ * effect of a credential-pool requirement.
+ *
+ * @param state - The state as locked.
+ * @param intent - What is being asked of the run.
+ */
+export const isCancellableWithoutExecutor = (
+  state: WorkflowState,
+  intent: 'pause' | 'resume' | 'stop' | 'correction',
+): boolean => intent === 'stop' && state === 'awaiting_credential'
+
 const OUTCOME_PHRASING: Readonly<Record<TerminalOutcome, string>> = {
   succeeded: 'finished successfully',
   failed: 'ended in failure',

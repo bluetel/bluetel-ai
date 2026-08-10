@@ -1,6 +1,9 @@
 import type { SisyphusDatabase } from '../db'
 import type { UserRole } from '../enums'
 
+import type { AgentCredentialLeaseReleases } from './admin/credential-leases'
+import type { AgentCredentialLoginEnvironments } from './admin/credential-login'
+import type { AgentCredentialMaterialStore } from './machine/credential-material'
 import { memoiseAsync } from './memoise'
 import type { WorkflowEventEmitter } from './notify'
 import type { ScopeResolver } from './scope'
@@ -105,6 +108,58 @@ export interface SisyphusDependencies {
    * product down does not get the same treatment — it does not get to be optional at all.
    */
   readonly notifier?: WorkflowEventEmitter
+  /**
+   * Where `admin.credentials.startLogin` provisions the hosted login environment, and what the
+   * wall-clock reaper destroys (003/FR-069, 003/FR-070, 003/FR-071, 003/FR-072).
+   *
+   * The second port on this object, and declared for the same reason as the first: the real
+   * environment is provisioned from `apps/sisyphus-control-plane/src/credentials/login/`, and this
+   * package must not depend on an application. See `server/admin/credential-login.ts` — chiefly for
+   * why a holder of one cannot read credential material, which is the property that keeps FR-070
+   * true of the panel's request path rather than merely intended.
+   *
+   * Optional, and an omitted provisioner **refuses** to start a login rather than behaving like an
+   * omitted {@link SisyphusDependencies.notifier} and appearing to start one. A login that
+   * provisioned nothing would leave an administrator waiting at a terminal that never opens, with
+   * nothing recorded against the seat to say why.
+   */
+  readonly agentCredentialLogin?: AgentCredentialLoginEnvironments
+  /**
+   * How the **machine surface** reads the material it hands an instance, and writes the material a
+   * rotation brings back (003/FR-012, 003/FR-030, 003/FR-032).
+   *
+   * The third port, and deliberately a *second* one onto the same store rather than two methods on
+   * {@link SisyphusDependencies.agentCredentialSecrets}. That port's whole design is that a holder
+   * of it cannot read material, because every administrative procedure holds it; this one can, and
+   * is reachable only from `server/machine/`, where the caller is an executor presenting a
+   * workflow-scoped credential. See `server/machine/credential-material.ts` for the comparison in
+   * full — chiefly for why widening the admin port instead would have destroyed the property that
+   * port exists for.
+   *
+   * Optional, and an omitted store **refuses in both directions** — like
+   * {@link SisyphusDependencies.agentCredentialLogin} and unlike
+   * {@link SisyphusDependencies.notifier}. An empty read would install a working credential's worth
+   * of nothing on a paid instance, and a swallowed write would report a rotation as persisted and
+   * lose it, which is the exact failure FR-030 and FR-032 exist to prevent.
+   */
+  readonly agentCredentialMaterial?: AgentCredentialMaterialStore
+  /**
+   * How `admin.credentials.forceRelease` takes a seat back from the run holding it (003/FR-057).
+   *
+   * The fourth port, and declared for the same reason as the other three: releasing a lease is
+   * `apps/sisyphus-control-plane/src/credentials/lease/release.ts`, and this package must not
+   * depend on an application. A holder of it can end one lease as an attributed administrator and
+   * can do nothing else — see `server/admin/credential-leases.ts`, chiefly for why the *other* half
+   * of FR-057 (resolving the affected run to a recorded state) deliberately stays in this package.
+   *
+   * Optional, and an omitted one is refused **before the procedure writes anything**, which is
+   * unlike the two other refusing ports. Those refuse at the moment they are called, which is safe
+   * because calling them is the whole operation; a force-release is two writes in a fixed order,
+   * and a refusal discovered between them would have ended somebody's run without freeing the seat.
+   * ({@link SisyphusDependencies.notifier} is the fourth, and refuses at no point at all — an
+   * omitted notifier is a silent no-op, for the reason given there.)
+   */
+  readonly agentCredentialLeases?: AgentCredentialLeaseReleases
 }
 
 /** The request-scoped values added on top of `{ headers, dependencies }`. */

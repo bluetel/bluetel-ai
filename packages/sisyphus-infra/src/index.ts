@@ -37,6 +37,7 @@
 export {
   POLICY_VERSION,
   SISYPHUS_PROJECT,
+  getAgentCredentialSecretPrefix,
   getAppSecurityGroupIdParameterName,
   getAppSubnetIdsParameterName,
   getBucketName,
@@ -106,6 +107,7 @@ export {
   buildControlPlanePolicy,
   buildDeployRoleTrustPolicy,
   buildPanelBundlesPolicy,
+  buildPanelPolicy,
   buildRunnerPolicy,
   buildRunnerTrustPolicy,
   getDeployBranchRef,
@@ -113,6 +115,7 @@ export {
   type ControlPlanePolicyConfig,
   type DeployRoleTrustPolicyConfig,
   type PanelBundlesPolicyConfig,
+  type PanelPolicyConfig,
   type RunnerPolicyConfig,
 } from './policies'
 

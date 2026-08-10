@@ -37,6 +37,21 @@
     "citext",
     "unredacted",
     "unsnapshotted",
+    // 003's own vocabulary. `unlaunchable` and `disableable` are the words FR-065 and FR-066 use,
+    // and the refusals they describe quote them — renaming them here to please a dictionary would
+    // put the code and the specification into disagreement over what the rule is called.
+    "unlaunchable",
+    "disableable",
+    // 003 Phase 9's vocabulary. `unresumable` is the word FR-045 is about — a snapshot that cannot
+    // be resumed from — and the refusals in `pause-instance.ts` and `snapshot-recovery.ts` say so
+    // in the requirement's own terms. `xvda` is the EC2 root device name.
+    "unresumable",
+    "unrecoverably",
+    "unclocked",
+    "Quiescing",
+    "xvda",
+    "unexpressible",
+    "unleased",
     "quiesces",
     "issuetype",
     "issuekey",

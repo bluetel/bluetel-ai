@@ -52,6 +52,41 @@ export type {
   WorkflowNotificationPlan,
 } from './coalesce'
 
+/**
+ * The FR-056 administrator alerts, and the port they go out through (003/T111).
+ *
+ * A **second vocabulary**, deliberately kept apart from `NotificationEvent`: these are about a seat
+ * rather than a run, their audience is whoever administers capacity rather than a run's owner, and
+ * none of them may be silenced by a notification preference — an administrator who could switch off
+ * "a credential is broken" would be switching off the only mechanism by which FR-037 reaches a
+ * human. 003/FR-079 makes waiting, cooling off and parking silent to a workflow's owner while
+ * leaving this path untouched, and two vocabularies is what keeps that separation structural rather
+ * than a matter of which branch somebody wrote. See `./credential-alerts.ts`.
+ */
+export {
+  composeCredentialAlertMessage,
+  CREDENTIAL_ALERT_KINDS,
+  credentialPoolUrl,
+  EXPIRY_WARNING_FRACTION,
+  planCredentialAlerts,
+} from './credential-alerts'
+export type {
+  CredentialAlert,
+  CredentialAlertHolder,
+  CredentialAlertKind,
+  CredentialAlertSubject,
+  PlanCredentialAlertsInput,
+} from './credential-alerts'
+
+export { createCredentialPoolAlerter } from './credential-alerter'
+export type {
+  AlertRecipient,
+  CredentialAlertDelivery,
+  CredentialAlertNotice,
+  CredentialPoolAlerter,
+  CredentialPoolAlerterOptions,
+} from './credential-alerter'
+
 export { deliverNotification, notifyIntegrationTick, notifyWorkflowEvent } from './delivery'
 export type {
   DeliveryDependencies,

@@ -58,6 +58,21 @@ const fakeTransport = (): FakeTransport => {
     },
     transport: {
       heartbeat: async (input) => record('heartbeat', input),
+      fetchAgentCredential: async () => {
+        await record('fetchAgentCredential', {})
+
+        return {
+          credentialId: '019fd631-15bf-7a03-a1c6-ff6d568c2670',
+          fence: 3,
+          // Synthetic. Not a credential belonging to anything.
+          material: 'not-a-real-agent-credential-0123456789-opaque',
+        }
+      },
+      reportCredentialRotation: async (input) => {
+        await record('reportCredentialRotation', input)
+
+        return { accepted: true as const }
+      },
       reportBootstrapPhase: async (input) => record('reportBootstrapPhase', input),
       appendLogSegment: async (input) => record('appendLogSegment', input),
       reportTerminal: async (input) => record('reportTerminal', input),
@@ -261,6 +276,52 @@ describe('createMachineSurfaceClient', () => {
 
     await expect(client.renewCredential()).rejects.toThrow('machine surface unreachable')
     expect(client.pendingReports).toBe(0)
+  })
+
+  /**
+   * 003/FR-012, FR-030. Both credential calls are direct, and for the two reasons the interface
+   * gives: a buffered fetch returns before the material exists, so the phase that called it would
+   * write nothing and report success; and a buffered rotation hands back neither `stale_fence` nor
+   * `not_newer`, which are the two answers the watcher branches on.
+   */
+  it('fetches the agent credential directly, because a buffered fetch returns nothing', async () => {
+    const fake = fakeTransport()
+    const client = createMachineSurfaceClient({
+      workflowId: WORKFLOW_ID,
+      transport: fake.transport,
+      sleep: noSleep,
+      backoff: instantBackoff,
+    })
+
+    fake.failNext = 1
+
+    await expect(client.fetchAgentCredential()).rejects.toThrow('machine surface unreachable')
+    expect(client.pendingReports).toBe(0)
+
+    await expect(client.fetchAgentCredential()).resolves.toMatchObject({ fence: 3 })
+  })
+
+  it('reports a rotation directly, so the caller sees which answer it got (FR-020, FR-030)', async () => {
+    const fake = fakeTransport()
+    const client = createMachineSurfaceClient({
+      workflowId: WORKFLOW_ID,
+      transport: fake.transport,
+      sleep: noSleep,
+      backoff: instantBackoff,
+    })
+
+    fake.failNext = 1
+
+    await expect(
+      client.reportCredentialRotation({ fence: 3, material: 'not-a-real-rotation-0001' }),
+    ).rejects.toThrow('machine surface unreachable')
+    // Nothing queued: the watcher keeps the material pending and sends it again, which is a retry
+    // of the newest bytes rather than a replay of stale ones.
+    expect(client.pendingReports).toBe(0)
+
+    await expect(
+      client.reportCredentialRotation({ fence: 3, material: 'not-a-real-rotation-0001' }),
+    ).resolves.toStrictEqual({ accepted: true })
   })
 
   it('buffers a skill reference and retries it — a lost digest is a lost fact (FR-059)', async () => {

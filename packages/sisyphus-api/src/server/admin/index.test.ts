@@ -13,6 +13,15 @@ describe('the admin barrel', () => {
       // mount that finally lets it be read. See `./audit.ts`.
       'audit',
       'bundles',
+      // 003/FR-060..FR-067. Mounted beside `profiles` rather than inside it: the group is the
+      // entity, it outlives every profile attached to it, and it is what the trail records against.
+      'credentialGroups',
+      // 003/FR-053..FR-055, 003/FR-074. The report over the two above: the one view that answers
+      // "should we buy another seat", per group. A third mount because it is a different kind of
+      // question — those say what is configured, this says whether the configuration is enough.
+      'credentialPool',
+      // 003/FR-004..FR-009. The seats themselves, mounted beside the pools they sit in.
+      'credentials',
       'grants',
       'integrations',
       'profiles',
@@ -46,9 +55,26 @@ describe('the admin barrel', () => {
       'profilesRouter',
       'integrationsRouter',
       'auditRouter',
+      'credentialGroupsRouter',
+      'credentialsRouter',
+      'credentialPoolRouter',
     ] as const) {
       expect(typeof barrel[name]).toBe('object')
     }
+  })
+
+  it('mounts credentials as the refusing default, so an unwired deployment logs nothing in', async () => {
+    // Same choice as `integrations` above and for the same reason: a login that appeared to begin
+    // and provisioned nothing would leave an administrator waiting at a terminal that never opens,
+    // with nothing recorded against the seat to say why (003/FR-009, 003/FR-069).
+    await expect(
+      barrel
+        .createRefusingLoginEnvironments()
+        .start({ agentCredentialId: 'credential-1', credentialName: 'seat-one' }),
+    ).rejects.toThrow(barrel.LOGIN_ENVIRONMENT_NOT_CONFIGURED_REASON)
+    expect(typeof barrel.createCredentialsRouter).toBe('function')
+    // And the sweep the control plane schedules is reachable from the same barrel it wires from.
+    expect(typeof barrel.reapAbandonedLogins).toBe('function')
   })
 
   it('exports the audit read beside the writer it reads back (FR-178)', () => {

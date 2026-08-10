@@ -2,10 +2,11 @@
  * The control plane's AWS layer — five narrow interfaces and their adapters (T054).
  *
  * Each seam states what the control plane *does* with a service, not what the service offers:
- * compute is launch/terminate/list, storage is head/list/remove, parameters are write/read/remove,
- * schedules are upsert/remove/list and a secret is read. Thirteen methods in total, against five
- * SDKs that expose several hundred — which is the point. A seam the width of the SDK is a
- * re-export, and the control plane would be untestable without provisioning real compute.
+ * compute is launch/launch-login/terminate/stop/start/describe-volumes/list/list-login, storage is
+ * head/list/remove, parameters are write/read/remove, schedules are upsert/remove/list and a secret
+ * is read, created or written. Twenty methods in total, against five SDKs that expose several
+ * hundred — which is the point. A seam the width of the SDK is a re-export, and the control plane
+ * would be untestable without provisioning real compute.
  *
  * Every interface ships with a recording fake in this directory, exported here so other jobs'
  * tests take the same one rather than inventing a stub apiece. **No module in this directory
@@ -14,14 +15,25 @@
  * Consumers import this barrel, never a module underneath it.
  */
 
-export { createEc2ComputeProvisioner, NAME_TAG, WORKFLOW_ID_TAG } from './compute'
+export {
+  CREDENTIAL_LOGIN_TAG,
+  createEc2ComputeProvisioner,
+  LOGIN_EXPIRES_AT_TAG,
+  NAME_TAG,
+  WORKFLOW_ID_TAG,
+} from './compute'
 export type {
+  AttachedVolume,
   ComputeProvisioner,
   Ec2CommandSender,
   Ec2ComputeConfiguration,
   Ec2ComputeProvisionerOptions,
+  InstanceTransition,
   LaunchComputeRequest,
   LaunchedCompute,
+  LaunchedLoginEnvironment,
+  LaunchLoginRequest,
+  LoginInstance,
   WorkflowInstance,
 } from './compute'
 

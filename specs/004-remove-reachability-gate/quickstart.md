@@ -54,13 +54,20 @@ pnpm nx test sisyphus-api -- profile-gate profiles
 3. Enabling an already-enabled profile succeeds and records no second audit entry.
 4. No test anywhere constructs a reachability probe, because none exists.
 
+> **Since 003 (`feature/agent-credential-pool`) merged**, the same gate also requires at least one enabled,
+> unarchived **credential group attached to the profile** (003/FR-065). The suites above attach one before
+> every case that expects a successful enable; a profile without one is refused with
+> `E_PROFILE_ENABLE_CREDENTIAL_GROUP`, which is correct behaviour and not a regression of this feature.
+
 **Manual confirmation** (the failure users actually reported):
 
 ```bash
 pnpm nx dev sisyphus-admin
 ```
 
-Sign in as an admin, open **Admin → Profiles**, enable a profile with several repositories. It turns on. The
+Sign in as an admin and attach a credential group to the profile under **Admin → Credentials → Groups**
+(see the note above — without one the enable is refused for an unrelated reason). Then open
+**Admin → Profiles** and enable a profile with several repositories. It turns on. The
 `E_PROFILE_ENABLE_WORKSPACE_ENTRY` refusal — one line per repository — does not appear.
 
 ## Scenario 2 — The retained checks still bite (SC-003, US2)

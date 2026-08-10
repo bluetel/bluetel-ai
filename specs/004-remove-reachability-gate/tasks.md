@@ -140,6 +140,12 @@ enable it, confirm it reports enabled and becomes selectable on the launch form.
       test router is gone), and `E_PROFILE_ENABLE_WORKSPACE_ENTRY` can no longer be constructed anywhere in
       the workspace, so the remaining risk is panel wiring rather than gate behaviour. **This is the one task
       an operator must still do before the fix is called confirmed.**
+      **Amended after merging `feature/agent-credential-pool` (003):** the profile must now also have at
+      least one enabled, unarchived **credential group attached** before it will enable — 003/FR-065 added
+      that to the same gate. Attach one under **Admin → Credentials → Groups** first, or the enable is
+      refused with `E_PROFILE_ENABLE_CREDENTIAL_GROUP` and this task reads as a failure when the behaviour
+      it is checking for is correct. The thing to confirm is unchanged: the profile turns on and no
+      per-entry `E_PROFILE_ENABLE_WORKSPACE_ENTRY` list appears.
 
 **Checkpoint**: US1 is complete and independently demonstrable — profiles can be enabled. This is a shippable
 MVP even if Phases 4–6 are deferred.

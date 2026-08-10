@@ -78,6 +78,11 @@ export const ENTITY_TYPE_LABELS: Record<AuditEntityType, string> = {
   user: 'user',
   profile_access_grant: 'profile access grant',
   workflow: 'workflow',
+  // 003's two classes. The compile error this Record produces is what brought them here: the API
+  // started recording against both in Phase 3, and a filter that did not offer them would have
+  // hidden every credential change from the one screen that exists to show changes.
+  agent_credential: 'agent credential',
+  credential_group: 'credential group',
 }
 
 /** The actions, labelled the same way and exhaustive for the same reason. */
@@ -93,6 +98,13 @@ export const ACTION_LABELS: Record<AuditAction, string> = {
   activated: 'activated',
   deactivated: 'deactivated',
   owner_reassigned: 'owner reassigned',
+  leased: 'leased',
+  released: 'released',
+  // Spelled apart from `released` in the trail and spelled apart here: "the run finished" and "the
+  // seat was taken off the run" are different events, and "was anything forced?" is the first
+  // question asked after a run ends unexpectedly (003/FR-057, 003/FR-022).
+  force_released: 'force released',
+  state_changed: 'state changed',
 }
 
 /** One choice in a picker: what the operator reads, and what the request carries. */

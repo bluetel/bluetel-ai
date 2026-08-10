@@ -4,6 +4,7 @@ import { getPlainStage } from './get-plain-stage'
 import {
   POLICY_VERSION,
   SISYPHUS_PROJECT,
+  getAgentCredentialSecretPrefix,
   getAppSecurityGroupIdParameterName,
   getAppSubnetIdsParameterName,
   getBucketName,
@@ -93,6 +94,32 @@ describe('getBucketNames', () => {
       snapshots: 'sisyphus-staging-snapshots',
     })
     expect(new Set(Object.values(names)).size).toBe(4)
+  })
+})
+
+describe('getAgentCredentialSecretPrefix', () => {
+  it('namespaces the stage’s agent credentials under a path of their own', () => {
+    expect(getAgentCredentialSecretPrefix(getStackScope('staging'))).toBe(
+      'sisyphus/staging/agent-credential',
+    )
+  })
+
+  it('resolves to the same prefix from every auxiliary stage, so the writer and the reader agree', () => {
+    expect(getAgentCredentialSecretPrefix(getStackScope('production-bootstrap'))).toBe(
+      getAgentCredentialSecretPrefix(getStackScope('production')),
+    )
+    expect(getAgentCredentialSecretPrefix(getStackScope('production-website'))).toBe(
+      getAgentCredentialSecretPrefix(getStackScope('production')),
+    )
+  })
+
+  it('never lets two stages share a prefix, so staging cannot read a production agent’s login', () => {
+    const staging = getAgentCredentialSecretPrefix(getStackScope('staging'))
+    const production = getAgentCredentialSecretPrefix(getStackScope('production'))
+
+    expect(staging).not.toBe(production)
+    expect(production.startsWith(staging)).toBe(false)
+    expect(staging.startsWith(production)).toBe(false)
   })
 })
 

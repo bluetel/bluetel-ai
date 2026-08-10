@@ -38,6 +38,12 @@ export type BootstrapPhaseOutcome = 'succeeded' | 'failed' | 'timed_out'
  *
  * `provisioning` is recorded by the control plane before hand-off, so the value
  * here is for completeness rather than for the executor to enforce.
+ *
+ * The key order is the run order, and it is asserted against `BOOTSTRAP_PHASES`
+ * position-by-position in the colocated test rather than only as a set. A map
+ * that agreed on membership but disagreed on order would read as a schedule
+ * while being none — and this map is the only place in the executor where the
+ * schedule is written down twice.
  */
 export const DEFAULT_PHASE_TIMEOUTS: Readonly<Record<BootstrapPhaseName, number>> = {
   provisioning: 600_000,
@@ -45,6 +51,19 @@ export const DEFAULT_PHASE_TIMEOUTS: Readonly<Record<BootstrapPhaseName, number>
   bundle_verify: 60_000,
   bundle_unpack: 180_000,
   setup_script: 900_000,
+  // One authenticated call to the machine surface for the leased material, then
+  // a small file written where the agent reads it (003/FR-049). It is a request
+  // and a write — not a download, not a clone, not an agent start — so it is
+  // given the same order of magnitude as `bundle_verify` rather than anything
+  // in the bundle or checkout band. Sixty seconds is far more than the work
+  // needs and still leaves room for a slow surface and a retry or two; going
+  // higher would only buy a longer paid hang on a control plane that is not
+  // answering, and the failure is not the instance's to fix.
+  //
+  // It is spent on **every** boot, including restore and resumed-instance boots
+  // (003/FR-050), because material may have rotated while the instance was
+  // stopped — so the cost of this number is paid per boot, not per workflow.
+  credential_install: 60_000,
   entry_checkout: 600_000,
   agent_start: 120_000,
 }

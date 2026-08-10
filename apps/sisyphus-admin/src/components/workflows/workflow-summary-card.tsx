@@ -1,6 +1,8 @@
 import { DataReadout } from '@sisyphus-admin/components/admin'
 import { Card, CardBody, CardHeader, Meter, StateChip } from '@sisyphus-admin/components/ui'
 
+import type { CredentialWaitReadout } from './credential-wait'
+import type { ParkingCountdownReadout } from './parking-countdown'
 import type { CapReadout, WorkflowDetailReadouts } from './workflow-detail-readouts'
 
 /**
@@ -39,9 +41,28 @@ const CapReading = ({ label, reading }: { label: string; reading: CapReadout }) 
 
 interface WorkflowSummaryCardProps {
   readonly detail: WorkflowDetailReadouts
+  /**
+   * The run's wait for an agent credential, if it has had one (003/SC-006).
+   *
+   * A separate prop rather than a field on {@link WorkflowDetailReadouts} because it is derived
+   * from the *timeline*, which is a second query — see `./credential-wait.ts`. `undefined` for the
+   * overwhelming majority of runs, which never waited.
+   */
+  readonly credentialWait?: CredentialWaitReadout
+  /**
+   * How long this run has before it parks, if it is paused (003/FR-047).
+   *
+   * A separate prop for the same reason the wait is: it is derived from the *timeline*, which is a
+   * second query. `undefined` for every run that is not paused right now.
+   */
+  readonly parking?: ParkingCountdownReadout
 }
 
-export const WorkflowSummaryCard = ({ detail }: WorkflowSummaryCardProps) => (
+export const WorkflowSummaryCard = ({
+  credentialWait,
+  detail,
+  parking,
+}: WorkflowSummaryCardProps) => (
   <Card aria-label="Run">
     <CardHeader>
       <span title={detail.id} className="type-data-mono">
@@ -51,6 +72,61 @@ export const WorkflowSummaryCard = ({ detail }: WorkflowSummaryCardProps) => (
     </CardHeader>
 
     <CardBody className="gap-default flex flex-col">
+      {/*
+        First, above even the storage park, and for the same reason at one remove: a run that is
+        waiting for an agent credential looks — from every other readout on this card — like a run
+        that has stalled. It has no instance, no turns, no spend and no log, and 003/SC-006 says an
+        engineer must be able to tell from this view alone that it is waiting and for how long.
+
+        The duration is rendered beside the summary rather than folded into it, because "how long"
+        is the question somebody scanning the card is asking; and the remedy is its own line,
+        because the four FR-029 cases differ in exactly that sentence. `data-credential-wait`
+        carries the fault flag so the difference between "wait" and "somebody must fix this" is
+        assertable rather than a matter of reading the copy.
+      */}
+      {credentialWait === undefined ? null : (
+        <div
+          className="gap-hair flex flex-col"
+          data-credential-wait={credentialWait.configurationFault ? 'fault' : 'waiting'}
+        >
+          <span className="type-label-mono text-graphite">
+            {credentialWait.headline} · {credentialWait.waitedFor}
+          </span>
+          <p className="type-body text-ink measure-prose">{credentialWait.summary}</p>
+          <p className="type-body text-graphite measure-prose">{credentialWait.remedy}</p>
+          {credentialWait.groups.length === 0 ? null : (
+            <p className="type-data-mono text-graphite measure-prose">
+              groups searched: {credentialWait.groups.join(', ')}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/*
+        The park ahead of a paused run (003/FR-047). Beside the two readouts above rather than
+        buried among the fields, because it is the only thing on this card with a deadline on it:
+        past the idle limit the instance and the disk go, and the remedy — resume it — is available
+        only beforehand. `data-parking-countdown` carries whether the park is pending or owed, so
+        the difference is assertable rather than a matter of reading the copy.
+
+        Not a state chip. The run's state really is `paused` throughout, and a chip that said
+        anything else would disagree with the supervision controls a few cards down.
+      */}
+      {parking === undefined ? null : (
+        <div
+          className="gap-hair flex flex-col"
+          data-parking-countdown={parking.overdue ? 'due' : 'counting'}
+        >
+          <span className="type-label-mono text-graphite">
+            {parking.headline} · {parking.remaining}
+          </span>
+          <p className="type-body text-ink measure-prose">{parking.explanation}</p>
+          <p className="type-data-mono text-graphite measure-prose">
+            paused for {parking.pausedFor}
+          </p>
+        </div>
+      )}
+
       {/*
         First in the body, above every readout, because it is the one thing on this card that
         changes what an operator should do next: a run that appears to be `running` and producing

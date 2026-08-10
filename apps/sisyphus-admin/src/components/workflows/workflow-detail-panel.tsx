@@ -13,6 +13,7 @@ import {
 } from '@sisyphus-admin/components/ui'
 import { api } from '@sisyphus-admin/trpc'
 
+import { toCredentialWaitReadout } from './credential-wait'
 import { EntryResultsCard, toEntryResultsReadouts } from './entry-results'
 import {
   IterationTimelineCard,
@@ -20,6 +21,7 @@ import {
   toIterationTimelineReadouts,
 } from './iterations'
 import { LogViewerSlot } from './log-viewer-slot'
+import { toParkingCountdownReadout } from './parking-countdown'
 import { SupervisionSlot } from './supervision-slot'
 import { useNow } from './use-now'
 import { WatchToggle } from './watch-toggle'
@@ -128,6 +130,28 @@ export const WorkflowDetailPanel = ({ workflowId }: WorkflowDetailPanelProps) =>
 
   const readouts =
     detail.data === undefined ? undefined : toWorkflowDetailReadouts(detail.data, now)
+  // Derived from the timeline rather than from `byId`, because that is where the control plane
+  // records a credential wait and what it recorded about it (003/FR-029, SC-006). `undefined` for
+  // every run that never waited, which is nearly all of them.
+  const credentialWait =
+    detail.data === undefined
+      ? undefined
+      : toCredentialWaitReadout({
+          state: detail.data.workflow.state,
+          timeline: timeline.data ?? [],
+          now,
+        })
+  // From the same timeline and the same clock, for the same reason (003/FR-047): the `paused` row
+  // is where the platform records when the pause began, and it is the row the control plane's own
+  // idle check measures against. `undefined` for every run that is not paused right now.
+  const parking =
+    detail.data === undefined
+      ? undefined
+      : toParkingCountdownReadout({
+          state: detail.data.workflow.state,
+          timeline: timeline.data ?? [],
+          now,
+        })
   const entries = detail.data === undefined ? [] : toWorkflowEntryReadouts(detail.data)
   // Rendered only once the run has been read, rather than in a reading state, because the whole
   // point of this card is a claim about the set — "2 of 3 landed" — and a card that appeared saying
@@ -157,7 +181,7 @@ export const WorkflowDetailPanel = ({ workflowId }: WorkflowDetailPanelProps) =>
           </CardBody>
         </Card>
       ) : (
-        <WorkflowSummaryCard detail={readouts} />
+        <WorkflowSummaryCard detail={readouts} credentialWait={credentialWait} parking={parking} />
       )}
 
       {readouts?.reviewerSummary === null || readouts === undefined ? null : (

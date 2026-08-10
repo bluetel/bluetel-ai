@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 
 import type { WorkspaceEntry } from '../../db'
 
+import type { AttachedCredentialGroup } from './profile-gate'
 import {
   checkProfileCanBeEnabled,
+  credentialGroupAttachmentCheck,
+  mergeProfileEnableChecks,
   noPublishedVersionCheck,
   profileCannotBeEnabledError,
   unreadableSubjectCheck,
@@ -127,6 +130,123 @@ describe('checkProfileCanBeEnabled', () => {
   it('keeps `passed` in step with `failures` in both directions', () => {
     expect(checkProfileCanBeEnabled(subject()).passed).toBe(true)
     expect(checkProfileCanBeEnabled(subject({ workspaceArchived: true })).passed).toBe(false)
+  })
+})
+
+const attachedGroup = (
+  overrides: Partial<AttachedCredentialGroup> = {},
+): AttachedCredentialGroup => ({
+  name: 'vendor pool',
+  enabled: true,
+  archivedAt: null,
+  position: 1,
+  ...overrides,
+})
+
+/**
+ * 003/FR-065. Every assertion here is about the *timing* of the refusal as much as its content:
+ * this check runs when a profile is being configured, which is the only moment at which the person
+ * who can fix it is looking at it.
+ */
+describe('credentialGroupAttachmentCheck', () => {
+  it('passes a profile attached to a usable group', () => {
+    expect(credentialGroupAttachmentCheck([attachedGroup()])).toStrictEqual({
+      passed: true,
+      failures: [],
+    })
+  })
+
+  it('refuses a profile with no attachment at all, naming what is missing (003/FR-065)', () => {
+    const check = credentialGroupAttachmentCheck([])
+
+    expect(check.passed).toBe(false)
+    expect(check.failures).toHaveLength(1)
+    expect(check.failures[0]?.element).toBe('credential_group')
+    // Not "this profile cannot be enabled": an admin holding a form with a bundle, a workspace, a
+    // dozen repositories and a group list needs to be told which of them is empty.
+    expect(check.failures[0]?.detail).toContain('no attached credential group')
+    expect(check.failures[0]?.detail).toContain('attach at least one group')
+  })
+
+  it('says why the refusal exists in terms of the run, not of the form', () => {
+    // The failure a launch-time check would have produced — a run with no identity it may work as
+    // — stated at the moment it can still be prevented.
+    expect(credentialGroupAttachmentCheck([]).failures[0]?.detail).toContain(
+      'no agent identity it is permitted to work as',
+    )
+  })
+
+  it('refuses a profile whose every attached group is disabled, naming them', () => {
+    const check = credentialGroupAttachmentCheck([
+      attachedGroup({ name: 'retired pool', enabled: false }),
+      attachedGroup({ name: 'other retired pool', enabled: false, position: 2 }),
+    ])
+
+    // "Has an attachment" and "can select a credential" are different properties, and a profile
+    // with only disabled groups behaves at launch exactly like one with none.
+    expect(check.passed).toBe(false)
+    expect(check.failures[0]?.detail).toContain('retired pool, other retired pool')
+    expect(check.failures[0]?.detail).toContain('unavailable')
+  })
+
+  it('refuses a profile whose every attached group is archived', () => {
+    const check = credentialGroupAttachmentCheck([
+      attachedGroup({ name: 'gone pool', archivedAt: new Date() }),
+    ])
+
+    expect(check.passed).toBe(false)
+    expect(check.failures[0]?.element).toBe('credential_group')
+  })
+
+  it('distinguishes “attach one” from “re-enable the one you have”', () => {
+    // Different fixes, so different sentences. One admin needs to attach a group, the other needs
+    // to turn one back on, and a shared message would send both to the wrong screen.
+    const none = credentialGroupAttachmentCheck([]).failures[0]?.detail ?? ''
+    const disabled =
+      credentialGroupAttachmentCheck([attachedGroup({ enabled: false })]).failures[0]?.detail ?? ''
+
+    expect(none).not.toBe(disabled)
+    expect(none).toContain('attach at least one group')
+    expect(disabled).not.toContain('attach at least one group')
+  })
+
+  it('passes when one attached group is usable and another is not', () => {
+    // Selection falls through to the next attached group in preference order, so one live group is
+    // enough to make the profile launchable.
+    expect(
+      credentialGroupAttachmentCheck([
+        attachedGroup({ name: 'retired pool', enabled: false }),
+        attachedGroup({ name: 'live pool', position: 2 }),
+      ]).passed,
+    ).toBe(true)
+  })
+})
+
+describe('mergeProfileEnableChecks', () => {
+  it('reports a missing attachment and a disabled bundle in one attempt', () => {
+    const merged = mergeProfileEnableChecks(
+      credentialGroupAttachmentCheck([]),
+      checkProfileCanBeEnabled(subject({ setupBundleEnabled: false })),
+    )
+
+    expect(merged.passed).toBe(false)
+    expect(merged.failures.map((failure) => failure.element)).toStrictEqual([
+      'credential_group',
+      'setup_bundle',
+    ])
+  })
+
+  it('passes only when every part passes', () => {
+    const merged = mergeProfileEnableChecks(
+      credentialGroupAttachmentCheck([attachedGroup()]),
+      checkProfileCanBeEnabled(subject()),
+    )
+
+    expect(merged).toStrictEqual({ passed: true, failures: [] })
+  })
+
+  it('reports nothing as passing, so an empty gate cannot refuse', () => {
+    expect(mergeProfileEnableChecks()).toStrictEqual({ passed: true, failures: [] })
   })
 })
 

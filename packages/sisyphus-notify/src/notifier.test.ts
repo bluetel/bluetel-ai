@@ -56,6 +56,15 @@ describe('notificationEventForState — exactly FR-136s list, and nothing else',
     },
   )
 
+  it('stays silent while a run waits for an agent credential (003/FR-079)', () => {
+    // Asserted on its own rather than folded into the list above, because this state is the one
+    // somebody is most likely to think deserves a message: the run is stuck and visibly not
+    // progressing. It is ordinary pool contention, surfaced on the workflow view where the engineer
+    // can see it and how long it has lasted (003/SC-006), and a run that waits and then starts has
+    // produced no outcome for anyone to hear about.
+    expect(notificationEventForState('awaiting_credential')).toBeUndefined()
+  })
+
   it('has an answer for every state the enum admits', () => {
     // A state added without a decision here would otherwise be a run that ends in silence.
     for (const state of WORKFLOW_STATES) {

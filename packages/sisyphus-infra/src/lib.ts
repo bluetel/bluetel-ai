@@ -91,6 +91,25 @@ export const getBucketNames = (scope: ResourceScope): Readonly<Record<ObjectClas
 })
 
 /**
+ * The Secrets Manager name prefix a stage's agent credentials are stored under.
+ *
+ * One secret per agent credential is created beneath this prefix (research R8), so a rotation is
+ * a `PutSecretValue` against a stable identifier rather than a rename. Derived from the plain
+ * stage for the same reason bucket names are: the control plane writes these secrets and the
+ * executor's instance profile is granted `secretsmanager:GetSecretValue` on the same prefix, and
+ * neither stack may disagree with the other about where a stage's credentials live.
+ *
+ * Deliberately **not** shared across stages — a staging deploy must not be able to read a
+ * production agent's login.
+ *
+ * @example
+ * getAgentCredentialSecretPrefix({ project: 'sisyphus', stack: 'staging' })
+ * // → 'sisyphus/staging/agent-credential'
+ */
+export const getAgentCredentialSecretPrefix = (scope: ResourceScope): string =>
+  `${scope.project}/${scope.stack}/agent-credential`
+
+/**
  * The Parameter Store path a stage's database connection URL is published to.
  *
  * Built from the plain stage so `<stage>-bootstrap` and `<stage>-website` read

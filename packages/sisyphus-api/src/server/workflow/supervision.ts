@@ -17,6 +17,7 @@ import {
   describeAlreadyFinished,
   firstRow,
   isAlreadyFinishedFor,
+  isCancellableWithoutExecutor,
   nextCommandSequence,
   runWorkflowTransition,
   workflowGoneError,
@@ -76,9 +77,11 @@ export interface SupervisionCommandQueued {
   readonly sequence: number
   /**
    * `pending` normally; `superseded` when the request was overtaken by an uncollected `stop` before
-   * it was written. Recorded rather than refused — see `./supersession.ts`, rule 3.
+   * it was written (see `./supersession.ts`, rule 3); `acknowledged` when the platform applied the
+   * command itself because there was no executor to apply it — a `stop` against a run waiting for
+   * an agent credential (003/FR-027), which is terminal by the time this answers.
    */
-  readonly outcome: 'pending' | 'superseded'
+  readonly outcome: 'acknowledged' | 'pending' | 'superseded'
   /** Ids of previously-queued commands this one replaced. */
   readonly supersededCommandIds: readonly string[]
   /** Present only when this request itself was overtaken. */
@@ -167,6 +170,83 @@ const recordRefusedCommand = async (
 }
 
 /**
+ * Cancel a run that is waiting for an agent credential, here and now (003/FR-027).
+ *
+ * Runs inside the locked transaction, so the state it acts on is the state it decided against —
+ * and so the command row, the workflow's outcome and the timeline entry either all land or none of
+ * them do. The command is written **`acknowledged`**, not `pending`: no executor exists to collect
+ * it, and a pending row against a terminated run is a row nothing will ever answer.
+ *
+ * Nothing is released. A waiting run holds no compute lease — FR-025 is the reason it is waiting
+ * rather than provisioning — and no agent-credential lease, because not getting one is what put it
+ * here. FR-027 says as much in as many words, and the absence of a release below is that sentence.
+ */
+const cancelWaitingRun = async (options: {
+  readonly writer: TransitionWriter
+  readonly locked: LockedWorkflowState
+  readonly userId: string
+}): Promise<SupervisionCommandQueued> => {
+  const { locked, userId, writer } = options
+  const workflowId = locked.id
+
+  // Any uncollected command is dead too — the run is terminal after this statement, and a `pause`
+  // left pending would outlive the run it was about. Same rule `resolveSupersession` applies when a
+  // stop overtakes one, applied here because this stop is not merely queued but performed.
+  const uncollected = await readUncollected(writer, workflowId)
+  const supersession = resolveSupersession(uncollected, 'stop')
+  await applySupersession(writer, supersession)
+
+  const sequence = await nextCommandSequence(writer, workflowId)
+  const outcomeReason =
+    'Stopped by a person while it was waiting for an agent credential. No instance was ever ' +
+    'provisioned for this run, and it held no agent credential to release.'
+
+  const inserted = await writer
+    .insert(supervisionCommands)
+    .values({
+      workflowId,
+      command: 'stop',
+      requestedByUserId: userId,
+      sequence,
+      deliveryOutcome: 'acknowledged',
+      // Timestamped as acknowledged so no executor ever collects it: it was applied here.
+      acknowledgedAt: new Date(),
+    })
+    .returning({ id: supervisionCommands.id })
+
+  const commandId = firstRow(inserted)?.id
+
+  if (commandId === undefined) {
+    throw new Error('Recording the applied stop returned no row.')
+  }
+
+  await writer
+    .update(workflows)
+    .set({ state: 'cancelled', terminalOutcome: 'cancelled', outcomeReason })
+    .where(eq(workflows.id, workflowId))
+
+  await writer.insert(workflowEvents).values({
+    workflowId,
+    event: 'cancelled',
+    actorType: 'user',
+    actorUserId: userId,
+    detail: { reason: outcomeReason, from: locked.state, commandId },
+  })
+
+  return {
+    applied: true,
+    alreadyFinished: false,
+    workflowId,
+    commandId,
+    command: 'stop',
+    sequence,
+    outcome: 'acknowledged',
+    supersededCommandIds: supersession.supersededIds,
+    supersededReason: null,
+  }
+}
+
+/**
  * Queue a `pause`, `resume` or `stop` (FR-015, FR-049, FR-081).
  *
  * The scope check runs **before** the transaction and is not optional: a workflow the caller may not
@@ -192,6 +272,13 @@ export const requestSupervisionCommand = async (
         await recordRefusedCommand(writer, { locked, userId, command, refusal })
 
         return refusal
+      }
+
+      // 003/FR-027. There is no executor to collect this one, and queueing it would leave the
+      // owner's cancellation apparently doing nothing until the pool freed up — at which point the
+      // platform would provision an instance for a run somebody stopped an hour ago.
+      if (isCancellableWithoutExecutor(locked.state, command)) {
+        return cancelWaitingRun({ writer, locked, userId })
       }
 
       const uncollected = await readUncollected(writer, workflowId)

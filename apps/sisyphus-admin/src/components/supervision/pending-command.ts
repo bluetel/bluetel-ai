@@ -110,6 +110,14 @@ export const nextPendingCommand = (options: {
     return options.held
   }
 
+  if (options.result.outcome === 'acknowledged') {
+    // Applied by the platform itself, with no executor in the loop: a `stop` against a run waiting
+    // for an agent credential is terminal by the time the mutation answers (003/FR-027). There is
+    // nothing to await, and showing "stop requested" for a run that has already stopped would
+    // invite somebody to press it again.
+    return undefined
+  }
+
   return { command: options.command, requestedAt: options.requestedAt }
 }
 

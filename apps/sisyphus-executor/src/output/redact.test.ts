@@ -117,6 +117,30 @@ describe('createStreamingRedactor', () => {
     expect(redactor.push('filler line\n'.repeat(40))).toContain('short line\n')
   })
 
+  /**
+   * The case the hold-back window alone does not cover.
+   *
+   * Once the buffer is longer than the hold-back, the release boundary lands in
+   * the middle of it — and a secret sitting across that point used to be cut in
+   * half, with the head released verbatim and the tail held, neither ever
+   * matching anything again. Known values are therefore removed from the whole
+   * buffer *before* the cut is chosen. The loop walks the secret across the
+   * boundary rather than guessing one position, because the exact offset depends
+   * on which encoded form happens to be the longest.
+   */
+  it('never cuts a secret in half at the release boundary of a large buffer', () => {
+    const filler = 'filler line\n'.repeat(60)
+
+    for (let offset = 0; offset < 240; offset += 7) {
+      const redactor = createStreamingRedactor({ secrets: SECRETS })
+      const input = `${'x'.repeat(offset)}${AGENT_VALUE}${filler}`
+      const output = redactor.push(input) + redactor.flush()
+
+      expect(output).not.toContain(AGENT_VALUE)
+      expect(output).toContain('[redacted:agent-credential]')
+    }
+  })
+
   it('releases everything on flush', () => {
     const redactor = createStreamingRedactor({ secrets: SECRETS })
 

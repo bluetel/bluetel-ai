@@ -8,14 +8,23 @@
  *
  * ## The one exclusion, and why it is at pack time
  *
- * `<root>/.agent-config/credentials/` and nothing else. FR-072 forbids a credential appearing in a
- * snapshot in plain text, and the exclusion is passed to `tar` rather than applied by deleting
- * afterwards: deleting afterwards means the secret sat inside the archive for a while, which is
- * the thing being forbidden.
+ * `<root>/.agent-config/credentials/` and nothing else. FR-072 — reaffirmed as 003/FR-013 — forbids
+ * a credential appearing in a snapshot in plain text, and the exclusion is passed to `tar` rather
+ * than applied by deleting afterwards: deleting afterwards means the secret sat inside the archive
+ * for a while, which is the thing being forbidden.
  *
- * This costs nothing because bootstrap phases 2–5 run on the **restore** boot as well — the setup
- * bundle reinstalls the credentials — which is why `setup.sh` idempotency is a hard requirement
- * rather than a nicety (see `bootstrap/bundle.ts`, `SETUP_SCRIPT_IDEMPOTENCY_NOTE`).
+ * **The rule is unchanged from 002; what changed is where the material comes from on the way back
+ * in.** In 002 the exclusion cost nothing because bootstrap phases 2–5 re-ran on the restore boot
+ * and the setup bundle reinstalled the credentials. Under 003 the bundle installs no agent
+ * credential at all (FR-048): the restore boot runs bootstrap phase `credential_install`, which
+ * fetches the leased material from the machine surface — and it runs on **every** boot, restore and
+ * resumed-instance alike (FR-050), so a snapshot that carries no credential is a snapshot that
+ * needs none.
+ *
+ * The excluded directory is {@link AGENT_CREDENTIAL_DIR_NAME}, the same constant
+ * `bootstrap/credential-install.ts` writes into. Deriving both ends from one name is what stops the
+ * install path and the exclusion drifting into two spellings of "credentials", which would not be
+ * noticed until an archive was opened by hand.
  *
  * The exclusion is deliberately the **credential subtree**, not the config tree. Widening it by one
  * path segment to `.agent-config` would drop the conversation log and produce a snapshot that
@@ -36,20 +45,21 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import { AGENT_CONFIG_DIR_NAME } from '../bootstrap'
+import { AGENT_CONFIG_DIR_NAME, AGENT_CREDENTIAL_DIR_NAME } from '../bootstrap'
 
 import { packWorkspaceArchive } from './snapshot-archive'
 import type { SnapshotLocation, SnapshotObjectStore } from './snapshot-store'
 import type { CapturedSnapshot, SnapshotPort, SnapshotRequest } from './suspend'
 
 /**
- * The directory `setup.sh` installs credential material into, relative to the pinned root.
+ * The directory bootstrap phase `credential_install` writes credential material into, relative to
+ * the pinned root.
  *
- * Stated once, here, because it is referenced by the exclusion, by the test that proves the
- * exclusion, and by the sentence in `bootstrap/workspace.ts` that promises the directory exists
- * before phases 2–5 run.
+ * Composed from the two names `bootstrap/workspace.ts` owns rather than spelled out, so that the
+ * path this exclusion protects and the path the installer writes to are the same path by
+ * construction (003/FR-013).
  */
-export const CREDENTIAL_SUBTREE = `${AGENT_CONFIG_DIR_NAME}/credentials`
+export const CREDENTIAL_SUBTREE = `${AGENT_CONFIG_DIR_NAME}/${AGENT_CREDENTIAL_DIR_NAME}`
 
 /** Where conversation logs sit beneath the config tree. Included, unlike their credential sibling. */
 export const CONVERSATION_SUBTREE = `${AGENT_CONFIG_DIR_NAME}/projects`

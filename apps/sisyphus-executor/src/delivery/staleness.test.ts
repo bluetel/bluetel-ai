@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
+import { stripAmbientGitEnvironment } from '../git-fixture-environment'
 import type { SanitisedText } from '../output'
 
 import type { GitRunner } from './git'
@@ -19,6 +20,15 @@ import { createTestRepository } from './test-repository'
 
 const WORKFLOW_ID = '3f7b6d2a-1c5e-4a9b-8d3f-2e6c9a4b1d70'
 const ENTRY_ID = '8c1d2e3f-4a5b-4c6d-8e9f-0a1b2c3d4e5f'
+
+/**
+ * The staleness assessment runs through the production git reader, which spawns `git` with the
+ * environment it was started in — so the ambient repository is removed from this process. See the
+ * same note in `./git.test.ts` and `../git-fixture-environment.ts`.
+ */
+const restoreGitEnvironment = stripAmbientGitEnvironment()
+
+afterAll(restoreGitEnvironment)
 
 let repository: TestRepository | undefined
 

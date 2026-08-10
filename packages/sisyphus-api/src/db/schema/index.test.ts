@@ -12,6 +12,7 @@ const tables = Object.values(exported).filter((value): value is PgTable => is(va
 
 /** Tables the data model marks append-only: never mutated, so never carrying `updated_at`. */
 const APPEND_ONLY = [
+  'keep_alive_runs',
   'workflow_events',
   'corrections',
   'external_actions',
@@ -37,6 +38,23 @@ const platformTables = tables.filter((table) => !AUTH_ADAPTER.includes(getTableN
 describe('the schema barrel', () => {
   it('exposes every aggregate, which is what drizzle-kit generates migrations from', () => {
     expect(tables.length).toBeGreaterThanOrEqual(35)
+  })
+
+  it('carries the credential pool, without which drizzle-kit would not generate its tables', () => {
+    // Not a tidy-up: `drizzle.config.ts` points drizzle-kit at this file and nothing else, so a
+    // table absent from here has no migration, and the five tables below would exist only in
+    // TypeScript. Named individually rather than counted, because a count passes when the wrong
+    // five are present.
+    const names = tables.map((table) => getTableName(table))
+    for (const name of [
+      'credential_groups',
+      'agent_credentials',
+      'credential_leases',
+      'profile_credential_groups',
+      'keep_alive_runs',
+    ]) {
+      expect(names).toContain(name)
+    }
   })
 
   it('carries the Auth.js adapter tables, without which sessions have nowhere to live', () => {
@@ -71,6 +89,10 @@ describe('the schema barrel', () => {
         'issued_at',
         'claimed_at',
         'recorded_at',
+        // A lease is created by being acquired, and a keep-alive row by being run; both name the
+        // event rather than the write, the same way `compute_leases.requested_at` does.
+        'acquired_at',
+        'ran_at',
       ].some((candidate) => names.includes(candidate))
       expect(hasCreationTime, `${getTableName(table)} records no creation time`).toBe(true)
     }

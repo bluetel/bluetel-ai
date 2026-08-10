@@ -6,7 +6,7 @@ import type { JobOutcome } from './jobs'
 /**
  * The jobs are mocked, and that is the point of this file.
  *
- * Every one of the eight is covered by its own suite against fakes; what has never been asserted
+ * Every one of them is covered by its own suite against fakes; what has never been asserted
  * anywhere is that an *event* reaches the right one carrying the right subject and the right ports.
  * A test that ran the real jobs would need a database to say anything about routing, and would say
  * it about admission rather than about the router.
@@ -28,22 +28,40 @@ const failed = (jobName: string, message: string): JobOutcome<unknown> => ({
 
 const runAdmitWorkflow = vi.fn(() => Promise.resolve(succeeded('admit-workflow')))
 const runBootstrapAdmins = vi.fn(() => Promise.resolve(succeeded('bootstrap-admins')))
+const runCredentialAlerts = vi.fn(() => Promise.resolve(succeeded('credential-alerts')))
 const runDrainQueue = vi.fn(() => Promise.resolve(succeeded('drain-queue')))
 const runIntegrationTick = vi.fn(() => Promise.resolve(succeeded('integration-tick')))
+const runPauseInstance = vi.fn(() => Promise.resolve(succeeded('pause-instance')))
 const runReconcile = vi.fn(() => Promise.resolve(succeeded('reconcile')))
+const runResumeWorkflow = vi.fn(() => Promise.resolve(succeeded('resume-workflow')))
 const runStartWorkflow = vi.fn(() => Promise.resolve(succeeded('start-workflow')))
 const runSyncSchedules = vi.fn(() => Promise.resolve(succeeded('sync-schedules')))
 const runTeardownWorkflow = vi.fn(() => Promise.resolve(succeeded('teardown-workflow')))
+const sweepKeepAlive = vi.fn(() => Promise.resolve({ considered: 0 }))
 
 const everyJob = {
   runAdmitWorkflow,
   runBootstrapAdmins,
+  runCredentialAlerts,
   runDrainQueue,
   runIntegrationTick,
+  runPauseInstance,
   runReconcile,
+  runResumeWorkflow,
   runStartWorkflow,
   runSyncSchedules,
   runTeardownWorkflow,
+  sweepKeepAlive,
+  // The keep-alive sweep has no `runKeepAlive` of its own — it lives in `credentials/liveness/`,
+  // which cannot import this directory's job envelope without a cycle — so the router wraps it.
+  // Both pieces have to be in the mock for that route to reach anything.
+  KEEP_ALIVE_JOB_NAME: 'keep-alive',
+  runJob: async (jobName: string, handler: () => Promise<unknown>) => ({
+    ok: true,
+    jobName,
+    durationMs: 1,
+    value: await handler(),
+  }),
 }
 
 vi.mock('./jobs', () => everyJob)
@@ -71,17 +89,26 @@ const context = {
   readCredential: 'the-credential-reader',
   buckets: { logs: 'logs-bucket', artifacts: 'artifacts-bucket', snapshots: 'snapshots-bucket' },
   ceiling: 7,
+  credentialWaitLimitMs: 900_000,
+  keepAliveIdleHours: 24,
+  coolingOffRetryMs: 900_000,
+  credentialExerciser: 'the-credential-exerciser',
   machineSurfaceUrl: 'https://machine.example',
   credentialSecret: 'the-credential-secret',
   bootstrapAdminEmails: ['admin@example.com'],
   starter: 'the-starter',
   queueDrain: 'the-queue-drain',
   notifier: 'the-notifier',
+  credentialAlerter: 'the-credential-alerter',
 } as unknown as ControlPlaneContext
 
 beforeEach(() => {
   for (const job of Object.values(everyJob)) {
-    job.mockClear()
+    // Not everything in the mocked module is a spy: the router also needs the job envelope and a
+    // job name from `./jobs`, and neither has calls to clear.
+    if (vi.isMockFunction(job)) {
+      job.mockClear()
+    }
   }
 })
 
@@ -109,6 +136,8 @@ describe('parseControlPlaneEvent', () => {
     const subjects: Record<string, unknown> = {
       'admit-workflow': { workflowId: 'wf_1' },
       'integration-tick': { integrationId: 'int_1' },
+      'pause-instance': { workflowId: 'wf_1' },
+      'resume-workflow': { workflowId: 'wf_1' },
       'start-workflow': { workflowId: 'wf_1' },
       'teardown-workflow': { workflowId: 'wf_1' },
     }
@@ -128,13 +157,16 @@ describe('parseControlPlaneEvent', () => {
     ['a tick naming no integration', { job: 'integration-tick' }],
     ['a trigger nothing recognises', { job: 'integration-tick', integrationId: 'i', trigger: 'x' }],
     ['a drain with a nonsensical limit', { job: 'drain-queue', limit: 0 }],
+    ['a pause naming no run', { job: 'pause-instance' }],
+    ['a resume naming no run', { job: 'resume-workflow' }],
+    ['a resume with a blank workflow id', { job: 'resume-workflow', workflowId: '' }],
   ])('refuses %s', (_description, event) => {
     expect(() => parseControlPlaneEvent(event)).toThrow('cannot route')
   })
 
   it('names every job it would have accepted, so the refusal is actionable', () => {
     expect(() => parseControlPlaneEvent({ job: 'unknown' })).toThrow(
-      'admit-workflow, bootstrap-admins, drain-queue, integration-tick, reconcile, start-workflow, sync-schedules, teardown-workflow, control-plane-tick',
+      'admit-workflow, bootstrap-admins, credential-alerts, drain-queue, integration-tick, keep-alive, pause-instance, reconcile, resume-workflow, start-workflow, sync-schedules, teardown-workflow, control-plane-tick',
     )
   })
 })
@@ -167,6 +199,10 @@ describe('runControlPlaneEvent', () => {
       ceiling: 7,
       starter: 'the-starter',
       limit: 3,
+      // The drain is where a wait is expired and announced (003/FR-028, FR-136), so it takes the
+      // configured limit and the notifier rather than reading either itself.
+      credentialWaitLimitMs: 900_000,
+      notifier: 'the-notifier',
     })
   })
 
@@ -194,7 +230,7 @@ describe('runControlPlaneEvent', () => {
     expect(runIntegrationTick).toHaveBeenCalledWith(expect.objectContaining({ trigger: undefined }))
   })
 
-  it('routes the reconcile with compute and the drain that re-admits what it frees', async () => {
+  it('routes the reconcile with compute, the drain, and the cooling-off retry interval', async () => {
     await runControlPlaneEvent(context, { job: 'reconcile' })
 
     expect(runReconcile).toHaveBeenCalledWith({
@@ -202,7 +238,86 @@ describe('runControlPlaneEvent', () => {
       compute: 'the-compute',
       queueDrain: 'the-queue-drain',
       notifier: 'the-notifier',
+      // 003/FR-078. Converted once, in the composition root, so the job never reads configuration.
+      coolingOffRetryMs: 900_000,
     })
+  })
+
+  it('routes the keep-alive sweep with the provider seam and the idle threshold (003/FR-035)', async () => {
+    await runControlPlaneEvent(context, { job: 'keep-alive' })
+
+    expect(sweepKeepAlive).toHaveBeenCalledWith({
+      db: 'the-database',
+      exerciser: 'the-credential-exerciser',
+      idleHours: 24,
+    })
+  })
+
+  it('keeps keep-alive out of the stage tick, so it runs independently of demand (003/FR-035)', () => {
+    // FR-035 requires the pool to be exercised independently of workflow demand. A sweep that only
+    // ran inside the stage tick would stop running whenever the tick did, and SC-009's failure —
+    // a pool that has quietly expired — is invisible until a workflow tries to use it.
+    expect(CONTROL_PLANE_TICK_SEQUENCE.map((step) => step.job)).not.toContain('keep-alive')
+  })
+
+  it('routes the FR-056 alert sweep with the alerter and no threshold of its own', async () => {
+    await runControlPlaneEvent(context, { job: 'credential-alerts' })
+
+    // The two hour knobs are bound into the alerter in the composition root, so the job is handed
+    // neither — there is nowhere for a second opinion about them to live.
+    expect(runCredentialAlerts).toHaveBeenCalledWith({
+      db: 'the-database',
+      alerter: 'the-credential-alerter',
+    })
+  })
+
+  it('keeps the alert sweep out of both the stage tick and keep-alive (003/FR-056)', () => {
+    // One of the four conditions it raises is a seat keep-alive has stopped exercising, so an alert
+    // that only ran inside keep-alive would go silent in the case it was written for. The stage
+    // tick is wrong for a different reason: it runs once a minute and nothing in the alert path
+    // coalesces.
+    expect(CONTROL_PLANE_TICK_SEQUENCE.map((step) => step.job)).not.toContain('credential-alerts')
+  })
+
+  it('routes the pause with compute and the drain (003/FR-039)', async () => {
+    // Until this route existed, `pauseInstance` was implemented, tested and exported from the jobs
+    // barrel with nothing anywhere able to reach it: `suspend()`'s pause plan says the control
+    // plane stops the instance from outside, and no event named the job that does it. A pause was
+    // therefore an instance left running until the reconciler's idle ceiling parked it — the
+    // FR-039 saving never happened, on any run.
+    await runControlPlaneEvent(context, { job: 'pause-instance', workflowId: 'wf_9' })
+
+    expect(runPauseInstance).toHaveBeenCalledWith({
+      db: 'the-database',
+      compute: 'the-compute',
+      workflowId: 'wf_9',
+      queueDrain: 'the-queue-drain',
+    })
+  })
+
+  it('routes the resume with everything provisioning takes (003/FR-041, FR-043)', async () => {
+    // The same dependency set as `start-workflow`, because the recovery path *is* `startWorkflow`:
+    // a stopped instance that will not start again is rebuilt from its snapshot onto a fresh one,
+    // which needs the machine surface URL and the signing secret exactly as a cold start does.
+    await runControlPlaneEvent(context, { job: 'resume-workflow', workflowId: 'wf_9' })
+
+    expect(runResumeWorkflow).toHaveBeenCalledWith({
+      db: 'the-database',
+      compute: 'the-compute',
+      machineSurfaceUrl: 'https://machine.example',
+      credentialSecret: 'the-credential-secret',
+      workflowId: 'wf_9',
+    })
+  })
+
+  it('keeps pause and resume out of the stage tick, since both name one run', () => {
+    // Neither is a sweep. A tick step takes no subject, and both of these are meaningless without
+    // one; the population-level backstop for an unattended pause is `reconcile`, which is in the
+    // sequence already.
+    const steps = CONTROL_PLANE_TICK_SEQUENCE.map((step) => step.job)
+
+    expect(steps).not.toContain('pause-instance')
+    expect(steps).not.toContain('resume-workflow')
   })
 
   it('routes provisioning with the machine surface and the credential secret', async () => {

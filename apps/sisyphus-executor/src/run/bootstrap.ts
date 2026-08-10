@@ -10,6 +10,7 @@
  * ```
  * prepareWorkspaceRoot          the config tree exists before setup.sh is promised it
  * 2-5  runBundleBootstrap       download, verify, unpack, run setup.sh
+ * 5a   installAgentCredential   the leased seat's material, from the machine surface
  * 6    checkoutWorkspace        every entry, sequentially, or none
  * 7    startAgentPhase          against a ReadyWorkspace and nothing else
  * ```
@@ -25,7 +26,29 @@
  *
  * They are not conditional on `resumeFromSnapshot`, and the protocol is explicit about why: a
  * snapshot deliberately excludes the credential subtree (FR-072), so re-running the bundle is how a
- * resumed workflow gets its credentials back. Restore replaces phases 6 and 7, never 2–5.
+ * resumed workflow gets its **repository-host and third-party** credentials back. Restore replaces
+ * phases 6 and 7, never 2–5.
+ *
+ * ## Phase 5a runs on **every** boot, and there is no branch for it to escape through (003/FR-050)
+ *
+ * `installAgentCredential` sits between the bundle and the checkout — after `setup_script`, because
+ * the bundle is what puts the agent CLI on the box; before `entry_checkout`, because there is no
+ * reason to clone a customer's repositories for a run that cannot authenticate.
+ *
+ * It is a straight-line `await` in this function, with nothing conditional anywhere near it, and
+ * that is deliberate rather than incidental. This function is the **only** boot path the executor
+ * has: `main.ts` parses an envelope and calls `assembleRun`, `run/execute.ts` calls this, and there
+ * is no second sequence for a restore or a resume. A restore boot is this same call with
+ * `resumeFromSnapshot` set — a value read in exactly one place, `startAgentPhase`'s
+ * `resumeSessionId` — and a resumed-instance boot is this same call on a machine that was stopped
+ * rather than terminated. So "the credential is installed on every boot" is not a rule anybody has
+ * to remember: there is no code path here that reaches phase 6 without having run 5a first, and
+ * `bootstrap.test.ts` asserts it against a restore envelope as well as a first boot.
+ *
+ * That matters most in the case that looks like it should be an optimisation. A **stopped**
+ * instance still has the previous boot's material on its disk, and skipping the fetch would look
+ * free — but the credential may have rotated while the instance was not running, and a run that
+ * starts with a superseded token fails somewhere much less legible than a bootstrap phase.
  *
  * ## Nothing here reports to the machine surface
  *
@@ -38,11 +61,13 @@ import { join } from 'node:path'
 
 import type { AgentAdapter } from '../agent'
 import type {
+  AgentCredentialSource,
   BootstrapPhaseName,
   BootstrapPhaseReporter,
   BundleArchiveStore,
   BundleBootstrapResult,
   CheckedOutEntry,
+  InstalledAgentCredential,
   ReadyWorkspace,
   SetupBundleReference,
   StartedAgent,
@@ -51,12 +76,13 @@ import type {
 import {
   agentConfigDir,
   checkoutWorkspace,
+  installAgentCredential,
   prepareWorkspaceRoot,
   runBundleBootstrap,
   startAgentPhase,
 } from '../bootstrap'
 import type { EnvelopeSetupBundle, WorkflowJobEnvelope } from '../job-envelope'
-import type { KnownSecret, SanitisedText } from '../output'
+import type { KnownSecret, SanitisedText, SecretRegistry } from '../output'
 import type { SkillSource } from '../skills'
 import { primarySkillSource } from '../skills'
 
@@ -105,6 +131,15 @@ export interface RunBootstrapOptions {
   readonly workspaceRoot: string
   readonly reporter: BootstrapPhaseReporter
   readonly adapter: AgentAdapter
+  /** `machine.fetchAgentCredential`, for phase 5a (003/FR-012, FR-049). */
+  readonly credentials: AgentCredentialSource
+  /**
+   * The run's known-value redaction set (003/FR-014).
+   *
+   * Phase 5a registers the leased material in it before writing the material anywhere, so the
+   * output pipeline knows the value from the moment this process does.
+   */
+  readonly credentialSecrets: SecretRegistry
   /** Credentials already known, for known-value redaction of setup output (FR-072, FR-089). */
   readonly secrets?: readonly KnownSecret[]
   /** Sanitised setup output as it is produced, for the live panel (FR-046). */
@@ -122,6 +157,13 @@ export interface RunBootstrapOptions {
 
 export interface BootstrappedRun {
   readonly bundle: BundleBootstrapResult
+  /**
+   * The seat this boot installed. **Identifiers and a path, never the material** (003/FR-012).
+   *
+   * Carried out of bootstrap because the fence is what `credential/rotation-watch.ts` must present
+   * on every write-through, and the fetch is the only thing that knows it.
+   */
+  readonly credential: InstalledAgentCredential
   readonly workspace: ReadyWorkspace
   readonly agent: StartedAgent
   /** Where every skill is resolved from, and nowhere else (FR-110). */
@@ -132,10 +174,12 @@ export interface BootstrappedRun {
 export const DEFAULT_BUNDLE_SUBDIRECTORY = '.setup-bundle'
 
 /**
- * Run bootstrap phases 2 through 7.
+ * Run bootstrap phases 2 through 7, including 5a on every boot (003/FR-050).
  *
- * @param options - The envelope, the object store, the phase reporter and the agent adapter.
- * @returns The bundle result, the checked-out workspace, the started agent and the skill source.
+ * @param options - The envelope, the object store, the phase reporter, the agent adapter and the
+ *   machine surface's credential fetch.
+ * @returns The bundle result, the installed seat's identifiers, the checked-out workspace, the
+ *   started agent and the skill source.
  * @throws {BootstrapPhaseError} Naming the phase that failed, and — for phase 6 — the entry
  *   (FR-112, FR-146). No path out of this function produces a failure without a phase attached.
  */
@@ -157,6 +201,20 @@ export const bootstrapRun = async (options: RunBootstrapOptions): Promise<Bootst
     ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
     ...(options.timeouts === undefined ? {} : { timeouts: options.timeouts }),
     ...(options.onSetupOutput === undefined ? {} : { onOutput: options.onSetupOutput }),
+    ...(options.now === undefined ? {} : { now: options.now }),
+  })
+
+  // Phase 5a. Unconditional — see the module note: this is the only boot path there is, so a
+  // restore boot and a resumed-instance boot reach this line exactly as a first boot does
+  // (003/FR-050).
+  const credential = await installAgentCredential({
+    source: options.credentials,
+    workspaceRoot,
+    reporter: options.reporter,
+    secrets: options.credentialSecrets,
+    ...(options.timeouts?.credential_install === undefined
+      ? {}
+      : { timeoutMs: options.timeouts.credential_install }),
     ...(options.now === undefined ? {} : { now: options.now }),
   })
 
@@ -192,5 +250,5 @@ export const bootstrapRun = async (options: RunBootstrapOptions): Promise<Bootst
     ...(options.now === undefined ? {} : { now: options.now }),
   })
 
-  return { bundle, workspace, agent, source: primarySkillSource(workspace) }
+  return { bundle, credential, workspace, agent, source: primarySkillSource(workspace) }
 }

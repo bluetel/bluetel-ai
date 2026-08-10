@@ -6,6 +6,8 @@ import {
   BOOTSTRAP_PHASES,
   CLAUDE_MODELS,
   CORRECTION_DELIVERY_OUTCOMES,
+  CREDENTIAL_RELEASE_REASONS,
+  CREDENTIAL_STATES,
   ENTRY_RESULTS,
   EXTERNAL_ACTION_KINDS,
   EXTERNAL_ACTION_RESULTS,
@@ -75,6 +77,11 @@ export const reviewFindingSeverityEnum = pgEnum(
 export const externalActionKindEnum = pgEnum('external_action_kind', EXTERNAL_ACTION_KINDS)
 export const externalActionResultEnum = pgEnum('external_action_result', EXTERNAL_ACTION_RESULTS)
 export const notificationEventEnum = pgEnum('notification_event', NOTIFICATION_EVENTS)
+export const credentialStateEnum = pgEnum('credential_state', CREDENTIAL_STATES)
+export const credentialReleaseReasonEnum = pgEnum(
+  'credential_release_reason',
+  CREDENTIAL_RELEASE_REASONS,
+)
 
 // --- Identity ------------------------------------------------------------------------------
 
