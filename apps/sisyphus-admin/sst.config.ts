@@ -219,7 +219,10 @@ export default $config({
      * This stack passed **no** `permissions` at all until this block existed,
      * which meant two things were true of every deployed stage. The bundles
      * grants `buildPanelBundlesPolicy` had described since 002 were never
-     * applied to anything; and — since 003 — the machine surface mounted at
+     * applied to anything — `bucketNames.bundles` is referenced by name and
+     * never `link`ed, so none of SST's automatic resource-permission wiring
+     * reaches it, and `permissions` here is the only thing that grants it
+     * (FR-084); and — since 003 — the machine surface mounted at
      * `/api/machine` could not reach Secrets Manager, so every instance failed
      * its `credential_install` bootstrap phase with an AWS authorisation error
      * on a stage that had deployed cleanly. See

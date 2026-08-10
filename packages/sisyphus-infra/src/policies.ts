@@ -219,6 +219,21 @@ export interface ControlPlanePolicyConfig {
    * from reading a production agent's login.
    */
   readonly agentCredentialSecretPrefix: string
+  /**
+   * Name of the stage's schedule group (`getSchedulerGroupName` in
+   * `schedule-name.ts`) — the exact group `scheduler:CreateSchedule`,
+   * `UpdateSchedule` and `DeleteSchedule` are scoped to, so `syncSchedules`
+   * (FR-100) can register and remove per-integration schedules without
+   * reaching another stage's group.
+   */
+  readonly schedulerGroupName: string
+  /**
+   * ARN of the role EventBridge Scheduler assumes to invoke the control plane
+   * (`schedulerRoleArn` in `sst.config.ts`) — the exact role `iam:PassRole` is
+   * scoped to here, since every `CreateSchedule`/`UpdateSchedule` call passes
+   * it as the schedule's target role.
+   */
+  readonly schedulerRoleArn: string
 }
 
 /**
@@ -268,6 +283,19 @@ export interface ControlPlanePolicyConfig {
  * tagging a resource **at creation** needs the tagging action in addition to
  * the creating one, and `WORKFLOW_ID_TAG` in `compute.ts` is set through
  * `RunInstances`'s own `TagSpecifications`, not a separate call.
+ *
+ * `syncSchedules` (`jobs/sync-schedules.ts`) needs the control plane to keep
+ * EventBridge Scheduler in lockstep with the `integrations` table (FR-100):
+ * `scheduler:ListSchedules` finds the sweep's orphans, and
+ * `Create`/`Update`/`DeleteSchedule` bring one integration's schedule to the
+ * row's desired state. `ListSchedules` has no resource-level permissions —
+ * like `ec2:DescribeInstances` above, AWS evaluates it against the literal
+ * `schedule/*` /`*` pattern regardless of how narrowly the rest of the policy
+ * is scoped — so that statement cannot be narrowed to this stage's group the
+ * way the mutating actions are. `CreateSchedule`/`UpdateSchedule` also pass
+ * `schedulerRoleArn` as the schedule's target role, which is why
+ * `iam:PassRole` is granted on exactly that role and nothing else, mirroring
+ * `PassExecutorRunnerRoleToLaunchedInstances` below.
  */
 export const buildControlPlanePolicy = (config: ControlPlanePolicyConfig): PolicyDocument => {
   const ec2Resource = (resourceType: string): string =>
@@ -287,6 +315,8 @@ export const buildControlPlanePolicy = (config: ControlPlanePolicyConfig): Polic
    * the secrets this stage creates there and nothing above or beside it.
    */
   const agentCredentialSecretArn = `arn:aws:secretsmanager:${config.region}:${config.accountId}:secret:${config.agentCredentialSecretPrefix}/*`
+
+  const schedulerGroupResource = `arn:aws:scheduler:${config.region}:${config.accountId}:schedule/${config.schedulerGroupName}/*`
 
   return {
     Version: POLICY_VERSION,
@@ -331,6 +361,28 @@ export const buildControlPlanePolicy = (config: ControlPlanePolicyConfig): Polic
           'secretsmanager:PutSecretValue',
         ],
         Resource: [agentCredentialSecretArn],
+      },
+      {
+        Sid: 'ListRegisteredSchedules',
+        Effect: 'Allow',
+        Action: ['scheduler:ListSchedules'],
+        Resource: [`arn:aws:scheduler:${config.region}:${config.accountId}:schedule/*/*`],
+      },
+      {
+        Sid: 'ManageIntegrationSchedules',
+        Effect: 'Allow',
+        Action: [
+          'scheduler:CreateSchedule',
+          'scheduler:UpdateSchedule',
+          'scheduler:DeleteSchedule',
+        ],
+        Resource: [schedulerGroupResource],
+      },
+      {
+        Sid: 'PassSchedulerInvokeRoleToScheduler',
+        Effect: 'Allow',
+        Action: ['iam:PassRole'],
+        Resource: [config.schedulerRoleArn],
       },
     ],
   }

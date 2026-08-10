@@ -9,7 +9,7 @@ import { agentCredentials } from '../../db'
  *
  * ## Why there is a port here at all
  *
- * The same reason `machine/credential-material.ts` and `admin/reachability.ts` have one: the
+ * The same reason `machine/credential-material.ts` and `admin/integration-connectors.ts` have one: the
  * environment is provisioned from
  * `apps/sisyphus-control-plane/src/credentials/login/`, and this package cannot import an
  * application without inverting the dependency graph and becoming impossible to build in two of its
@@ -120,7 +120,7 @@ export const LOGIN_ENVIRONMENT_NOT_CONFIGURED_REASON =
 /**
  * The provisioner used when a deployment has wired none.
  *
- * `start` **refuses**, for the reason `createRefusingReachabilityProbe` refuses: a login that appeared to
+ * `start` **refuses**, for the reason `createRefusingConnectorRegistry` refuses: a login that appeared to
  * begin and provisioned nothing would leave an administrator waiting at a terminal that will never
  * open, and the credential would sit in `awaiting_login` with no explanation against it.
  *

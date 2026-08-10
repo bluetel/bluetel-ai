@@ -13,8 +13,9 @@ import { isTerminalState, runWorkflowTransition } from '../workflow'
  * Releasing a lease is `apps/sisyphus-control-plane/src/credentials/lease/release.ts`, and this
  * package cannot import an application: the panel, the control plane and the executor all consume
  * it, so a dependency from here onto an app would invert the graph and leave two of the three
- * unable to build. That is the same argument `admin/credential-login.ts`, `admin/reachability.ts` and
- * `machine/credential-material.ts` each make from their own side, and the answer is the same one —
+ * unable to build. That is the same argument `admin/credential-login.ts`,
+ * `admin/integration-connectors.ts` and `machine/credential-material.ts` each make from their own
+ * side, and the answer is the same one —
  * state what is needed, let the host supply it, and put the key on
  * {@link import('../context').SisyphusDependencies}.
  *

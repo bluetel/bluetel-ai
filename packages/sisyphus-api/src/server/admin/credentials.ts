@@ -92,7 +92,7 @@ import type { Page } from './user-queries'
  *
  * `createCredentialsRouter` takes the login environments port as an argument, and
  * `credentialsRouter` is the one built with the **refusing** provisioner, exactly as
- * `profilesRouter` is built with the refusing reachability probe. A deployment supplies the real
+ * `integrationsRouter` is built with the refusing connector registry. A deployment supplies the real
  * one through `SisyphusDependencies.agentCredentialLogin`, which wins over the constructor argument
  * per request; the argument stays so the contract test can inject a fake without assembling a
  * context. See `credential-login.ts` for why the port exists at all — chiefly that this package
@@ -700,8 +700,8 @@ export const createCredentialsRouter = (options: CredentialsRouterOptions = {}) 
  *
  * A deployment that supplies `SisyphusDependencies.agentCredentialLogin` can log a seat in; one that
  * does not gets a refusal naming the missing configuration, rather than a login that appears to
- * begin and provisions nothing. Same choice, for the same reason, as `profilesRouter` and the
- * FR-124 reachability probe.
+ * begin and provisions nothing. Same choice, for the same reason, as `integrationsRouter` and the
+ * connector registry.
  */
 export const credentialsRouter = createCredentialsRouter()
 

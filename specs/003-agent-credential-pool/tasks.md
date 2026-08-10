@@ -763,7 +763,8 @@ component, the full quickstart walkthrough, and the merge gate.
       "fixed". The type-only imports from `server/context.ts` into `admin/credential-leases`,
       `admin/credential-login` and `machine/credential-material` are the pre-existing pattern beside
       `admin/reachability` and cannot go through a barrel: the barrels import the procedures that import this
-      module.
+      module. (`admin/reachability` has since been removed by `specs/004-remove-reachability-gate`, which
+      landed on `feature/sisyphus` after this audit; the three type-only imports are unaffected.)
 - [x] T129 Run the full gate — `pnpm nx affected -t lint test typecheck` and `pnpm qlty:diff` — green with **no
       threshold overrides** (Constitution Principle IV). Run as `run-many` over all six projects rather than
       `affected`: this branch is off `feature/sisyphus`, and an `affected` base that excluded the feature's own

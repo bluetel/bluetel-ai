@@ -7,8 +7,14 @@ import type { IntegrationType } from '../../enums'
  * `validate` has to *reach the board* — a well-formed configuration pointing at an unreachable
  * system must not enable (FR-097) — and `previewPrompt` has to read a real ticket and render what
  * the agent would actually be told (FR-160). Both are network calls, and a network call reached
- * directly from a resolver is a resolver no test can exercise. The same argument `reachability.ts`
- * makes for FR-124's gate, one requirement along.
+ * directly from a resolver is a resolver no test can exercise.
+ *
+ * These two seams are worth having because a deployment can actually supply them: the board
+ * credential is held by the platform, so the check `validate` makes is the same check the run will
+ * later depend on. Contrast the repository-reachability seam FR-124 once carried, which was removed
+ * (`specs/004-remove-reachability-gate`) because the credential it needed lives only on the
+ * executor instance and never reaches here — a port nobody can implement is not a seam, it is a
+ * refusal with extra steps.
  *
  * ## Neither port names a board (FR-192)
  *

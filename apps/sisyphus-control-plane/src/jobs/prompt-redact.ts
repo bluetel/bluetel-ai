@@ -31,10 +31,13 @@ import type { PromptParts } from '@bluetel-ai/sisyphus-api/contracts'
  *
  * ## The default refuses
  *
- * {@link createRefusingPromptRedactor} throws on every call, in the same spirit as
- * `createRefusingReachabilityProbe` in `sisyphus-api`. A deployment that has wired no redactor
+ * {@link createRefusingPromptRedactor} throws on every call. Refusing by default is the right shape
+ * here because the refusal is *survivable*: a tick that throws is recorded and retried (FR-105,
+ * FR-108), so one job stalls and nothing else is affected. A deployment that has wired no redactor
  * genuinely cannot meet FR-163, and a pass-through default would store unredacted customer ticket
- * content while looking configured.
+ * content while looking configured. Contrast a gate sitting on the only path that lets an operator
+ * enable anything at all — refuse by default there and the safe-looking default is the one that
+ * takes the whole product down with it.
  *
  * ## Why the bound is applied *after* redaction
  *

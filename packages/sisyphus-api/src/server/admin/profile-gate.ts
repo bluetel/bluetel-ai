@@ -1,44 +1,56 @@
 import { TRPCError } from '@trpc/server'
 
 import type { ProfileEnableSubject } from './profile-store'
-import type { ReachabilityTarget, RepositoryReachabilityProbe } from './reachability'
-import { probeTargets } from './reachability'
-import { describeWorkspaceEntry } from './workspace-entries'
 
 /**
  * FR-124's enable gate — the check that stops a profile/bundle mismatch reaching a run.
  *
  * ## What it checks
  *
- * An execution profile may not be enabled until validation confirms **both** halves of FR-124:
+ * An execution profile may not be enabled until validation confirms all of:
  *
- * 1. the setup bundle version it pins belongs to a bundle that is **enabled** and not archived; and
- * 2. **every** entry of the workspace version it pins is reachable — repository and base branch
- *    together — with the credentials available.
- *
- * Plus the structural minimum the two halves assume: a profile must actually have a published
- * version, that version's pinned rows must still be there, and the workspace version must contain
- * at least one entry. A workspace version with no entries produces a run with nothing to check out,
- * and the executor discovers that at phase 6 having already paid for an instance.
+ * 1. the profile has a published version at all, and that version's pinned rows can still be read;
+ * 2. the setup bundle version it pins belongs to a bundle that is **enabled** and not archived;
+ * 3. the workspace it pins is not archived; and
+ * 4. the workspace version it pins contains at least one entry. A workspace version with no
+ *    entries produces a run with nothing to check out, and the executor discovers that at phase 6
+ *    having already paid for an instance.
  *
  * Together these are the difference between "this preset looks fine" and "this preset can start a
- * run". Without them, a bundle written for one repository set can be attached to another and
- * nothing notices until an agent is running against a tree that does not match its setup.
+ * run". Without them, a bundle taken out of circulation can stay attached to a profile and nothing
+ * notices until an agent is running against a tree that does not match its setup.
+ *
+ * ## What it deliberately does not check
+ *
+ * FR-124 once also required that every workspace entry's repository and base branch be reachable
+ * with the credentials available. That half has been withdrawn (`specs/004-remove-reachability-gate`)
+ * because it was never satisfiable from here: the repository-host credential is installed by a
+ * client-authored setup bundle onto an ephemeral executor instance, in a format the bundle contract
+ * deliberately leaves unspecified, and it never leaves that instance. The panel structurally cannot
+ * hold it.
+ *
+ * A wrong repository or branch therefore surfaces at bootstrap phase 6 (`entry_checkout`), which
+ * already fails the run naming the entry, the repository, the branch and git's own error, and
+ * leaves no partial workspace behind (FR-112). That is the accepted cost, and it is why this module
+ * must never grow a check it cannot actually perform: the previous attempt shipped as a
+ * refuse-by-default stub that no deployment could wire, so no profile could be enabled in any
+ * deployment.
  *
  * ## Why it refuses by name
  *
  * "This profile cannot be enabled" tells an admin nothing: they hold a form with a bundle, a
  * workspace and up to a dozen repositories on it, and the platform has just declined to say which
- * one is wrong. "Workspace entry 2 (github.com/acme/api on main) is unreachable: the credential
- * cannot read this repository" tells them what to fix and where. So the gate collects **every**
- * failure rather than stopping at the first, and each one names its element.
+ * one is wrong. "The setup bundle node-20 (version 4) is disabled; enable it before enabling this
+ * profile" tells them what to fix and where. So the gate collects **every** failure rather than
+ * stopping at the first, and each one names its element.
  *
  * ## Why it is a pure function
  *
- * Everything it judges arrives as {@link ProfileEnableSubject} — read by `profile-store.ts` — and
- * the one outbound call goes through {@link RepositoryReachabilityProbe}. So the rule can be tested
- * against a reachable host, an unreachable one, a missing branch, a disabled bundle and every
- * combination, without a network and without a database.
+ * Everything it judges arrives as {@link ProfileEnableSubject}, read by `profile-store.ts`. The
+ * gate makes no call of its own — no network, no database — so the rule can be tested against a
+ * disabled bundle, an archived workspace, an empty workspace version and every combination, with
+ * nothing but a value. The signature is synchronous to keep that true: a `Promise` here would leave
+ * room for an outbound call to be slipped back in without the type changing.
  */
 
 /** Which element of the configuration failed. Closed, so the panel can group failures by cause. */
@@ -46,7 +58,6 @@ export const PROFILE_ENABLE_ELEMENTS = [
   'profile_version',
   'setup_bundle',
   'workspace_version',
-  'workspace_entry',
   /**
    * The profile's attached credential groups (003/FR-065). Its own element rather than folded into
    * `profile_version`, because attachments hang off the **mutable profile row** and not off a
@@ -175,7 +186,7 @@ export const credentialGroupAttachmentCheck = (
  *
  * The gate reports **every** failure rather than the first, and that rule has to survive the gate
  * being made of more than one function: an administrator with an unattached credential group *and*
- * an unreachable repository should learn both in one attempt, not discover the second after fixing
+ * a disabled setup bundle should learn both in one attempt, not discover the second after fixing
  * the first.
  */
 export const mergeProfileEnableChecks = (
@@ -186,12 +197,8 @@ export const mergeProfileEnableChecks = (
  * Run the gate (FR-124).
  *
  * @param subject - The pinned bundle, workspace and entries, from `readProfileEnableSubject`.
- * @param probe - The outbound seam. Every entry is probed, including after one has failed.
  */
-export const checkProfileCanBeEnabled = async (
-  subject: ProfileEnableSubject,
-  probe: RepositoryReachabilityProbe,
-): Promise<ProfileEnableCheck> => {
+export const checkProfileCanBeEnabled = (subject: ProfileEnableSubject): ProfileEnableCheck => {
   const failures: ProfileEnableFailure[] = []
 
   if (subject.setupBundleArchived) {
@@ -221,30 +228,11 @@ export const checkProfileCanBeEnabled = async (
       element: 'workspace_version',
       detail: `version ${String(subject.workspaceVersion)} of the workspace ${subject.workspaceName} contains no repositories, so a run launched from this profile would have nothing to check out`,
     })
-
-    // Nothing to probe, and reporting "0 entries unreachable" alongside would read as a second
-    // problem.
-    return verdict(failures)
   }
 
-  const targets: readonly ReachabilityTarget[] = subject.entries.map((entry) => ({
-    repositoryUrl: entry.repositoryUrl,
-    baseBranch: entry.baseBranch,
-  }))
-
-  const reports = await probeTargets(probe, targets)
-
-  reports.forEach((report, index) => {
-    if (report.outcome.reachable) {
-      return
-    }
-
-    failures.push({
-      element: 'workspace_entry',
-      detail: `${describeWorkspaceEntry(index + 1, report.target)} is unreachable: ${report.outcome.reason}`,
-    })
-  })
-
+  // The entries themselves are not inspected beyond being counted. Whether each repository and
+  // branch actually exists is settled at checkout, by the credential that will do the cloning —
+  // see the module header.
   return verdict(failures)
 }
 

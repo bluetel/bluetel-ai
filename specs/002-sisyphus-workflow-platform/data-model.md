@@ -176,9 +176,10 @@ Identity and pointer state only — every launch value lives on `execution_profi
 | `enabled`            | boolean                      | Gated by the FR-124 validation check                         |
 | `archived_at`        | timestamptz null             | Soft delete; referenced profiles never hard-deleted (FR-128) |
 
-**Rules.** Cannot be enabled until validation confirms the setup bundle is enabled **and** every workspace
-entry's repository and branch are reachable — this gate is what prevents a run launching with a bundle that
-does not match its repositories (FR-124). Not deletable while referenced; disable instead (FR-128).
+**Rules.** Cannot be enabled until validation confirms the profile has a published version, its pinned bundle
+and workspace version rows are readable, the setup bundle is enabled and not archived, and the workspace is not
+archived and holds at least one entry (FR-124). Repository reachability is **not** checked — see
+`specs/004-remove-reachability-gate`. Not deletable while referenced; disable instead (FR-128).
 
 ### `integrations` / `integration_mappings`
 

@@ -14,8 +14,6 @@ const gateMessage = (...lines: readonly string[]): string =>
 
 const BUNDLE_LINE =
   'the setup bundle Payments toolchain (version 3) is disabled; enable it before enabling this profile'
-const ENTRY_LINE =
-  'workspace entry 2 (github.com/acme/api on main) is unreachable: the credential cannot read this repository'
 const EMPTY_WORKSPACE_LINE =
   'version 4 of the workspace Payments contains no repositories, so a run launched from this profile would have nothing to check out'
 const NO_VERSION_LINE =
@@ -25,12 +23,9 @@ const NO_GROUP_LINE =
   'this execution profile has no attached credential group, so a run launched from it would have no agent identity it is permitted to work as; attach at least one group before enabling it'
 const UNUSABLE_GROUP_LINE =
   'every credential group attached to this execution profile is unavailable (Payments), so no credential could ever be selected for a run launched from it'
+const UNKNOWN_LINE = 'the launch template failed a check nobody has written a name for yet'
 
 describe('classifyEnableFailure (FR-124)', () => {
-  it('recognises a failing workspace entry', () => {
-    expect(classifyEnableFailure(ENTRY_LINE)).toBe('workspace_entry')
-  })
-
   it('recognises a disabled setup bundle', () => {
     expect(classifyEnableFailure(BUNDLE_LINE)).toBe('setup_bundle')
   })
@@ -74,20 +69,20 @@ describe('the 003/FR-065 element (credential groups)', () => {
 
 describe('readEnableFailures (FR-124)', () => {
   it('keeps one entry per failing element, which is what the gate went to trouble to collect', () => {
-    expect(readEnableFailures(gateMessage(BUNDLE_LINE, ENTRY_LINE))).toHaveLength(2)
+    expect(readEnableFailures(gateMessage(BUNDLE_LINE, EMPTY_WORKSPACE_LINE))).toHaveLength(2)
   })
 
   it('keeps the gate’s own sentence verbatim, so the failing element stays named', () => {
-    const failures = readEnableFailures(gateMessage(ENTRY_LINE))
+    const failures = readEnableFailures(gateMessage(EMPTY_WORKSPACE_LINE))
 
-    expect(failures[0]?.detail).toBe(ENTRY_LINE)
+    expect(failures[0]?.detail).toBe(EMPTY_WORKSPACE_LINE)
   })
 
   it('gives each element a machine code and a next action, never a bare sentence', () => {
-    const failures = readEnableFailures(gateMessage(ENTRY_LINE))
+    const failures = readEnableFailures(gateMessage(EMPTY_WORKSPACE_LINE))
 
-    expect(failures[0]?.error.code).toBe('E_PROFILE_ENABLE_WORKSPACE_ENTRY')
-    expect(failures[0]?.error.action).toContain('Fix the repository or branch')
+    expect(failures[0]?.error.code).toBe('E_PROFILE_ENABLE_WORKSPACE_VERSION')
+    expect(failures[0]?.error.action).toContain('Publish a workspace version')
   })
 
   it('drops the preamble, which introduces the list rather than naming a failure', () => {
@@ -98,9 +93,27 @@ describe('readEnableFailures (FR-124)', () => {
   })
 
   it('reports the elements in the order the gate reported them', () => {
-    const failures = readEnableFailures(gateMessage(BUNDLE_LINE, ENTRY_LINE))
+    const failures = readEnableFailures(gateMessage(BUNDLE_LINE, EMPTY_WORKSPACE_LINE))
 
-    expect(failures.map((failure) => failure.element)).toEqual(['setup_bundle', 'workspace_entry'])
+    expect(failures.map((failure) => failure.element)).toEqual([
+      'setup_bundle',
+      'workspace_version',
+    ])
+  })
+
+  it('still renders a wording the gate has not been taught yet, rather than dropping the line', () => {
+    const failures = readEnableFailures(gateMessage(UNKNOWN_LINE))
+
+    expect(failures).toEqual([
+      {
+        element: 'unclassified',
+        detail: UNKNOWN_LINE,
+        error: {
+          code: 'E_PROFILE_ENABLE_UNCLASSIFIED',
+          action: 'Fix what the line names, then enable again.',
+        },
+      },
+    ])
   })
 })
 
@@ -108,7 +121,7 @@ describe('describeEnableRefusal (FR-124, FR-031)', () => {
   it('breaks a gate refusal into one notice per element rather than flattening it', () => {
     const refusal = describeEnableRefusal({
       data: { code: 'CONFLICT' },
-      message: gateMessage(BUNDLE_LINE, ENTRY_LINE),
+      message: gateMessage(BUNDLE_LINE, EMPTY_WORKSPACE_LINE),
     })
 
     expect(refusal.failures).toHaveLength(2)
@@ -117,7 +130,7 @@ describe('describeEnableRefusal (FR-124, FR-031)', () => {
   it('says how many elements are listed, so the summary is not a restatement of the list', () => {
     const refusal = describeEnableRefusal({
       data: { code: 'CONFLICT' },
-      message: gateMessage(BUNDLE_LINE, ENTRY_LINE),
+      message: gateMessage(BUNDLE_LINE, EMPTY_WORKSPACE_LINE),
     })
 
     expect(refusal.error.action).toContain('2 elements are listed below')

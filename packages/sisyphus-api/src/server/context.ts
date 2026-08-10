@@ -3,7 +3,6 @@ import type { UserRole } from '../enums'
 
 import type { AgentCredentialLeaseReleases } from './admin/credential-leases'
 import type { AgentCredentialLoginEnvironments } from './admin/credential-login'
-import type { RepositoryReachabilityProbe } from './admin/reachability'
 import type { AgentCredentialMaterialStore } from './machine/credential-material'
 import { memoiseAsync } from './memoise'
 import type { WorkflowEventEmitter } from './notify'
@@ -95,15 +94,6 @@ export interface SisyphusDependencies {
   /** Records a refusal. Failures here must not mask the refusal itself. */
   readonly recordDenial: (denial: AuthorisationDenial) => Promise<void>
   /**
-   * The outbound half of FR-124's profile-enable gate: can this deployment's credential reach a
-   * repository and its base branch?
-   *
-   * Optional, and a deployment that omits it gets a probe that **refuses** every enable rather
-   * than one that waves them through — an unchecked gate is worse than an absent one, because it
-   * reports a check that did not happen. See `server/admin/reachability.ts`.
-   */
-  readonly repositoryReachability?: RepositoryReachabilityProbe
-  /**
    * Where FR-136's notifications go — a port, not a Slack client (FR-140, FR-141).
    *
    * Four of FR-136's events plus `review_iteration_failed` are set on the machine surface in this
@@ -111,34 +101,34 @@ export interface SisyphusDependencies {
    * this package depend on an app. This is that seam; see `server/notify/emitter.ts` for why it is
    * a port and what a holder of one deliberately cannot do.
    *
-   * Optional, and unlike {@link SisyphusDependencies.repositoryReachability} an omitted notifier is
-   * a **silent no-op** rather than a refusal. The asymmetry is deliberate: an unwired gate reports
-   * a check that did not happen, whereas an unwired notifier withholds a message and breaks
-   * nothing — and FR-140 already requires that an unnotifiable recipient never fails a run.
+   * Optional, and an omitted notifier is a **silent no-op** rather than a refusal. That is the
+   * right default only because the refusal would be survivable: a withheld message costs a
+   * recipient their notification and nothing else, and FR-140 already requires that an
+   * unnotifiable recipient never fails a run. A seam on a path where refusing would take the
+   * product down does not get the same treatment — it does not get to be optional at all.
    */
   readonly notifier?: WorkflowEventEmitter
   /**
    * Where `admin.credentials.startLogin` provisions the hosted login environment, and what the
    * wall-clock reaper destroys (003/FR-069, 003/FR-070, 003/FR-071, 003/FR-072).
    *
-   * The third port on this object, and declared for the same reason as the other two: the real
+   * The second port on this object, and declared for the same reason as the first: the real
    * environment is provisioned from `apps/sisyphus-control-plane/src/credentials/login/`, and this
    * package must not depend on an application. See `server/admin/credential-login.ts` — chiefly for
    * why a holder of one cannot read credential material, which is the property that keeps FR-070
    * true of the panel's request path rather than merely intended.
    *
-   * Optional, and an omitted provisioner behaves like an omitted
-   * {@link SisyphusDependencies.repositoryReachability} rather than like an omitted
-   * {@link SisyphusDependencies.notifier}: it **refuses** to start a login instead of appearing to
-   * start one. A login that provisioned nothing would leave an administrator waiting at a terminal
-   * that never opens, with nothing recorded against the seat to say why.
+   * Optional, and an omitted provisioner **refuses** to start a login rather than behaving like an
+   * omitted {@link SisyphusDependencies.notifier} and appearing to start one. A login that
+   * provisioned nothing would leave an administrator waiting at a terminal that never opens, with
+   * nothing recorded against the seat to say why.
    */
   readonly agentCredentialLogin?: AgentCredentialLoginEnvironments
   /**
    * How the **machine surface** reads the material it hands an instance, and writes the material a
    * rotation brings back (003/FR-012, 003/FR-030, 003/FR-032).
    *
-   * The fourth port, and deliberately a *second* one onto the same store rather than two methods on
+   * The third port, and deliberately a *second* one onto the same store rather than two methods on
    * {@link SisyphusDependencies.agentCredentialSecrets}. That port's whole design is that a holder
    * of it cannot read material, because every administrative procedure holds it; this one can, and
    * is reachable only from `server/machine/`, where the caller is an executor presenting a
@@ -147,7 +137,7 @@ export interface SisyphusDependencies {
    * port exists for.
    *
    * Optional, and an omitted store **refuses in both directions** — like
-   * {@link SisyphusDependencies.repositoryReachability} and unlike
+   * {@link SisyphusDependencies.agentCredentialLogin} and unlike
    * {@link SisyphusDependencies.notifier}. An empty read would install a working credential's worth
    * of nothing on a paid instance, and a swallowed write would report a rotation as persisted and
    * lose it, which is the exact failure FR-030 and FR-032 exist to prevent.
@@ -156,14 +146,14 @@ export interface SisyphusDependencies {
   /**
    * How `admin.credentials.forceRelease` takes a seat back from the run holding it (003/FR-057).
    *
-   * The fifth port, and declared for the same reason as the other four: releasing a lease is
+   * The fourth port, and declared for the same reason as the other three: releasing a lease is
    * `apps/sisyphus-control-plane/src/credentials/lease/release.ts`, and this package must not
    * depend on an application. A holder of it can end one lease as an attributed administrator and
    * can do nothing else — see `server/admin/credential-leases.ts`, chiefly for why the *other* half
    * of FR-057 (resolving the affected run to a recorded state) deliberately stays in this package.
    *
    * Optional, and an omitted one is refused **before the procedure writes anything**, which is
-   * unlike all four of the others. They refuse at the moment they are called, which is safe because
+   * unlike all three of the others. They refuse at the moment they are called, which is safe because
    * calling them is the whole operation; a force-release is two writes in a fixed order, and a
    * refusal discovered between them would have ended somebody's run without freeing the seat.
    */

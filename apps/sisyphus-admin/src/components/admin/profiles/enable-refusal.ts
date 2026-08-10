@@ -11,7 +11,8 @@ import type { FieldErrorContent } from '@sisyphus-admin/components/ui'
  * ```
  * This execution profile cannot be enabled yet:
  * - the setup bundle Payments toolchain (version 3) is disabled; enable it before enabling this profile
- * - workspace entry 2 (github.com/acme/api on main) is unreachable: the credential cannot read it
+ * - version 4 of the workspace Payments contains no repositories, so a run launched from this profile
+ *   would have nothing to check out
  * ```
  *
  * The gate goes out of its way to collect **every** failure rather than stopping at the first,
@@ -42,7 +43,6 @@ export const ENABLE_FAILURE_ELEMENTS = [
   'profile_version',
   'setup_bundle',
   'workspace_version',
-  'workspace_entry',
   /**
    * The profile's attached credential groups (003/FR-065). Its own element rather than folded into
    * `profile_version`, because attachments hang off the **mutable profile row** rather than off a
@@ -72,14 +72,12 @@ const ACTIONS: Readonly<Record<EnableFailureElement, string>> = {
     'Enable the setup bundle this profile pins, or publish a profile version that pins one that is enabled.',
   workspace_version:
     'Publish a workspace version that contains at least one repository, then point this profile at it.',
-  workspace_entry:
-    'Fix the repository or branch the line names, or grant the platform credential access to it, then enable again.',
   credential_group:
     'Open this profile’s credential groups screen and attach a group, or re-enable one already attached. Publishing a new version will not clear this — attachments are not part of a version.',
   unclassified: 'Fix what the line names, then enable again.',
 }
 
-/** `E_PROFILE_ENABLE_WORKSPACE_ENTRY` — searchable, stable, and quotable in a ticket. */
+/** `E_PROFILE_ENABLE_SETUP_BUNDLE` — searchable, stable, and quotable in a ticket. */
 export const enableFailureCode = (element: EnableFailureElement): string =>
   `E_PROFILE_ENABLE_${element.toUpperCase()}`
 
@@ -88,7 +86,6 @@ export const classifyEnableFailure = (line: string): EnableFailureElement => {
   // Checked first: 003/FR-065's two sentences are the only ones that name a credential group, and
   // the one about an unavailable group would otherwise fall through to the catch-all.
   if (line.includes('credential group')) return 'credential_group'
-  if (line.includes('workspace entry')) return 'workspace_entry'
   if (line.includes('setup bundle')) return 'setup_bundle'
   if (line.includes('no published version') || line.includes('could not be read')) {
     return 'profile_version'

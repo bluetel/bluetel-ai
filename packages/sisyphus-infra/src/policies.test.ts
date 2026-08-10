@@ -41,7 +41,12 @@ const controlPlaneConfig: ControlPlanePolicyConfig = {
   accountId: '429776178057',
   executorRunnerRoleArn: 'arn:aws:iam::429776178057:role/sisyphus-staging-executor-runner',
   agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('staging')),
+  schedulerGroupName: 'sisyphus-staging-schedules',
+  schedulerRoleArn: 'arn:aws:iam::429776178057:role/sisyphus-staging-scheduler-invoke',
 }
+
+const controlPlaneActions = (config: ControlPlanePolicyConfig = controlPlaneConfig): string[] =>
+  buildControlPlanePolicy(config).Statement.flatMap((statement) => [...statement.Action])
 
 const panelBundlesConfig: PanelBundlesPolicyConfig = {
   region: 'eu-west-2',
@@ -54,9 +59,6 @@ const panelConfig: PanelPolicyConfig = {
   // The same helper the control-plane config above uses, and deliberately so — see the suite.
   agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('staging')),
 }
-
-const controlPlaneActions = (config: ControlPlanePolicyConfig = controlPlaneConfig): string[] =>
-  buildControlPlanePolicy(config).Statement.flatMap((statement) => [...statement.Action])
 
 describe('the GitHub OIDC identity', () => {
   it('federates the GitHub Actions issuer', () => {
@@ -458,20 +460,53 @@ describe('buildControlPlanePolicy — what the control plane may do', () => {
     expect(statement?.Resource).toEqual([controlPlaneConfig.executorRunnerRoleArn])
   })
 
-  it('scopes every EC2 resource ARN to the region and account supplied, not another stage’s', () => {
+  it('can list every schedule, with the wildcard resource ListSchedules requires', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'ListRegisteredSchedules')
+
+    expect(statement?.Action).toEqual(['scheduler:ListSchedules'])
+    expect(statement?.Resource).toEqual(['arn:aws:scheduler:eu-west-2:429776178057:schedule/*/*'])
+  })
+
+  it('can create, update and delete schedules scoped to its own schedule group', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'ManageIntegrationSchedules')
+
+    expect(statement?.Action).toEqual([
+      'scheduler:CreateSchedule',
+      'scheduler:UpdateSchedule',
+      'scheduler:DeleteSchedule',
+    ])
+    expect(statement?.Resource).toEqual([
+      `arn:aws:scheduler:eu-west-2:429776178057:schedule/${controlPlaneConfig.schedulerGroupName}/*`,
+    ])
+  })
+
+  it('may pass exactly the scheduler invoke role, and no other', () => {
+    const statement = policy.Statement.find(
+      (entry) => entry.Sid === 'PassSchedulerInvokeRoleToScheduler',
+    )
+
+    expect(statement?.Action).toEqual(['iam:PassRole'])
+    expect(statement?.Resource).toEqual([controlPlaneConfig.schedulerRoleArn])
+  })
+
+  it('scopes every EC2 and Scheduler resource ARN to the region and account supplied, not another stage’s', () => {
     const other = buildControlPlanePolicy({
       region: 'us-east-1',
       accountId: '111111111111',
       executorRunnerRoleArn: 'arn:aws:iam::111111111111:role/sisyphus-other-executor-runner',
       agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('production')),
+      schedulerGroupName: 'sisyphus-other-schedules',
+      schedulerRoleArn: 'arn:aws:iam::111111111111:role/sisyphus-other-scheduler-invoke',
     })
-    const ec2Resources = other.Statement.filter(
-      (statement) => statement.Sid !== 'PassExecutorRunnerRoleToLaunchedInstances',
+    const scopedResources = other.Statement.filter(
+      (statement) =>
+        statement.Sid !== 'PassExecutorRunnerRoleToLaunchedInstances' &&
+        statement.Sid !== 'PassSchedulerInvokeRoleToScheduler',
     )
       .flatMap((statement) => statement.Resource ?? [])
       .filter((resource) => resource !== '*')
 
-    for (const resource of ec2Resources) {
+    for (const resource of scopedResources) {
       expect(resource.includes('eu-west-2')).toBe(false)
       expect(resource.includes('429776178057')).toBe(false)
     }
@@ -522,8 +557,8 @@ describe('buildControlPlanePolicy — what the control plane may do', () => {
     ).toThrow('empty agent credential prefix')
   })
 
-  it('grants nothing outside the five scoped statements', () => {
-    expect(policy.Statement).toHaveLength(5)
+  it('grants nothing outside the eight scoped statements', () => {
+    expect(policy.Statement).toHaveLength(8)
     expect(policy.Statement.every((statement) => statement.Effect === 'Allow')).toBe(true)
   })
 })
@@ -570,10 +605,69 @@ describe('buildControlPlanePolicy — what the control plane must never do', () 
       expect(action.endsWith(':*')).toBe(false)
     }
 
-    const passRoleResources = buildControlPlanePolicy(controlPlaneConfig).Statement.find((entry) =>
-      entry.Action.includes('iam:PassRole'),
+    const passRoleStatements = buildControlPlanePolicy(controlPlaneConfig).Statement.filter(
+      (entry) => entry.Action.includes('iam:PassRole'),
+    )
+
+    expect(passRoleStatements).toHaveLength(2)
+    for (const statement of passRoleStatements) {
+      expect(statement.Resource).not.toContain('*')
+    }
+  })
+})
+
+describe('buildPanelBundlesPolicy — what the panel may do', () => {
+  const policy = buildPanelBundlesPolicy(panelBundlesConfig)
+
+  it('can register an archive anywhere in the bundles bucket', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'RegisterSetupBundleArchive')
+
+    expect(statement?.Action).toEqual(['s3:PutObject'])
+    expect(statement?.Resource).toEqual(['arn:aws:s3:::sisyphus-staging-bundles/*'])
+  })
+
+  it('can encrypt under the same AWS-managed key the upload path asks for', () => {
+    const statement = policy.Statement.find((entry) => entry.Sid === 'EncryptSetupBundleArchive')
+
+    expect(statement?.Action).toEqual(['kms:GenerateDataKey'])
+    expect(statement?.Resource).toEqual(['arn:aws:kms:eu-west-2:429776178057:alias/aws/s3'])
+  })
+
+  it('scopes the KMS grant to the region and account supplied, not another stage’s', () => {
+    const other = buildPanelBundlesPolicy({
+      region: 'us-east-1',
+      accountId: '111111111111',
+      bundlesBucketName: 'sisyphus-other-bundles',
+    })
+    const kmsResource = other.Statement.find(
+      (entry) => entry.Sid === 'EncryptSetupBundleArchive',
     )?.Resource
 
-    expect(passRoleResources).not.toContain('*')
+    expect(kmsResource).toEqual(['arn:aws:kms:us-east-1:111111111111:alias/aws/s3'])
+  })
+
+  it('grants nothing outside the two scoped statements', () => {
+    expect(policy.Statement).toHaveLength(2)
+    expect(policy.Statement.every((statement) => statement.Effect === 'Allow')).toBe(true)
+  })
+})
+
+describe('buildPanelBundlesPolicy — what the panel must never do', () => {
+  it('cannot read a bundle back — validation runs and the executor read through the runner role', () => {
+    const actions = buildPanelBundlesPolicy(panelBundlesConfig).Statement.flatMap(
+      (statement) => statement.Action,
+    )
+
+    expect(actions).not.toContain('s3:GetObject')
+  })
+
+  it('cannot reach any bucket other than the one it was configured with', () => {
+    const resources = buildPanelBundlesPolicy(panelBundlesConfig).Statement.flatMap(
+      (statement) => statement.Resource ?? [],
+    )
+
+    for (const resource of resources) {
+      expect(resource).not.toBe('*')
+    }
   })
 })

@@ -142,13 +142,12 @@ export {
 export type { WorkspacesRouter } from './workspaces'
 
 export {
-  createProfilesRouter,
   duplicateProfileNameError,
   profilesRouter,
   profileStateError,
   profileTargetNotFoundError,
 } from './profiles'
-export type { ProfilesRouter, ProfilesRouterOptions } from './profiles'
+export type { ProfilesRouter } from './profiles'
 
 export {
   credentialGroupNotDeletableError,
@@ -240,7 +239,7 @@ export type {
 /**
  * The hosted login seam, and the wall-clock sweep over it (003/FR-069..003/FR-072).
  *
- * Published for the same reason `createRefusingReachabilityProbe` is: the composition root that
+ * Published for the same reason `createRefusingConnectorRegistry` is: the composition root that
  * supplies `SisyphusDependencies.agentCredentialLogin` lives in an application, and it needs the
  * port's type and the refusing default in order to wire one — or to state that it deliberately
  * wires none. A holder of one cannot reach credential material; see the module for why that is the
@@ -299,9 +298,6 @@ export type {
   ProfileEnableCheck,
   ProfileEnableFailure,
 } from './profile-gate'
-
-export { createRefusingReachabilityProbe, probeTargets } from './reachability'
-export type { RepositoryReachabilityProbe } from './reachability'
 
 export {
   createIntegrationsRouter,
