@@ -31,6 +31,9 @@
 //   missing-oidc-provider-message.ts the diagnostic FR-068 requires when the provider is absent
 //   panel-domain.ts                 the panel's domain per stage, and the refusal that confines
 //                                   what it may create in the shared `bluetel.co.uk` zone
+//   executor-instance-environment.ts every value a launched instance is configured with, and the
+//                                   deploy-time refusal when a stage has not supplied one
+
 //
 // A construct reads its values from those modules and never restates one.
 
@@ -118,6 +121,15 @@ export {
   type PanelPolicyConfig,
   type RunnerPolicyConfig,
 } from './policies'
+
+export {
+  REQUIRED_EXECUTOR_STAGE_URLS,
+  buildExecutorInstanceEnvironment,
+  formatExecutorInstanceEnvironment,
+  getExecutorInstanceEnvironmentParameterName,
+  type ExecutorInstanceEnvironmentConfig,
+  type RequiredExecutorStageUrl,
+} from './executor-instance-environment'
 
 export { getMissingOidcProviderMessage } from './missing-oidc-provider-message'
 

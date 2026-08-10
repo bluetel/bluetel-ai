@@ -641,8 +641,34 @@ iterations.
       `LISTEN/NOTIFY` fails **silently** through a transaction-mode pooler — but the CDN/Lambda half was not
       testable without cloud resources. See `apps/sisyphus-admin/src/app/api/stream/SPIKE-FINDINGS.md`.
       _Added during implementation; carried from T013._
-- [ ] T143 [P] Knip and cspell clean — unused exports removed rather than suppressed, unless `knip.json`
+- [x] T143 [P] Knip and cspell clean — unused exports removed rather than suppressed, unless `knip.json`
       documents why the code is legitimately unreferenced (`knip.json`, `cspell.json`)
+
+  > **Rescoped to its knip half and closed — T244.** As written this task is unsatisfiable by construction: it
+  > demands _both_ knip and cspell clean, and **T212 establishes that gating cspell is a workspace-wide change
+  > that must not ride in on this feature**. A task that cannot be completed without violating another task is
+  > not an open item, it is a contradiction; it is split rather than left to rot.
+  >
+  > **The knip half is genuinely satisfied.** `pnpm knip:orphans` exits 0 with an empty report. Re-verified
+  > under T244 by running it nine times during concurrent edits, which incidentally proved the gate is not
+  > vacuous: it went **red** the moment an agent created an unwired module
+  > (`packages/sisyphus-infra/src/executor-instance-environment.ts`, then
+  > `apps/sisyphus-executor/src/session/instance-metadata.ts`) and **green** again once each was wired in. A
+  > `--debug` run confirms the `--production` entry sets resolve non-empty for the Sisyphus workspaces, with the
+  > un-suffixed barrels correctly negated — the trailing `!` is present where it matters.
+  >
+  > **The cspell half is discharged to T212**, which owns it and is explicitly out of scope here.
+  >
+  > **Two blind spots found while verifying, which T244 did not create and does not close** — raise with T212's
+  > findings as workspace-level tickets outside this specification:
+  >
+  > 1. The **root workspace and all of `tooling/*` carry no `!`**, so neither is inside the orphan gate under
+  >    `--production` at all. Root's `entry` is `["scripts/*.{ts,js}"]`, which matches **zero files in either
+  >    mode** — `scripts/` contains only `.mjs` and `.sh`. Adding `!` there without also covering `.mjs` would
+  >    change nothing.
+  > 2. `knip.json` carries five workspace blocks for directories that do not exist in this repository:
+  >    `apps/web`, `apps/mobile`, `apps/ui-demo`, `packages/shared-frontend`, `packages/api`. Dead
+  >    configuration, and the kind that makes a gate look broader than it is.
 
 ---
 
@@ -1076,13 +1102,36 @@ loose ends, the coverage gaps and the three gate verifications — can follow in
       presents. Make `secrets` a `() => readonly KnownSecret[]` resolved at each redaction site, register the
       forge credential and every other bundle-installed value through it, and verify with a planted secret
       that reaches a log segment (rule 4)
+
+  > **Partially satisfied by PR #19 (`003/T054`) — T232.** The architectural half landed: `createSecretRegistry`
+  > exists in `apps/sisyphus-executor/src/output/secret-registry.ts` with `add` and a
+  > `current: () => readonly KnownSecret[]` provider, and it is threaded through every redaction site via
+  > `run/execute.ts:283`. The rotating agent credential registers through it. **The seeding did not land**:
+  > `assembleRun` still returns an `options` object with no `secrets` key
+  > (`apps/sisyphus-executor/src/run/assemble.ts:247-268`), so `runExecutor` reads `options.secrets ?? []` and
+  > the registry is empty on every real run — the dangerous half of this task is unchanged. Leave this box
+  > **unticked**; the residue is carried under **T239** in Phase 22, which is where the remaining work is
+  > specified.
+
 - [ ] T196 [P] [US5] `FindingsPublisher` implementation, and [US4] `TicketPort` / `IntegrationPlanner` — the
       same absence for the review and autonomous paths. `runReviewWorkflow` and `runAutonomousWorkflow` are
       tested and dispatched and both halt at their port
-- [ ] T197 [P] `InstanceMetadataReader` against IMDS — the interruption watch is wired and tested end to end
+- [x] T197 [P] `InstanceMetadataReader` against IMDS — the interruption watch is wired and tested end to end
       through a fake reader, but the real notice source is assumed, not read. Spike S2 recorded the notice
       format as unobserved. Until this lands, `watchForInterruption` runs against
       `createQuietMetadataReader()` and no reclamation is ever detected (FR-054)
+
+  > **Done under T240**, which carried this task forward at corrected severity rather than restating it.
+  > `apps/sisyphus-executor/src/session/instance-metadata.ts` implements `createImdsMetadataReader` against
+  > IMDSv2 — token cached with a 60s renewal margin so a 5s poll costs one `PUT` per ~6h; `404` is the **only**
+  > path to `null`, so a healthy "not interrupted" answer is never counted as a read failure; a `401`/`403`
+  > refreshes the token and retries exactly once; and the 1s deadline is enforced both by `AbortSignal` and by a
+  > `Promise.race`, so a transport that ignores the signal still cannot stall the poll loop. It is now the
+  > default at `run/execute.ts:493`, with `createQuietMetadataReader` kept for tests. Verified per rule 4 by
+  > two neuterings: deleting the `404 → null` branch turned two healthy polls into counted failures
+  > (`expected 2 to be +0`) and failed 5 of 18 tests; dropping the token header failed 3 of 18. Both green on
+  > restore. Spot is confirmed the default purchase mode (`packages/sisyphus-api/src/enums/purchase-mode.ts:17`),
+  > so this was silent data loss in the **default** configuration, not an edge case.
 
 ### Surfaces a caller needs and no package publishes
 
@@ -1160,11 +1209,23 @@ system, and it is why T192 belongs in the gate rather than in a review._
       `PAUSE REQUESTED`. Honest, but less informative than FR-015 intends. This rides on `workflow.byId`
       alongside `watching`, `storagePark` and `launchConfiguration`, which is the same argument all three used
       (FR-015)
-- [ ] T210 [P] Give the pause idle ceiling one home. `PAUSE_IDLE_CEILING_MS` is 30 minutes in **both**
+- [x] T210 [P] Give the pause idle ceiling one home. `PAUSE_IDLE_CEILING_MS` is 30 minutes in **both**
       `apps/sisyphus-executor/src/session/idle-ceiling.ts` and
       `apps/sisyphus-control-plane/src/jobs/reconcile.ts` — the executor arms the timer, the control plane
       backstops it, and the two agree only by inspection. Both files document the duplication. Its shared home
       is `packages/sisyphus-api`, which neither task was permitted to edit at the time (FR-049)
+
+  > **Satisfied by PR #19 (`003/T098`) — T232.** The constant now has exactly one definition,
+  > `packages/sisyphus-api/src/contracts/pause-idle.ts:57`, exported through
+  > `packages/sisyphus-api/src/contracts/index.ts:84` and imported from `@bluetel-ai/sisyphus-api/contracts` by
+  > all three consumers: `apps/sisyphus-executor/src/session/idle-ceiling.ts:51`,
+  > `apps/sisyphus-control-plane/src/jobs/reconcile.ts:1` and
+  > `apps/sisyphus-admin/src/components/workflows/parking-countdown.ts:2` — the panel countdown being a third
+  > site this task did not know about. Each re-exports it locally for its own callers rather than redeclaring
+  > it, and `contracts/pause-idle.test.ts` pins the value. Verified by grep on merged `main`: no second literal
+  > survives. **This is the only one of the 34 open tasks that PR #19 completed outright**, and this box is the
+  > single checkbox T232 was permitted to flip.
+
 - [ ] T211 [P] Fix the stale reference in `apps/sisyphus-control-plane/src/dispatch.ts` (~line 28) naming
       `buildControlPlaneTickSpecification`, which no longer exists — the tick payload is built inline in
       `createScheduler` from the exported `CONTROL_PLANE_TICK_JOB`. Also correct
@@ -1232,6 +1293,14 @@ recorded manual run is the honest verdict here and a green tick would be a fabri
       are checked and neither of which has been run against a real instance. Supersedes the prose checkpoint at
       line 431. Not a CI target: it holds a real instance open for minutes and measures wall-clock latency, so
       the verdict is a recorded run with its timings, not a green tick (SC-003, SC-004)
+
+  > **Superseded in wording by `003/FR-039`, `003/FR-041` — T232.** The subject still needs doing; the script it
+  > runs no longer describes the platform. This task's success criteria include "the process still alive" after
+  > a pause, and a pause now **ends the agent at the turn boundary and stops the instance with its disk
+  > retained**, so the check as written would fail a correctly working platform. The 10-second ceiling (SC-003)
+  > and the snapshot-before-acknowledgement ordering (FR-049's surviving half) both still hold. **T236** rewrites
+  > quickstart Scenario 5; this task then runs the rewritten script. **Blocked on T236.**
+
 - [ ] T219 [P] [US3] **Run quickstart Scenario 6 end to end** — force-terminate an instance mid-run, resume on
       a fresh one, and prove the conversation and the uncommitted working tree both survive. Requires T194 and
       T195 (Scenario 6's own note says it requires Scenario 2 to run first), and step 2 additionally requires
@@ -1240,6 +1309,16 @@ recorded manual run is the honest verdict here and a green tick would be a fabri
       be run on interruptible capacity with a genuine reclamation, not a simulated signal. Step 3's successor
       chain reads back through T188's resolver change. Supersedes the prose checkpoint at line 462. Not a CI
       target — it destroys and re-provisions real compute (SC-005, SC-008, SC-019, SC-039)
+
+  > **Superseded in wording by `003/FR-041`, `003/FR-043` — T232.** Resume is no longer a snapshot restore onto
+  > a fresh instance: it is `StartInstances` against the **same** stopped box, without re-provisioning,
+  > re-cloning or restoring. Snapshots remain the durability and recovery path and stop being the pause-resume
+  > path, and "that instance cannot be started again" is a **new** case this task never covered — recovery onto
+  > a fresh instance holding the same credential, with the substitution recorded. This task's dependency on
+  > **T197** is unchanged and is now more severe than its own wording implies, since spot is the default
+  > purchase mode; see **T240**. **T237** rewrites quickstart Scenario 6; this task then runs it. **Blocked on
+  > T237.**
+
 - [ ] T220 [P] [US4] **Run quickstart Scenario 9's autonomous half end to end** — the develop → review →
       integrate loop against `sisyphus-scratch-a` with a deliberately review-failing ticket, plus step 1's
       missing-skill halt. Running it proves the two things the loop's 908 executor tests cannot: that it stops
@@ -1367,15 +1446,15 @@ checked-but-in-breach tasks applies to superseded ones.
 > re-check is worth as much as the original finding, and a layer that was not re-verified after its
 > subject moved should not be trusted.
 >
-> | Task | Re-verified on merged `main` |
-> | --- | --- |
-> | T232 (T210 satisfied) | Holds — three consumers import `PAUSE_IDLE_CEILING_MS` from `@bluetel-ai/sisyphus-api/contracts` |
-> | T233 (`awaiting_credential`) | Holds — still **zero** occurrences in `spec.md`, `data-model.md` or `quickstart.md` |
-> | T234 (pool prerequisite) | Holds — `quickstart.md`'s only "pool" references are PgBouncer connection pooling in the S3 spike |
-> | T236 (Scenario 5) | Holds — `quickstart.md:400` still reads "the process is alive (not terminated)" |
-> | T237 (Scenario 6) | Holds — step 1 still resumes by restoring a snapshot onto a fresh instance, not by starting the stopped one |
-> | T238 (forge URL) | Holds — still no producer; the only reference outside the executor is a comment at `jobs/start-workflow.ts:106` |
-> | T239 (T231 residue) | Holds — `assembleRun` still returns `options` with no `secrets` key |
+> | Task                                     | Re-verified on merged `main`                                                                                                                                      |
+> | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | T232 (T210 satisfied)                    | Holds — three consumers import `PAUSE_IDLE_CEILING_MS` from `@bluetel-ai/sisyphus-api/contracts`                                                                  |
+> | T233 (`awaiting_credential`)             | Holds — still **zero** occurrences in `spec.md`, `data-model.md` or `quickstart.md`                                                                               |
+> | T234 (pool prerequisite)                 | Holds — `quickstart.md`'s only "pool" references are PgBouncer connection pooling in the S3 spike                                                                 |
+> | T236 (Scenario 5)                        | Holds — `quickstart.md:400` still reads "the process is alive (not terminated)"                                                                                   |
+> | T237 (Scenario 6)                        | Holds — step 1 still resumes by restoring a snapshot onto a fresh instance, not by starting the stopped one                                                       |
+> | T238 (forge URL)                         | Holds — still no producer; the only reference outside the executor is a comment at `jobs/start-workflow.ts:106`                                                   |
+> | T239 (T231 residue)                      | Holds — `assembleRun` still returns `options` with no `secrets` key                                                                                               |
 > | T240 / T197, T241 / T200, and T198, T196 | All hold — `createQuietMetadataReader`, `validationModeUnsupportedError`, `?? createRefusingPromptRedactor()` and `noWorkflowPorts` are all present and unchanged |
 >
 > **What the merge did add is one piece of context, and it changes a rationale rather than a decision.**
@@ -1406,24 +1485,24 @@ checked-but-in-breach tasks applies to superseded ones.
 
 **Traceability vocabulary**, used verbatim below so a reader can grep it:
 
-| Term | Meaning |
-| --- | --- |
-| **Satisfied by** | The named external work completed this task's subject. Tick it; do not redo it |
-| **Partially satisfied by** | Part of the subject shipped; the residue is a **new** task here, which names what is left |
+| Term                         | Meaning                                                                                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Satisfied by**             | The named external work completed this task's subject. Tick it; do not redo it                                                       |
+| **Partially satisfied by**   | Part of the subject shipped; the residue is a **new** task here, which names what is left                                            |
 | **Superseded in wording by** | The task's subject still needs doing, but its description now describes behaviour the platform no longer has. Rewrite before running |
-| **Carried forward** | Unaffected. Still correct exactly as written above |
-| **Blocked on** | Cannot start until the named task lands |
+| **Carried forward**          | Unaffected. Still correct exactly as written above                                                                                   |
+| **Blocked on**               | Cannot start until the named task lands                                                                                              |
 
 ### Supersession summary — the whole of PR #19's effect on Phases 1–19
 
-| Original | Verdict | Detail |
-| --- | --- | --- |
-| **T210** | **Satisfied by** PR #19 (003/T098) | `PAUSE_IDLE_CEILING_MS` now defined once in `@bluetel-ai/sisyphus-api/contracts`; read by `apps/sisyphus-executor/src/session/idle-ceiling.ts:51`, `apps/sisyphus-control-plane/src/jobs/reconcile.ts:1` and `apps/sisyphus-admin/src/components/workflows/parking-countdown.ts:2`. **The only one of the 34 that can be ticked.** Recorded by T232 |
-| **T231** | **Partially satisfied by** PR #19 (003/T054) | The provider shape landed — `createSecretRegistry` in `apps/sisyphus-executor/src/output/secret-registry.ts`, threaded as `secretRegistry.current` through `run/execute.ts:283`. The seeding did **not**: `assembleRun` still returns `options` with no `secrets` key, so the registry is empty on every real run. Residue is **T239** |
-| **T218** | **Superseded in wording by** `003/FR-039` | Its Scenario 5 script checks the agent process is still alive after a pause; a pause now stops the instance on on-demand. Script rewritten by **T236**, then T218 runs it |
-| **T219** | **Superseded in wording by** `003/FR-041`, `003/FR-043` | Resume is now `StartInstances` against the same box, not a snapshot restore; and a stopped instance that cannot restart is a new case. Script rewritten by **T237**, then T219 runs it |
-| **T079** | **Satisfied by** spec 004 (already noted in place) | Recorded here only for completeness; no action |
-| All other 30 | **Carried forward** | Individually re-verified against PR #19 head `c32258d`; none affected |
+| Original     | Verdict                                                 | Detail                                                                                                                                                                                                                                                                                                                                              |
+| ------------ | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **T210**     | **Satisfied by** PR #19 (003/T098)                      | `PAUSE_IDLE_CEILING_MS` now defined once in `@bluetel-ai/sisyphus-api/contracts`; read by `apps/sisyphus-executor/src/session/idle-ceiling.ts:51`, `apps/sisyphus-control-plane/src/jobs/reconcile.ts:1` and `apps/sisyphus-admin/src/components/workflows/parking-countdown.ts:2`. **The only one of the 34 that can be ticked.** Recorded by T232 |
+| **T231**     | **Partially satisfied by** PR #19 (003/T054)            | The provider shape landed — `createSecretRegistry` in `apps/sisyphus-executor/src/output/secret-registry.ts`, threaded as `secretRegistry.current` through `run/execute.ts:283`. The seeding did **not**: `assembleRun` still returns `options` with no `secrets` key, so the registry is empty on every real run. Residue is **T239**              |
+| **T218**     | **Superseded in wording by** `003/FR-039`               | Its Scenario 5 script checks the agent process is still alive after a pause; a pause now stops the instance on on-demand. Script rewritten by **T236**, then T218 runs it                                                                                                                                                                           |
+| **T219**     | **Superseded in wording by** `003/FR-041`, `003/FR-043` | Resume is now `StartInstances` against the same box, not a snapshot restore; and a stopped instance that cannot restart is a new case. Script rewritten by **T237**, then T219 runs it                                                                                                                                                              |
+| **T079**     | **Satisfied by** spec 004 (already noted in place)      | Recorded here only for completeness; no action                                                                                                                                                                                                                                                                                                      |
+| All other 30 | **Carried forward**                                     | Individually re-verified against PR #19 head `c32258d`; none affected                                                                                                                                                                                                                                                                               |
 
 **Nothing in Phases 1–19 is deletable.** No task became unnecessary.
 
@@ -1442,13 +1521,13 @@ phase below is planned against documents that are currently wrong in two known p
 `quickstart.md` and find it describing a stopped instance; read this file's Phase 19 and find T210's
 disposition recorded.
 
-- [ ] T232 Append a **supersession ledger** to this file recording the dispositions in the summary table
+- [x] T232 Append a **supersession ledger** to this file recording the dispositions in the summary table
       above — T210 satisfied, T231 partially satisfied with its residue named, T218/T219 superseded in
       wording. Append-only: a `> **Superseded …**` block beneath each affected task, in the style
       `specs/004-remove-reachability-gate` already used on T079, and **no checkbox above T232 is flipped by
       this task** except T210's, which is the one genuinely completed. The ledger is what makes the layer
       traceable; without it the phases below refer to dispositions recorded nowhere
-- [ ] T233 [P] Add `awaiting_credential` to the workflow-state table in
+- [x] T233 [P] Add `awaiting_credential` to the workflow-state table in
       `specs/002-sisyphus-workflow-platform/data-model.md`, with its meaning (admitted, holding no compute,
       waiting for a pool seat), its position between `queued` and `provisioning`, and its valid exits.
       **Found by cross-artifact analysis, not by any gate**: it is a live member of `WORKFLOW_STATES` and
@@ -1456,22 +1535,22 @@ disposition recorded.
       anywhere under this directory — including in the state table PR #19 edited two rows above it. That
       table is this specification's canonical enumeration, and T042's leak test, T075's state chip and
       T076's filters are all specified against it (`003/FR-020`)
-- [ ] T234 [P] Reconcile `specs/002-sisyphus-workflow-platform/quickstart.md` with spec 003 — the file PR #19
+- [x] T234 [P] Reconcile `specs/002-sisyphus-workflow-platform/quickstart.md` with spec 003 — the file PR #19
       did not touch. Add the pool prerequisite (a registered, logged-in seat and a credential group attached
       to the profile under test) to the setup step of **every** scenario, because
       `packages/sisyphus-api/src/server/admin/profiles.ts:237` now refuses an unattached profile as
       unlaunchable and every scenario launches from one (`003/FR-065`)
-- [ ] T235 [P] Fix the four remaining broken commands and stale target names in `quickstart.md` that T191 did
+- [x] T235 [P] Fix the four remaining broken commands and stale target names in `quickstart.md` that T191 did
       not cover, and re-verify T191's five against the current `project.json` set — PR #19 added dispatch
       routes and targets, so the guide's command surface moved under it
-- [ ] T236 Rewrite quickstart **Scenario 5** for pause-as-stop (`003/FR-039`, `003/FR-041`): the agent is
+- [x] T236 Rewrite quickstart **Scenario 5** for pause-as-stop (`003/FR-039`, `003/FR-041`): the agent is
       **ended** at the turn boundary, the instance is **stopped with its disk retained**, compute billing
       ends, and resume is a start of the same instance rather than a restore. Keep the 10-second pause
       ceiling (SC-003) and the snapshot-before-acknowledgement ordering (FR-049's surviving half) — both
       still hold. Add the spot branch explicitly: a one-time spot instance cannot be stopped and degrades to
       this document's snapshot-and-terminate path, which is why `003/SC-007` reports two figures. **Supersedes
       the wording of T218, which then runs this script**
-- [ ] T237 Rewrite quickstart **Scenario 6** for the new resume and recovery split (`003/FR-041`,
+- [x] T237 Rewrite quickstart **Scenario 6** for the new resume and recovery split (`003/FR-041`,
       `003/FR-043`): resuming a paused run starts its existing instance without re-provisioning, re-cloning
       or restoring; and a **new step** for the case that instance cannot be started again — recovery from the
       durable snapshot onto a fresh instance **holding the same credential**, with the substitution recorded.
@@ -1493,7 +1572,7 @@ got here.
 
 **Independent test**: provision an instance from a clean stage deploy and watch bootstrap pass env validation.
 
-- [ ] T238 Give `SISYPHUS_FORGE_API_URL` a producer and an owner.
+- [x] T238 Give `SISYPHUS_FORGE_API_URL` a producer and an owner.
       `apps/sisyphus-executor/src/env-schemas.ts:51` declares it `z.string().url()` — **required, not
       optional** — and nothing in this repository sets it, so the first real run fails at boot naming the
       variable. `apps/sisyphus-control-plane/src/jobs/start-workflow.ts:106` deliberately declines to carry it
@@ -1503,8 +1582,34 @@ got here.
       **decide, and write it down**. Recorded to date only as prose inside checked task **T229**, which is why
       nothing on the open list surfaces it. Re-verified absent on PR #19 head `c32258d` (FR-075, FR-202)
 
+  > **Done, and the task's premise was wrong in a way worth recording.** This task assumed the fix was to put
+  > one variable on the instance environment "the way its siblings get there". Tracing the chain showed **the
+  > siblings do not get there either**: `encodeUserData` (`jobs/job-envelope.ts:181`) serialises the envelope as
+  > JSON only, `aws/compute.ts:479` base64s that verbatim into `RunInstances.UserData`, and the executor reads
+  > it from a file or stdin (`main.ts:76`). `SISYPHUS_BUNDLES_BUCKET`, `SISYPHUS_LOGS_BUCKET`,
+  > `SISYPHUS_SNAPSHOTS_BUCKET` and `SISYPHUS_MACHINE_SURFACE_URL` reach the **control plane's Lambda**
+  > (`control-plane/sst.config.ts:320-350`), not the instance. **None of the executor's seven required
+  > variables had a producer.** The forge URL was the one somebody noticed.
+  >
+  > Resolved by publishing the whole instance environment as one `.env`-shaped Parameter Store entry at
+  > `/sisyphus/<stage>/executor/instance-environment`, beside the existing release key
+  > (`executor/sst.config.ts:181`) and for the same reader, with deploy-time validation so a stage missing the
+  > value fails `sst deploy` naming the variable instead of deploying clean and dying at first boot. The job
+  > envelope is untouched, so `start-workflow.ts:106`'s boundary still holds. **Blocked from taking effect by
+  > T247.**
+
+- [ ] T247 Grant the runner role `ssm:GetParameter` on its own stage's parameters. **Found while closing
+      T238**, which is inert without it: `buildRunnerPolicy`
+      (`packages/sisyphus-infra/src/policies.ts:391`) grants S3 and Session Manager only, so an instance cannot
+      read the instance-environment parameter T238 publishes — **nor the executor release-key parameter, which
+      has had the same gap since that stack was written and is how the launch unit is supposed to learn what to
+      run**. Scope the grant to `arn:aws:ssm:<region>:<account>:parameter/sisyphus/<stage>/executor/*` rather
+      than the account's parameters at large. This means widening `RunnerPolicyConfig` with region, account and
+      stage and rippling through `runner-role.ts` and `policies.test.ts` — a different shape of change from
+      T238, which is why it is its own task rather than an amendment to it (FR-075, FR-202)
+
 **Checkpoint**: a fresh instance reaches bootstrap phase 2 rather than dying in env validation. **T213 cannot
-run before this.**
+run before this.** **Not met by T238 alone** — the value is published but unreadable until **T247** lands.
 
 ---
 
@@ -1519,7 +1624,7 @@ they fire. Everything else outstanding in this feature is something that does no
 **Independent test**: plant a credential in a bundle's `setup.sh` output and confirm it is redacted from the
 segment the panel streams; reclaim a spot instance and confirm the snapshot path runs.
 
-- [ ] T239 [US1] Seed the secret registry from bundle-installed credentials — **the residue of T231**, which
+- [x] T239 [US1] Seed the secret registry from bundle-installed credentials — **the residue of T231**, which
       PR #19 partially satisfied. `createSecretRegistry` and the `SecretSource` shape now exist and are
       threaded through every redaction site (`apps/sisyphus-executor/src/output/secret-registry.ts`,
       `run/execute.ts:283`), and the rotating agent credential registers through them. What did not change:
@@ -1531,7 +1636,7 @@ segment the panel streams; reclaim a spot instance and confirm the snapshot path
       through `registry.add`, and verify per Phase 19 rule 4 with a **planted secret that reaches a log
       segment**. The architectural half is done; this is the half that was dangerous (FR-045, FR-072,
       `003/FR-014`)
-- [ ] T240 [US3] **Carried forward: T197** — the real `InstanceMetadataReader` against IMDS. Recorded here
+- [x] T240 [US3] **Carried forward: T197** — the real `InstanceMetadataReader` against IMDS. Recorded here
       because the companion analysis **corrected its severity** and the correction has not reached its
       original entry: T197 is qualified there as conditional on whether `purchase_mode` will ever be `spot`.
       Spot **is** the default — `packages/sisyphus-api/src/enums/purchase-mode.ts:17` sets
@@ -1539,6 +1644,39 @@ segment the panel streams; reclaim a spot instance and confirm the snapshot path
       data loss in the **default** configuration, not an edge case. `watchForInterruption` still runs against
       `createQuietMetadataReader()` on PR #19 head; no `169.254.169.254` exists outside a test file. Do the
       work under T197; this entry exists so its priority is not read off its original wording (FR-054)
+
+- [ ] T248 [US1] Make `RunExecutorOptions.secrets` a `SecretSource` rather than a frozen array — **the last
+      residue of T231, left behind by T239**. `run/execute.ts:153` still types it
+      `readonly KnownSecret[]`, and `output/secret-registry.ts:60-61` copies it at construction
+      (`let secrets = [...initial]`), so nothing can grow that seed afterwards through that argument. T239
+      worked around this correctly by seeding the run-wide registry from inside bootstrap phase 5, where the
+      values become knowable, which closes the dangerous case. Two narrower ones stay open and both need this
+      type change: **(a)** the forge credential (`run/forge-credential.ts`) is registered only on the forge's
+      own redactor unless the bundle also happened to write it under `credentials/`; **(b)** `setup.sh`'s own
+      output during phase 5 is still pattern-only, because the values are not knowable until the script
+      installing them exits — closing that additionally needs `secrets` widened at `bootstrap/bundle.ts:126`
+      and `bootstrap/run-command.ts:38`. Not urgent, and explicitly **not** a reason to reopen T239 (FR-072,
+      FR-089)
+- [ ] T246 [US1] **The ad hoc launch path is dead under spec 003, and nothing reports it as such.** Found
+      during T234's scenario sweep and confirmed independently against merged `main`; it is owned by no task on
+      either specification. The chain: `packages/sisyphus-api/src/server/workflow/start-ad-hoc.ts:171` writes
+      `executionProfileId: null`; `apps/sisyphus-control-plane/src/credentials/allocate/select.ts` reaches
+      candidate credentials only by joining out through that column, so `wait-reason.ts:305` classifies such a
+      run `NO_EXECUTION_PROFILE` and `wait-reason.ts:379` marks it **not grantable**; `admit-workflow.ts`
+      therefore admits it deliberately **without a seat**, rather than queueing it in a queue nothing could
+      ever serve. That decision was correct when it was made, and its own comment states the condition it rests
+      on — `admit-workflow.ts:142`: _"nothing downstream is yet ready to require one of them — the executor's
+      `credential_install` phase is T055/T056"_. **That phase has since landed and is unconditional**:
+      `apps/sisyphus-executor/src/run/bootstrap.ts:442` is commented _"Phase 5a. Unconditional"_ and `await`s
+      `installAgentCredential` on a straight line with no branch, on every boot path including restore and
+      resume (`003/FR-050`). The credential it asks for comes from
+      `packages/sisyphus-api/src/server/machine/agent-credential.ts`, which throws `PRECONDITION_FAILED` for a
+      workflow holding no live lease (`:201`, `:281`). So an ad hoc run is now admitted, provisioned, billed
+      for an instance, and **fails at bootstrap phase 5a** — after the compute is running. Either re-route ad
+      hoc launches through the pool, refuse them at admission with the real reason, or withdraw the path; but
+      the stale premise at `admit-workflow.ts:142` must not survive whichever is chosen. Quickstart Scenario 2
+      was rewritten under **T234** to direct its launch through an enabled profile, which documents around the
+      defect and does not fix it (`003/FR-051`, `003/FR-052`, FR-122)
 
 **Carried forward**: T197 (see T240), T201 (`skillReferences.unavailableReason` still `z.string().optional()`
 at `packages/sisyphus-api/src/schemas/machine.ts:158` — verified unchanged by PR #19).
@@ -1604,6 +1742,20 @@ four that was never mechanised, and it is still the cheapest thing in this file.
       pausing. That is rule 4 working, applied to 003's gates. **This feature's three gates are still
       unverified.** Point the same technique at them (SC-063, SC-064, FR-205)
 
+  > **Half done — deliberately left unticked.** The practice is now recorded: `quickstart.md` gained a
+  > _"Falsify the gate before you trust it"_ subsection carrying the four PR #19 defects and a falsification
+  > recipe for each of this feature's three gates. **Recording a recipe is not running it**, and this task's
+  > second sentence asks for the gates themselves. Those are **T215–T217**, carried forward below and untouched
+  > here. Ticking this on the strength of the documentation alone would reproduce exactly the failure mode the
+  > task exists to name — a check that looks present and measures nothing.
+  >
+  > One data point arrived free. While verifying T244, `knip:orphans` was run nine times during concurrent
+  > edits and went **red** the moment an unwired module appeared
+  > (`packages/sisyphus-infra/src/executor-instance-environment.ts`, then
+  > `apps/sisyphus-executor/src/session/instance-metadata.ts`), then **green** once each was wired in. That is
+  > **T215's** falsification observed by accident rather than by design — an orphan planted, and the gate
+  > reported it. It is recorded here as evidence, not as a substitute for running T215 deliberately.
+
 **Carried forward**: **T215** (assembly gate — plant an orphan, confirm `knip:orphans` reports it),
 **T216** (database gate — confirm the guarded suites fail rather than skip with `CI` set and
 `SISYPHUS_TEST_DATABASE_URL` unset), **T217** (latency gates — inflate each operation past its bound, confirm
@@ -1651,12 +1803,12 @@ pull request at the end of it.
 **Why last**: three of them touch files PR #19 rewrites — `sst.config.ts` in all three deployables,
 `packages/sisyphus-infra`, and the scheduler — so doing them before the merge buys conflicts.
 
-- [ ] T244 [P] Rescope **T143** to its knip half and close it: `pnpm knip:orphans` exits 0 with an empty
+- [x] T244 [P] Rescope **T143** to its knip half and close it: `pnpm knip:orphans` exits 0 with an empty
       report and has done since T193. **T143 cannot be satisfied as written** — it also demands cspell clean,
       and T212 establishes that gating cspell is a workspace-wide change that must not ride in on this
       feature. Split the contradiction rather than leaving a task that is unsatisfiable by construction, and
       raise T212's findings as a workspace-level ticket outside this specification
-- [ ] T245 [P] Fix or delete `scripts/audit-cspell.mjs`. It `JSON.parse`s `cspell.json`, which is JSONC —
+- [x] T245 [P] Fix or delete `scripts/audit-cspell.mjs`. It `JSON.parse`s `cspell.json`, which is JSONC —
       confirmed independently: it throws `Expected double-quoted property name in JSON at position 124`, and
       has done since the config gained its first comment, so it has **never run**. Its file walk also scans
       `*.tsbuildinfo`, counting words kept alive only by build output as live. T212 found both and
@@ -1683,15 +1835,15 @@ with no `QLTY_*` override, and no gate in this repository that has never execute
 _This section governs the remediation layer only. The table under **Dependencies & Execution Order** below is
 the original and is not edited._
 
-| Phase | Depends on | Notes |
-| --- | --- | --- |
-| 20 Ledger & docs | — | Hours of editing. Everything below is planned against these documents |
-| 21 Launch blocker | — | One variable. **T213 cannot run before it** |
-| 22 Live defects | — | Independent of everything; both are executor-local |
-| 23 Dead stories | — | Shares no file with PR #19; parallel with the merge |
-| 24 Gate integrity | — | **Do first in wall-clock terms** — hours, and it is what makes every other verdict trustworthy |
-| 25 Stage exercise | 20, 21, and T200 for T226 | The only phase with hard predecessors |
-| 26 Hygiene | PR #19 merged | Three items collide with it otherwise |
+| Phase             | Depends on                | Notes                                                                                          |
+| ----------------- | ------------------------- | ---------------------------------------------------------------------------------------------- |
+| 20 Ledger & docs  | —                         | Hours of editing. Everything below is planned against these documents                          |
+| 21 Launch blocker | —                         | One variable. **T213 cannot run before it**                                                    |
+| 22 Live defects   | —                         | Independent of everything; both are executor-local                                             |
+| 23 Dead stories   | —                         | Shares no file with PR #19; parallel with the merge                                            |
+| 24 Gate integrity | —                         | **Do first in wall-clock terms** — hours, and it is what makes every other verdict trustworthy |
+| 25 Stage exercise | 20, 21, and T200 for T226 | The only phase with hard predecessors                                                          |
+| 26 Hygiene        | PR #19 merged             | Three items collide with it otherwise                                                          |
 
 ### Recommended order
 

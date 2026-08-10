@@ -43,6 +43,31 @@
  * properties an immutable release wants (FR-090).
  *
  * ---------------------------------------------------------------------------
+ * The instance environment, and why this stack owns it (T238, FR-075, FR-202)
+ * ---------------------------------------------------------------------------
+ * Alongside the release, this config publishes the **environment** an instance
+ * runs that release with: the region, the stage, the machine surface's base URL,
+ * the code host's API base and the four bucket names — everything
+ * `src/env-schemas.ts` requires and does not default. Nothing produced any of
+ * them before, which is why `SISYPHUS_FORGE_API_URL` had a schema entry, a
+ * consumer in `main.ts` and no source anywhere in the repository.
+ *
+ * It belongs to this stack rather than to the control plane's for the reason the
+ * control plane itself states at `jobs/start-workflow.ts`: these are values
+ * identical for every run on a stage, so they are instance configuration and not
+ * job configuration, and putting them on the per-launch envelope would mean
+ * re-stating a constant inside a 16 KiB budget on every single launch. This
+ * stack, by contrast, already derives the stage's bucket names and already
+ * publishes to `/sisyphus/<stage>/executor/...` for the launch unit to read.
+ *
+ * The two URLs are the part no stack can derive, and they come from the same
+ * operator-populated configuration entry every other deploy-time value here does
+ * (FR-202). `buildExecutorInstanceEnvironment` refuses to build without them, so
+ * a stage that has never been given a forge URL fails **this deploy**, naming the
+ * variable, instead of deploying cleanly and failing its first real run at boot
+ * with the same name.
+ *
+ * ---------------------------------------------------------------------------
  * Three files, and why this one only builds the application stack
  * ---------------------------------------------------------------------------
  * `sst-bootstrap.config.ts` creates the configuration entry this file reads, and
@@ -127,14 +152,18 @@ export default $config({
 
     const {
       BUCKET_SERVER_SIDE_ENCRYPTION,
+      buildExecutorInstanceEnvironment,
       createRunnerRole,
+      formatExecutorInstanceEnvironment,
       getBucketNames,
+      getExecutorInstanceEnvironmentParameterName,
       getExecutorInstanceProfileParameterName,
       getStackScope,
+      readEnvRecord,
       // The package barrel — never a module inside it.
     } = await import('@bluetel-ai/sisyphus-infra')
 
-    await loadStageConfiguration($app.stage)
+    const region = await loadStageConfiguration($app.stage)
 
     const scope = getStackScope($app.stage)
     const stage = scope.stack
@@ -187,11 +216,48 @@ export default $config({
       description: `Sisyphus executor release key for stage "${stage}"`,
     })
 
+    /**
+     * The environment every instance on this stage runs the release with
+     * (T238, FR-075).
+     *
+     * Built before the resource so the refusal happens during evaluation: a
+     * stage whose configuration entry is missing `SISYPHUS_FORGE_API_URL` or
+     * `SISYPHUS_MACHINE_SURFACE_URL` throws here, naming the variable, and no
+     * parameter is written. That is the whole point of producing this at deploy
+     * time rather than leaving it to be typed onto a machine — the alternative
+     * is an instance that launches, validates its environment and dies naming
+     * the same variable, on the one channel it has not been configured to
+     * report over.
+     *
+     * `readEnvRecord(process.env)` rather than the raw environment because
+     * `loadStageConfiguration` above has already merged the stage's entry into
+     * it, and because `process.env` types every value as possibly `undefined`,
+     * which is precisely the case the builder must be able to name.
+     */
+    const instanceEnvironment = buildExecutorInstanceEnvironment({
+      region,
+      stage,
+      buckets: bucketNames,
+      configuration: readEnvRecord(process.env),
+    })
+
+    new aws.ssm.Parameter('SisyphusExecutorInstanceEnvironment', {
+      name: getExecutorInstanceEnvironmentParameterName(stage),
+      // Not a credential, and the module note in
+      // `executor-instance-environment.ts` argues why nothing here may become
+      // one: an instance's three credential routes are the envelope, the
+      // machine surface and the setup bundle, and none of them is this.
+      type: 'String',
+      value: formatExecutorInstanceEnvironment(instanceEnvironment),
+      description: `Sisyphus executor instance environment for stage "${stage}"`,
+    })
+
     return {
       releaseKey: release.key,
       releaseDigest: digest,
       releaseBucket: bucketNames.bundles,
       releaseKeyParameter: getReleaseKeyParameterName(stage),
+      instanceEnvironmentParameter: getExecutorInstanceEnvironmentParameterName(stage),
       executorInstanceProfileArn: runnerRole.instanceProfile.arn,
     }
   },

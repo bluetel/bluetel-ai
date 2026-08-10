@@ -21,6 +21,24 @@ export {
 export type { PauseIdleCeiling, PauseIdleCeilingOptions, PauseIdleExpiry } from './idle-ceiling'
 
 export {
+  createImdsMetadataReader,
+  DEFAULT_IMDS_TIMEOUT_MS,
+  DEFAULT_IMDS_TOKEN_TTL_SECONDS,
+  IMDS_BASE_URL,
+  IMDS_SPOT_ACTION_PATH,
+  IMDS_TIMEOUT,
+  IMDS_TOKEN_HEADER,
+  IMDS_TOKEN_PATH,
+  IMDS_TOKEN_TTL_HEADER,
+  IMDS_UNEXPECTED_STATUS,
+  IMDS_UNREACHABLE,
+  parseInstanceAction,
+  TOKEN_RENEWAL_MARGIN_MS,
+  UNKNOWN_INSTANCE_ACTION,
+} from './instance-metadata'
+export type { ImdsMetadataReaderOptions } from './instance-metadata'
+
+export {
   createQuietMetadataReader,
   DEFAULT_INTERRUPTION_POLL_MS,
   watchForInterruption,

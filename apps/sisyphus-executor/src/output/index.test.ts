@@ -55,6 +55,8 @@ describe('the output barrel', () => {
       'SECRET_PATTERNS',
       'agentCredentialSecret',
       'buildSecretIndex',
+      // The values a client's setup bundle installed, which the run registers at phase 5 (T239).
+      'bundleCredentialSecrets',
       'createControlStripper',
       'createKeyBlockFilter',
       'createRedactor',

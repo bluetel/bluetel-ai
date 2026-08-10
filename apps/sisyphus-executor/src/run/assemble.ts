@@ -258,6 +258,18 @@ export const assembleRun = (options: AssembleRunOptions): AssembledRun => {
         workflowId: envelope.workflowId,
       }),
       adapter,
+      // **No `secrets` key, and its absence is the answer to T231/T239 rather than the defect they
+      // describe.** `RunExecutorOptions.secrets` is a `readonly KnownSecret[]`, and `runExecutor`
+      // copies it into a fresh registry at step 1 — before bootstrap. Every credential a client's
+      // bundle installs arrives at phase 5, which is after this function has returned and after
+      // that copy has been taken, so there is no value this line could carry that would not be
+      // either empty or a lie. The same is true of the code host's credential: `forgeCredential`
+      // above resolves lazily precisely because nothing exists to read until phase 5 has run.
+      //
+      // The seeding therefore happens where the values become knowable, through the registry
+      // `runExecutor` already threads into bootstrap for phase 5a: see `registerBundleCredentials`
+      // in `./bootstrap.ts` (FR-072, FR-089, 003/FR-014). Adding a static array here would put the
+      // registration in the one place in the run that cannot observe what it is registering.
       ports: options.ports ?? agentWorkflowPorts({ frames, forge }),
       bundlesBucket: environment.bundlesBucket,
       workspaceRoot: environment.workspaceRoot,
