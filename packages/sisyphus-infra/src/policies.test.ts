@@ -9,12 +9,14 @@ import {
   buildControlPlanePolicy,
   buildDeployRoleTrustPolicy,
   buildPanelBundlesPolicy,
+  buildPanelPolicy,
   buildRunnerPolicy,
   buildRunnerTrustPolicy,
   getDeployBranchRef,
   getTrustedSubject,
   type ControlPlanePolicyConfig,
   type PanelBundlesPolicyConfig,
+  type PanelPolicyConfig,
   type RunnerPolicyConfig,
 } from './policies'
 import { DEPLOY_STAGES } from './sst-app'
@@ -45,6 +47,12 @@ const panelBundlesConfig: PanelBundlesPolicyConfig = {
   region: 'eu-west-2',
   accountId: '429776178057',
   bundlesBucketName: 'sisyphus-staging-bundles',
+}
+
+const panelConfig: PanelPolicyConfig = {
+  ...panelBundlesConfig,
+  // The same helper the control-plane config above uses, and deliberately so — see the suite.
+  agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(getStackScope('staging')),
 }
 
 const controlPlaneActions = (config: ControlPlanePolicyConfig = controlPlaneConfig): string[] =>
@@ -333,6 +341,73 @@ describe('buildPanelBundlesPolicy', () => {
     expect(actions).not.toContain('s3:GetObject')
     expect(actions).not.toContain('s3:DeleteObject')
     expect(policy.Statement).toHaveLength(2)
+  })
+})
+
+describe('buildPanelPolicy — the whole of what the panel’s server function may do', () => {
+  const policy = buildPanelPolicy(panelConfig)
+
+  it('carries the bundles grants unchanged, so the two builders cannot drift', () => {
+    // Composed rather than restated. Asserted by equality against the other builder's output so
+    // that adding a bundles statement there cannot silently leave the panel's real policy behind.
+    const bundles = buildPanelBundlesPolicy(panelBundlesConfig).Statement
+
+    expect(policy.Statement.slice(0, bundles.length)).toEqual(bundles)
+  })
+
+  it('reads and writes agent credential material, scoped to this stage’s prefix (003/FR-012)', () => {
+    const statement = policy.Statement.find(
+      (entry) => entry.Sid === 'ReadAndWriteAgentCredentialMaterial',
+    )
+
+    expect(statement?.Action).toEqual([
+      'secretsmanager:GetSecretValue',
+      'secretsmanager:PutSecretValue',
+    ])
+    expect(statement?.Resource).toEqual([
+      'arn:aws:secretsmanager:eu-west-2:429776178057:secret:sisyphus/staging/agent-credential/*',
+    ])
+  })
+
+  it('is scoped to the same prefix the control plane writes under', () => {
+    // The control plane creates the secret and the panel's machine surface reads it back. Two
+    // prefixes would be two different secrets, and the failure would be a boot-time authorisation
+    // error against a name nothing had ever written.
+    const panelResources = policy.Statement.filter((entry) =>
+      entry.Action.some((action) => action.startsWith('secretsmanager:')),
+    ).flatMap((entry) => [...(entry.Resource ?? [])])
+    const controlPlaneResources = buildControlPlanePolicy(controlPlaneConfig)
+      .Statement.filter((entry) =>
+        entry.Action.some((action) => action.startsWith('secretsmanager:')),
+      )
+      .flatMap((entry) => [...(entry.Resource ?? [])])
+
+    expect(panelResources).toEqual(controlPlaneResources)
+  })
+
+  it.each([
+    'secretsmanager:CreateSecret',
+    'secretsmanager:DeleteSecret',
+    'secretsmanager:ListSecrets',
+    'secretsmanager:UpdateSecret',
+  ])('does not grant %s', (action) => {
+    // Each for its own reason — see the builder. `ListSecrets` is the one that matters most:
+    // it takes no resource-level permission, so granting it would defeat the ARN scoping above
+    // entirely rather than merely widening it.
+    expect(policy.Statement.flatMap((entry) => [...entry.Action])).not.toContain(action)
+  })
+
+  it('never scopes a secret grant to a wildcard', () => {
+    const resources = policy.Statement.flatMap((entry) => [...(entry.Resource ?? [])])
+
+    expect(resources).not.toContain('*')
+    expect(resources.every((resource) => resource.startsWith('arn:aws:'))).toBe(true)
+  })
+
+  it('refuses an empty prefix rather than widening to every secret in the account', () => {
+    expect(() => buildPanelPolicy({ ...panelConfig, agentCredentialSecretPrefix: '   ' })).toThrow(
+      'empty agent credential prefix',
+    )
   })
 })
 

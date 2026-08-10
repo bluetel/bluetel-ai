@@ -94,11 +94,13 @@ export default $config({
 
   run: async () => {
     const {
+      buildPanelPolicy,
       createBuckets,
       createDatabase,
       createNextjsWebsite,
       createPanelDomain,
       createSisyphusVpc,
+      getAgentCredentialSecretPrefix,
       getAppSecurityGroupIdParameterName,
       getAppSubnetIdsParameterName,
       getBucketNames,
@@ -211,6 +213,41 @@ export default $config({
       securityGroupIds: [network.databaseSecurityGroup.id],
     })
 
+    /**
+     * What the panel's server function is allowed to do (003/FR-012).
+     *
+     * This stack passed **no** `permissions` at all until this block existed,
+     * which meant two things were true of every deployed stage. The bundles
+     * grants `buildPanelBundlesPolicy` had described since 002 were never
+     * applied to anything; and — since 003 — the machine surface mounted at
+     * `/api/machine` could not reach Secrets Manager, so every instance failed
+     * its `credential_install` bootstrap phase with an AWS authorisation error
+     * on a stage that had deployed cleanly. See
+     * `src/server/credential-material.ts`, which states the requirement from
+     * the application's side.
+     *
+     * The account id is read from the caller's own identity rather than from
+     * the stage's env blob, for the reason the control plane's config reads it
+     * the same way: an operator-edited account number is a way for a policy to
+     * be scoped to somebody else's account and still deploy.
+     *
+     * The mapping onto SST's `permissions` prop is the control plane's,
+     * verbatim. `buildPanelPolicy` is the asserted source of truth for the
+     * contents (FR-200); this only reshapes it, and none of its statements
+     * carries a `Condition`, so nothing is lost in the reshaping.
+     */
+    const { accountId } = await aws.getCallerIdentity()
+
+    const panelPolicy = buildPanelPolicy({
+      region,
+      accountId,
+      bundlesBucketName: bucketNames.bundles,
+      // Derived from the same scope the control plane derives it from, so the
+      // stack that writes a seat's material and the stack that reads it back
+      // cannot disagree about where it lives.
+      agentCredentialSecretPrefix: getAgentCredentialSecretPrefix(scope),
+    })
+
     const site = createNextjsWebsite({
       path: '.',
       vpc: {
@@ -218,6 +255,11 @@ export default $config({
         securityGroups: [network.appSecurityGroup.id],
       },
       domain: panelDomain,
+      permissions: panelPolicy.Statement.map((statement) => ({
+        effect: statement.Effect === 'Allow' ? ('allow' as const) : ('deny' as const),
+        actions: [...statement.Action],
+        resources: [...(statement.Resource ?? [])],
+      })),
       environment: {
         AWS_REGION: region,
         SISYPHUS_STAGE: stage,

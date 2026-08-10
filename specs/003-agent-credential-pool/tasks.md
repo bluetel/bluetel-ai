@@ -721,11 +721,17 @@ re-login, and confirm it returns to the pool.
 **Purpose**: What no single story owns — provider measurements, the material-leak audit that spans every
 component, the full quickstart walkthrough, and the merge gate.
 
-- [ ] T122 The material-leak audit (SC-014), spanning every story above: assert no credential material in the
+- [x] T122 The material-leak audit (SC-014), spanning every story above: assert no credential material in the
       job envelope, snapshots, log segments or any panel response. Extend
       `apps/sisyphus-control-plane/src/jobs/job-envelope.test.ts` and the executor redaction tests from T054.
       **Decode the instance user-data by hand** as well — user-data is readable from the metadata service, so
       this one is worth not trusting a test with.
+      → The cross-cutting suite is `packages/sisyphus-api/src/server/admin/material-leak-audit.test.ts`: it
+      moves real material through both machine procedures and then sweeps every text, varchar and JSON column
+      in the schema, asked of `information_schema` rather than listed, with a planted-leak negative control so
+      a sweep that stopped searching correctly fails rather than passes silently. The by-hand decode was run
+      against a real envelope from the real provisioning path and is recorded in
+      [outstanding.md](./outstanding.md); the remaining metadata-service read belongs to T123.
 - [ ] T123 Walk [quickstart.md](./quickstart.md) scenarios 1–8 end to end against a real stage and record the
       results, including the abandoned-login reap (T071) and the by-hand envelope check (T122)
 - [ ] T124 [P] Run the **R1 measurement** (research.md): register a credential, force a refresh, attempt a call
@@ -734,17 +740,69 @@ component, the full quickstart walkthrough, and the merge gate.
 - [ ] T125 [P] Run the **R2 measurement**: leave a registered credential untouched and probe periodically to
       find the real idle-expiry window, then set `SISYPHUS_KEEPALIVE_IDLE_HOURS` from evidence rather than from
       the conservative 24h default
-- [ ] T126 [P] Update `specs/002-sisyphus-workflow-platform/` where this feature supersedes it —
+- [x] T126 [P] Update `specs/002-sisyphus-workflow-platform/` where this feature supersedes it —
       `002/FR-043`, `002/FR-049`, `002/FR-072`, `002/FR-075` — per
       [Relationship to 002](./spec.md#relationship-to-002), so the two specs do not contradict each other in the
       repository
+      → All four are struck through in place with a note naming what replaced them, never deleted: 002 is the
+      record of what the platform was designed to do, and a requirement that quietly vanished would leave every
+      code comment citing it pointing at nothing. A banner at the top of `002/spec.md` names the four. Three
+      further contradictions were found and amended the same way — the setup-bundle prose in 002's overview and
+      US7, the `paused` row in `002/data-model.md`, and the snapshot exclusion and suspend sketch in
+      `002/contracts/executor-protocol.md`.
 - [ ] T127 [P] Record SC-007 as **two** figures, `on_demand` and `spot`, rather than one — the paths genuinely
       differ and a single number would misrepresent both
-- [ ] T128 Audit barrels and imports across every new directory: public API through `index.ts` only, no
+- [x] T128 Audit barrels and imports across every new directory: public API through `index.ts` only, no
       consumer reaching into a module path, no `.js` extensions (Constitution Principle II,
       `.claude/rules/typescript-conventions.md`)
-- [ ] T129 Run the full gate — `pnpm nx affected -t lint test typecheck` and `pnpm qlty:diff` — green with **no
-      threshold overrides** (Constitution Principle IV)
+      → No `.js` import extension anywhere in the workspace. Every new directory has a barrel and every barrel
+      but one had a test asserting its surface; `apps/sisyphus-executor/src/output/index.test.ts` was added for
+      the one that did not, and it asserts the absence of any export that would hand back a registered secret.
+      `credentials/allocate/pool-fixtures.ts` is reached directly by 17 suites and by no production module, and
+      both the `allocate` and `lease` barrel tests still assert it stays unexported — verified rather than
+      "fixed". The type-only imports from `server/context.ts` into `admin/credential-leases`,
+      `admin/credential-login` and `machine/credential-material` are the pre-existing pattern beside
+      `admin/reachability` and cannot go through a barrel: the barrels import the procedures that import this
+      module.
+- [x] T129 Run the full gate — `pnpm nx affected -t lint test typecheck` and `pnpm qlty:diff` — green with **no
+      threshold overrides** (Constitution Principle IV). Run as `run-many` over all six projects rather than
+      `affected`: this branch is off `feature/sisyphus`, and an `affected` base that excluded the feature's own
+      commits would have graded a subset. No `QLTY_*` override was set. Observed: lint clean across all six
+      (one pre-existing warning in `apps/sisyphus-admin/open-next.config.ts`, zero errors); typecheck clean;
+      **7080 tests passing, 7 skipped, across 656 test files**; `pnpm qlty:diff` vs `origin/main` — 0 issues at
+      medium+ (0 security, max 0), duplication 1.0% (384/37479 lines, max 10%), complexity reported and
+      unthresholded — "within thresholds".
+
+---
+
+## Phase 14: Integration gaps found after Phase 13
+
+**Purpose**: Two things the story-by-story tasks each left correct in isolation and unreachable together, and
+one defect the first of them exposed. All three were found while auditing Phase 13 rather than while building
+a story, which is the failure mode a per-story task list has.
+
+- [x] T130 **Wire pause and resume into dispatch.** `jobs/pause-instance.ts` and `resumeWorkflow` were
+      implemented, tested and exported from the jobs barrel with **no route to them**:
+      `CONTROL_PLANE_JOB_NAMES` listed neither, so Phases 9 and 10 were dead code in production and a pause was
+      an instance left running until the reconciler parked it. Both are now per-workflow events on exactly the
+      footing `start-workflow` and `teardown-workflow` are on, routed with the same dependencies their own
+      suites take, with routing tests. Neither is in the tick sequence: both name one run, and the
+      population-level backstop for an unattended pause is `reconcile`, which is in the sequence already.
+- [x] T131 **A paused run's silence stopped being evidence** (`reconcile.ts`). Exposed by T130 and load-bearing:
+      under `002/FR-049` a pause held the agent alive on a running instance, so a paused run went on beating.
+      003/FR-039 stops the instance, so it cannot — and the heartbeat-lapse check would have declared every
+      correctly paused run dead five minutes after it was paused and terminated the instance the pause exists
+      to keep, silently converting FR-041's start-the-same-box resume into FR-043's rebuild on every pause.
+      `silenceIsEvidenceFor` exempts `paused` from the two silence checks and from nothing else; the checks
+      that ask whether the instance still exists are untouched.
+- [x] T132 **Panel IAM for the secret store** (003/FR-012). `apps/sisyphus-admin/sst.config.ts` passed no
+      `permissions` at all, so the machine surface mounted at `/api/machine` could not reach Secrets Manager
+      and every instance would have failed `credential_install` on a stage that deployed cleanly — and
+      `buildPanelBundlesPolicy`, which had existed since 002, was applied to nothing. `buildPanelPolicy` in
+      `packages/sisyphus-infra/src/policies.ts` composes the bundles grants with `GetSecretValue` and
+      `PutSecretValue` scoped by ARN to `getAgentCredentialSecretPrefix(scope)`, refuses an empty prefix rather
+      than widening to `secret:/*`, and grants no `CreateSecret`, `DeleteSecret`, `ListSecrets` or
+      `UpdateSecret`. Asserted to be scoped to the same prefix the control plane writes under.
 
 ---
 

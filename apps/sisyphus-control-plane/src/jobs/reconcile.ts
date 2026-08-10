@@ -59,10 +59,25 @@ import type { QueueDrain } from './teardown-workflow'
  * difference between pausing and parking, and it is the whole reason pausing is useful. It is also
  * why a pause cannot be allowed to last for ever: an instance held for a person who never came back
  * is the same silent cost as a leaked lease, arriving by a different route and looking, to every
- * check above, perfectly healthy. Its heartbeat is current, its instance is running, and its lease
- * is live, because all of that is true.
+ * check above, perfectly healthy. Its lease is live and its instance exists, because both of those
+ * are true.
  *
- * So a paused run is also judged against the clock. Past {@link PAUSE_IDLE_CEILING_MS} plus
+ * **What is no longer true of it is the heartbeat, and that is 003/FR-039.** Under `002/FR-049` a
+ * pause held the agent process alive on a *running* instance, so a paused run went on beating and
+ * the silence checks below applied to it unchanged. A pause now **stops the instance**
+ * (`jobs/pause-instance.ts`), and a stopped instance sends nothing — by design, since compute
+ * billing ending is the entire point. Judged by the lapse below, every correctly-paused run would
+ * be declared dead {@link HEARTBEAT_LAPSE_MS} after it was paused, and the reconciler would
+ * terminate the very instance the pause was keeping. Five minutes, on every pause, silently
+ * converting FR-041's start-the-same-box resume into FR-043's rebuild-from-snapshot fallback.
+ *
+ * So {@link silenceIsEvidenceFor} exempts `paused` from the two silence checks and from those only.
+ * The checks that ask whether the *instance* still exists are untouched and still apply: a paused
+ * run whose instance was terminated underneath it is a vanished instance, and EC2 reports a stopped
+ * instance as `stopped` rather than as absent — see `aws/compute.ts`'s `LIVE_INSTANCE_STATES`, which
+ * lists it precisely so that this distinction survives.
+ *
+ * A paused run is judged against the clock instead. Past {@link PAUSE_IDLE_CEILING_MS} plus
  * {@link PAUSE_IDLE_GRACE_MS} it is moved out — to `parked_resumable`, because FR-049 registers a
  * snapshot before a pause is ever acknowledged, so a paused run is a resumable run by
  * construction — its lease is released in the same pass, and the owner is told it was **parked**
@@ -260,6 +275,23 @@ export const PAUSE_IDLE_GRACE_MS = 5 * 60 * 1000
  * it lives in `drain-queue.ts` where the clock and the reason are.
  */
 const ACTIVE_STATES = ['provisioning', 'running', 'paused'] as const
+
+/**
+ * Whether this run's silence means anything (003/FR-039).
+ *
+ * Exported and pure so the rule is assertable without a database, and so it reads as a rule rather
+ * than as a condition buried three levels into a loop. There is exactly one state it answers false
+ * for, and the reason is the whole of the module note's third section: a paused run's instance is
+ * **stopped**, so it cannot beat, and reading its silence as death would have the reconciler
+ * terminate the instance the pause exists to keep — five minutes after every pause, on every run.
+ *
+ * `provisioning` and `running` are unchanged. A `provisioning` run that has never beaten is judged
+ * against {@link PROVISIONING_GRACE_MS} as before, and a `running` one against
+ * {@link HEARTBEAT_LAPSE_MS}: both of those instances are meant to be talking.
+ *
+ * @param state - The run's current state, as read at the top of the pass.
+ */
+export const silenceIsEvidenceFor = (state: string): boolean => state !== 'paused'
 
 /**
  * How long a credential cooling off with **no stated return time** waits before it is retried
@@ -753,6 +785,13 @@ export const reconcile = async (options: ReconcileOptions): Promise<ReconcileRes
 
       if (lease.providerInstanceId !== null && !liveInstanceIds.has(lease.providerInstanceId)) {
         return `instance ${lease.providerInstanceId} is no longer running`
+      }
+
+      // 003/FR-039: a paused run's instance is stopped, so it has nothing to say and its saying
+      // nothing is not evidence. Everything above this line still applies to it — a paused run
+      // whose instance was terminated underneath it is still a vanished instance.
+      if (!silenceIsEvidenceFor(workflow.state)) {
+        return undefined
       }
 
       if (lease.lastHeartbeatAt !== null) {

@@ -10,7 +10,9 @@ import {
   runDrainQueue,
   runIntegrationTick,
   runJob,
+  runPauseInstance,
   runReconcile,
+  runResumeWorkflow,
   runStartWorkflow,
   runSyncSchedules,
   runTeardownWorkflow,
@@ -63,7 +65,9 @@ export const CONTROL_PLANE_JOB_NAMES = [
   'drain-queue',
   'integration-tick',
   'keep-alive',
+  'pause-instance',
   'reconcile',
+  'resume-workflow',
   'start-workflow',
   'sync-schedules',
   'teardown-workflow',
@@ -108,7 +112,30 @@ const controlPlaneEventSchema = z.discriminatedUnion('job', [
    * registers the timer that fires this.
    */
   z.object({ job: z.literal('keep-alive') }),
+  /**
+   * The stop half of a pause (003/FR-039). Its own per-workflow event, on exactly the footing
+   * `start-workflow` and `teardown-workflow` are on: a pause is a thing that happens to **one**
+   * run at a known moment — the instant its executor acknowledges the pause command and
+   * `workflows.state` becomes `paused` — and not a population to be swept.
+   *
+   * It is deliberately **not** in {@link CONTROL_PLANE_TICK_SEQUENCE}. See `jobs/reconcile.ts`,
+   * which is the backstop for a pause whose stop never came: a stop issued twice a minute against
+   * a run that is already stopping is an EC2 call per tick for as long as somebody is at lunch,
+   * and the reconciler already carries the clock that decides when an unattended pause has gone
+   * on too long.
+   */
+  z.object({ job: z.literal('pause-instance'), workflowId: workflowIdField }),
   z.object({ job: z.literal('reconcile') }),
+  /**
+   * The other half of the same decision (003/FR-041, FR-043, FR-046).
+   *
+   * A resume cannot travel the supervision queue the way a pause does, and that asymmetry is the
+   * whole reason this event exists. A pause is applied by an executor that is still running; a
+   * resume is asked of a run whose instance is **stopped**, so there is nothing polling
+   * `pullPendingCommands` and a queued `resume` row would sit unread for ever. Somebody outside
+   * the instance has to start it, and this is that somebody.
+   */
+  z.object({ job: z.literal('resume-workflow'), workflowId: workflowIdField }),
   z.object({ job: z.literal('start-workflow'), workflowId: workflowIdField }),
   z.object({ job: z.literal('sync-schedules') }),
   z.object({ job: z.literal('teardown-workflow'), workflowId: workflowIdField }),
@@ -216,6 +243,18 @@ const runControlPlaneJob = (
         }),
       )
 
+    case 'pause-instance':
+      // The drain travels with it because two of the three pause paths release a compute lease —
+      // the spot degrade and the park — and a freed slot that nothing re-admits is a queue that
+      // waits a tick for capacity it already has. The stop path releases nothing and drains
+      // nothing; that decision is the job's, not this router's. See `jobs/pause-instance.ts`.
+      return runPauseInstance({
+        db: context.db,
+        compute: context.compute,
+        workflowId: event.workflowId,
+        queueDrain: context.queueDrain,
+      })
+
     case 'reconcile':
       return runReconcile({
         db: context.db,
@@ -223,6 +262,19 @@ const runControlPlaneJob = (
         queueDrain: context.queueDrain,
         notifier: context.notifier,
         coolingOffRetryMs: context.coolingOffRetryMs,
+      })
+
+    case 'resume-workflow':
+      // The same dependencies provisioning takes, and that is the point rather than a coincidence:
+      // a resume that cannot start the stopped instance rebuilds the run from its snapshot onto a
+      // fresh one, which is `startWorkflow` with a different reason. A route that handed this job
+      // less than the start route would be a resume that could only take the happy path.
+      return runResumeWorkflow({
+        db: context.db,
+        compute: context.compute,
+        machineSurfaceUrl: context.machineSurfaceUrl,
+        credentialSecret: context.credentialSecret,
+        workflowId: event.workflowId,
       })
 
     case 'start-workflow':

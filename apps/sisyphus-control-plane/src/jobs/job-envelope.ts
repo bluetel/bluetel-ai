@@ -26,10 +26,15 @@ import type { Workflow } from '@bluetel-ai/sisyphus-api/db'
  * That distinction is the whole point of the rule. **User data is not a secret channel**: it is
  * readable by every process on the instance through the metadata service for as long as the
  * instance exists, and it survives into any image taken of it. The scoped credential is
- * nevertheless correct to put here, because it is bounded on three axes at once — one workflow,
- * one audience, and a window that is fifteen minutes and revoked outright at teardown. A
- * long-lived secret has none of those bounds, so the same channel that is acceptable for the one
- * is unacceptable for the other.
+ * nevertheless correct to put here, because it is bounded on four axes at once — one workflow, one
+ * audience, a database-side validity of fifteen minutes that must be renewed
+ * (`SCOPED_CREDENTIAL_WINDOW_MS`) and is revoked outright at teardown, and a hard `exp` on the
+ * signed token itself of twelve hours (`SCOPED_CREDENTIAL_MAX_LIFETIME_MS`), which is what a
+ * by-hand decode of real user data actually shows. The two are not the same bound and it is worth
+ * not conflating them: the fifteen minutes is what makes a stolen token useless quickly, and the
+ * twelve hours is what makes one recovered from an instance image months later inert even if the
+ * revocation record were lost. A long-lived secret has none of those bounds, so the same channel
+ * that is acceptable for the one is unacceptable for the other.
  *
  * ## The agent credential is named here and fetched elsewhere (003/FR-012, T050)
  *

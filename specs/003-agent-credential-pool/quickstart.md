@@ -381,6 +381,11 @@ Both must be green with no threshold overrides, per constitution principle IV.
 
 ## Outstanding measurements
 
+> **See [outstanding.md](./outstanding.md)** for the full record of what cannot be finished in this
+> repository — T123 (this walkthrough itself), T124, T125 and T127 — stating for each what it needs, what
+> to measure, which configured value or reported figure depends on the answer, and what is assumed in its
+> place today. Their checkboxes in `tasks.md` are deliberately unticked.
+
 Two provider behaviours are unresolved by design (research [R1](./research.md#r1), [R2](./research.md#r2)) and
 should be measured against the first registered credential **before the pool carries real work**:
 

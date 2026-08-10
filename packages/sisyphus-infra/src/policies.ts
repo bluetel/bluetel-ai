@@ -419,3 +419,88 @@ export const buildPanelBundlesPolicy = (config: PanelBundlesPolicyConfig): Polic
     },
   ],
 })
+
+export interface PanelPolicyConfig extends PanelBundlesPolicyConfig {
+  /**
+   * Secrets Manager name prefix the stage's agent credentials live under, from
+   * `getAgentCredentialSecretPrefix` in `lib.ts` — the same value
+   * {@link ControlPlanePolicyConfig.agentCredentialSecretPrefix} carries, and
+   * necessarily so: the control plane writes the secret and the panel's machine
+   * surface reads it back, and two prefixes would be two different secrets.
+   */
+  readonly agentCredentialSecretPrefix: string
+}
+
+/**
+ * The panel's server function, in full: register a setup bundle archive, and
+ * read and write **agent credential material** for the machine surface it
+ * mounts (003/FR-011, FR-012, FR-030, FR-032).
+ *
+ * ## Why the panel needs Secrets Manager at all
+ *
+ * `machine.fetchAgentCredential` and `machine.reportCredentialRotation` are the
+ * only two procedures in the platform that touch credential material, and both
+ * are mounted at `/api/machine`, which is a route in the panel's Next.js
+ * application (see `apps/sisyphus-admin/src/server/credential-material.ts` for
+ * why that mount is the only composition root that can fill the port). So the
+ * function that serves them has to be able to reach the store — and until this
+ * builder was applied it could not, because
+ * `apps/sisyphus-admin/sst.config.ts` passed no `permissions` at all. The
+ * symptom is not a deploy failure: it is every instance failing its
+ * `credential_install` bootstrap phase with an AWS authorisation error, on a
+ * stage that deployed cleanly.
+ *
+ * ## Two actions, and the four that are deliberately absent
+ *
+ * `GetSecretValue` is the boot-time fetch; `PutSecretValue` is the rotation the
+ * agent performs mid-run and the executor reports back. That is the whole of
+ * what this surface does with material, so it is the whole of what it is
+ * granted.
+ *
+ * - **No `CreateSecret`.** Minting a seat's secret is the login capture's act,
+ *   performed in the control plane where the material already is. A machine
+ *   surface able to create one could file material under an identifier nothing
+ *   references and report success; the port the panel implements does not even
+ *   declare the method, so this omission makes the deployment agree with the
+ *   type rather than merely not contradict it.
+ * - **No `DeleteSecret`.** Retiring a credential is a state change on the row.
+ *   Deleting the material behind a live seat would lose an agent's only login
+ *   with no recovery.
+ * - **No `ListSecrets`.** It takes no resource-level permission, so granting it
+ *   would let this function enumerate every secret in the account regardless of
+ *   how narrowly the ARNs below are scoped.
+ * - **No `UpdateSecret`.** It can rewrite a secret's KMS key and description as
+ *   well as its value; `PutSecretValue` writes a version and nothing else.
+ *
+ * The same reasoning as {@link buildControlPlanePolicy}'s Secrets Manager
+ * statement, reached independently by the two members that need it, which is
+ * why an empty prefix is refused here too rather than formatted into
+ * `secret:/*` — a wildcard that would deploy cleanly and let a staging panel
+ * read production's agent logins.
+ */
+export const buildPanelPolicy = (config: PanelPolicyConfig): PolicyDocument => {
+  if (config.agentCredentialSecretPrefix.trim() === '') {
+    throw new Error(
+      'Cannot scope the panel’s Secrets Manager grant to an empty agent credential prefix, ' +
+        'which would widen it to every secret in the account.',
+    )
+  }
+
+  return {
+    Version: POLICY_VERSION,
+    Statement: [
+      // Composed rather than restated: the bundles grants are unchanged, and a
+      // second copy of them here would be a second place to get the KMS alias
+      // wrong.
+      ...buildPanelBundlesPolicy(config).Statement,
+      {
+        Sid: 'ReadAndWriteAgentCredentialMaterial',
+        Effect: 'Allow',
+        Action: ['secretsmanager:GetSecretValue', 'secretsmanager:PutSecretValue'],
+        Resource: [
+          `arn:aws:secretsmanager:${config.region}:${config.accountId}:secret:${config.agentCredentialSecretPrefix}/*`,
+        ],
+      },
+    ],
+  }
+}

@@ -6,7 +6,7 @@ import type { JobOutcome } from './jobs'
 /**
  * The jobs are mocked, and that is the point of this file.
  *
- * Every one of the eight is covered by its own suite against fakes; what has never been asserted
+ * Every one of them is covered by its own suite against fakes; what has never been asserted
  * anywhere is that an *event* reaches the right one carrying the right subject and the right ports.
  * A test that ran the real jobs would need a database to say anything about routing, and would say
  * it about admission rather than about the router.
@@ -31,7 +31,9 @@ const runBootstrapAdmins = vi.fn(() => Promise.resolve(succeeded('bootstrap-admi
 const runCredentialAlerts = vi.fn(() => Promise.resolve(succeeded('credential-alerts')))
 const runDrainQueue = vi.fn(() => Promise.resolve(succeeded('drain-queue')))
 const runIntegrationTick = vi.fn(() => Promise.resolve(succeeded('integration-tick')))
+const runPauseInstance = vi.fn(() => Promise.resolve(succeeded('pause-instance')))
 const runReconcile = vi.fn(() => Promise.resolve(succeeded('reconcile')))
+const runResumeWorkflow = vi.fn(() => Promise.resolve(succeeded('resume-workflow')))
 const runStartWorkflow = vi.fn(() => Promise.resolve(succeeded('start-workflow')))
 const runSyncSchedules = vi.fn(() => Promise.resolve(succeeded('sync-schedules')))
 const runTeardownWorkflow = vi.fn(() => Promise.resolve(succeeded('teardown-workflow')))
@@ -43,7 +45,9 @@ const everyJob = {
   runCredentialAlerts,
   runDrainQueue,
   runIntegrationTick,
+  runPauseInstance,
   runReconcile,
+  runResumeWorkflow,
   runStartWorkflow,
   runSyncSchedules,
   runTeardownWorkflow,
@@ -132,6 +136,8 @@ describe('parseControlPlaneEvent', () => {
     const subjects: Record<string, unknown> = {
       'admit-workflow': { workflowId: 'wf_1' },
       'integration-tick': { integrationId: 'int_1' },
+      'pause-instance': { workflowId: 'wf_1' },
+      'resume-workflow': { workflowId: 'wf_1' },
       'start-workflow': { workflowId: 'wf_1' },
       'teardown-workflow': { workflowId: 'wf_1' },
     }
@@ -151,13 +157,16 @@ describe('parseControlPlaneEvent', () => {
     ['a tick naming no integration', { job: 'integration-tick' }],
     ['a trigger nothing recognises', { job: 'integration-tick', integrationId: 'i', trigger: 'x' }],
     ['a drain with a nonsensical limit', { job: 'drain-queue', limit: 0 }],
+    ['a pause naming no run', { job: 'pause-instance' }],
+    ['a resume naming no run', { job: 'resume-workflow' }],
+    ['a resume with a blank workflow id', { job: 'resume-workflow', workflowId: '' }],
   ])('refuses %s', (_description, event) => {
     expect(() => parseControlPlaneEvent(event)).toThrow('cannot route')
   })
 
   it('names every job it would have accepted, so the refusal is actionable', () => {
     expect(() => parseControlPlaneEvent({ job: 'unknown' })).toThrow(
-      'admit-workflow, bootstrap-admins, credential-alerts, drain-queue, integration-tick, keep-alive, reconcile, start-workflow, sync-schedules, teardown-workflow, control-plane-tick',
+      'admit-workflow, bootstrap-admins, credential-alerts, drain-queue, integration-tick, keep-alive, pause-instance, reconcile, resume-workflow, start-workflow, sync-schedules, teardown-workflow, control-plane-tick',
     )
   })
 })
@@ -268,6 +277,47 @@ describe('runControlPlaneEvent', () => {
     // tick is wrong for a different reason: it runs once a minute and nothing in the alert path
     // coalesces.
     expect(CONTROL_PLANE_TICK_SEQUENCE.map((step) => step.job)).not.toContain('credential-alerts')
+  })
+
+  it('routes the pause with compute and the drain (003/FR-039)', async () => {
+    // Until this route existed, `pauseInstance` was implemented, tested and exported from the jobs
+    // barrel with nothing anywhere able to reach it: `suspend()`'s pause plan says the control
+    // plane stops the instance from outside, and no event named the job that does it. A pause was
+    // therefore an instance left running until the reconciler's idle ceiling parked it — the
+    // FR-039 saving never happened, on any run.
+    await runControlPlaneEvent(context, { job: 'pause-instance', workflowId: 'wf_9' })
+
+    expect(runPauseInstance).toHaveBeenCalledWith({
+      db: 'the-database',
+      compute: 'the-compute',
+      workflowId: 'wf_9',
+      queueDrain: 'the-queue-drain',
+    })
+  })
+
+  it('routes the resume with everything provisioning takes (003/FR-041, FR-043)', async () => {
+    // The same dependency set as `start-workflow`, because the recovery path *is* `startWorkflow`:
+    // a stopped instance that will not start again is rebuilt from its snapshot onto a fresh one,
+    // which needs the machine surface URL and the signing secret exactly as a cold start does.
+    await runControlPlaneEvent(context, { job: 'resume-workflow', workflowId: 'wf_9' })
+
+    expect(runResumeWorkflow).toHaveBeenCalledWith({
+      db: 'the-database',
+      compute: 'the-compute',
+      machineSurfaceUrl: 'https://machine.example',
+      credentialSecret: 'the-credential-secret',
+      workflowId: 'wf_9',
+    })
+  })
+
+  it('keeps pause and resume out of the stage tick, since both name one run', () => {
+    // Neither is a sweep. A tick step takes no subject, and both of these are meaningless without
+    // one; the population-level backstop for an unattended pause is `reconcile`, which is in the
+    // sequence already.
+    const steps = CONTROL_PLANE_TICK_SEQUENCE.map((step) => step.job)
+
+    expect(steps).not.toContain('pause-instance')
+    expect(steps).not.toContain('resume-workflow')
   })
 
   it('routes provisioning with the machine surface and the credential secret', async () => {

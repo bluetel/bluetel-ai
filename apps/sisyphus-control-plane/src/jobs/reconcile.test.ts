@@ -22,6 +22,7 @@ import {
   PAUSE_IDLE_GRACE_MS,
   PROVISIONING_GRACE_MS,
   reconcile,
+  silenceIsEvidenceFor,
 } from './reconcile'
 import { createWorkflowFixtures, readTestDatabaseUrl } from './workflow-fixtures'
 
@@ -45,6 +46,23 @@ const ago = (milliseconds: number): Date => new Date(NOW.getTime() - millisecond
 
 /** See `admit-workflow.ts`: `noUncheckedIndexedAccess` is off, so indexing needs an honest type. */
 const firstRow = <TRow>(rows: readonly TRow[]): TRow | undefined => rows[0]
+
+/**
+ * The one rule 003/FR-039 changed about this sweep, asserted without a database.
+ *
+ * Kept outside {@link describeWithDatabase} deliberately: it is a statement about which states are
+ * *supposed* to be talking, and a suite that could only make it with Postgres running would be one
+ * that quietly said nothing wherever Postgres was not.
+ */
+describe('silenceIsEvidenceFor', () => {
+  it('forgives a paused run, whose instance is stopped and so cannot beat', () => {
+    expect(silenceIsEvidenceFor('paused')).toBe(false)
+  })
+
+  it.each(['provisioning', 'running'])('holds %s to its heartbeat', (state) => {
+    expect(silenceIsEvidenceFor(state)).toBe(true)
+  })
+})
 
 describeWithDatabase('reconciling reality against recorded state', () => {
   const fixtures = createWorkflowFixtures(connectionString ?? '')
@@ -235,21 +253,72 @@ describeWithDatabase('reconciling reality against recorded state', () => {
       expect(await fixtures.stateOf(workflowId)).toBe('failed')
     })
 
-    it('sweeps a paused run whose heartbeat lapsed, like any other state holding compute', async () => {
-      // The other arm of `ACTIVE_STATES`' third member: a paused run is swept on the same evidence
-      // as a running one, because a pause holds the instance and a silent pause is still a leak.
+    /**
+     * **A paused run's silence is not evidence (003/FR-039).**
+     *
+     * This suite used to assert the opposite, and correctly so: under `002/FR-049` a pause held
+     * the agent process alive on a running instance, so a paused run went on beating and a silent
+     * one really was a leak. 003/FR-039 stops the instance. A stopped instance sends nothing —
+     * that is the saving, not a symptom — so the old rule would have declared every correctly
+     * paused run dead {@link HEARTBEAT_LAPSE_MS} after it was paused and terminated the instance
+     * the pause exists to keep, converting FR-041's start-the-same-box resume into FR-043's
+     * rebuild-from-snapshot fallback on every single pause, silently.
+     *
+     * The clock that *does* end a pause is the idle ceiling, asserted immediately below.
+     */
+    it('leaves a paused run alone however long its stopped instance has been silent', async () => {
       const workflowId = await runHoldingCompute({
         label: 'paused-silent',
         state: 'paused',
-        lastHeartbeatAt: ago(HEARTBEAT_LAPSE_MS + 60_000),
+        // Far past the lapse, and still not evidence: this instance is stopped.
+        lastHeartbeatAt: ago(HEARTBEAT_LAPSE_MS * 10),
       })
+      await seedPauseEvent(workflowId, ago(60_000))
       const compute = createFakeComputeProvisioner()
-      compute.seedInstance({ instanceId: 'i-paused-silent', workflowId, state: 'running' })
+      // `stopped` is in the adapter's live-instance states precisely so this case survives: the
+      // instance exists, it is simply off.
+      compute.seedInstance({ instanceId: 'i-paused-silent', workflowId, state: 'stopped' })
 
       const result = await reconcile({ db: fixtures.db(), compute, now: () => NOW })
 
-      expect(result.moved[0]).toMatchObject({ workflowId, from: 'paused', to: 'failed' })
-      expect(await fixtures.stateOf(workflowId)).toBe('failed')
+      expect(result.moved).toStrictEqual([])
+      expect(result.healthy).toBe(1)
+      expect(compute.terminations).toStrictEqual([])
+      expect(await fixtures.stateOf(workflowId)).toBe('paused')
+    })
+
+    it('still sweeps a paused run whose instance was terminated underneath it', async () => {
+      // The exemption above is for silence and for nothing else. An absent instance is absent
+      // whatever state the run is in, and a paused run standing on an instance that no longer
+      // exists must not be reported as a healthy pause somebody can come back to.
+      const workflowId = await runHoldingCompute({
+        label: 'paused-vanished',
+        state: 'paused',
+        lastHeartbeatAt: ago(30_000),
+      })
+      await seedPauseEvent(workflowId, ago(60_000))
+      const compute = createFakeComputeProvisioner()
+
+      const result = await reconcile({ db: fixtures.db(), compute, now: () => NOW })
+
+      expect(result.moved[0]).toMatchObject({ workflowId, from: 'paused' })
+      expect(result.moved[0]?.reason).toContain('no longer running')
+    })
+
+    it('sweeps a running run on the same silence it forgives a paused one', async () => {
+      // The rule is about the state, not about the threshold: nothing here is relaxed for a run
+      // that is meant to be talking.
+      const workflowId = await runHoldingCompute({
+        label: 'running-silent',
+        state: 'running',
+        lastHeartbeatAt: ago(HEARTBEAT_LAPSE_MS + 60_000),
+      })
+      const compute = createFakeComputeProvisioner()
+      compute.seedInstance({ instanceId: 'i-running-silent', workflowId, state: 'running' })
+
+      const result = await reconcile({ db: fixtures.db(), compute, now: () => NOW })
+
+      expect(result.moved[0]).toMatchObject({ workflowId, from: 'running', to: 'failed' })
     })
 
     /**
