@@ -57,7 +57,25 @@ export const PINNED_WORKSPACE_ROOT = '/workspace'
 /** Relocated **inside** the root so the whole state tree is one tar target. */
 export const AGENT_CONFIG_DIR_NAME = '.agent-config'
 
+/**
+ * The one subdirectory of the config tree that holds credential material.
+ *
+ * Named here, once, because three separate rules are written against it and they
+ * are only correct if they are written against the *same* path: bootstrap phase
+ * `credential_install` writes into it (`./credential-install.ts`), the rotation
+ * watcher watches it (`credential/rotation-watch.ts`), and the snapshot writer
+ * excludes it from every archive (`session/snapshot.ts`, 003/FR-013, preserving
+ * `002/FR-072`). A second spelling of "credentials" in any one of those three is
+ * a credential in a snapshot, and it would not be noticed until an archive was
+ * inspected by hand.
+ */
+export const AGENT_CREDENTIAL_DIR_NAME = 'credentials'
+
 export const agentConfigDir = (root: string): string => join(root, AGENT_CONFIG_DIR_NAME)
+
+/** Where credential material lives on this instance, and nowhere else. */
+export const agentCredentialDir = (root: string): string =>
+  join(agentConfigDir(root), AGENT_CREDENTIAL_DIR_NAME)
 
 /** One repository as the job envelope declares it (FR-109). */
 export interface WorkspaceEntry {
@@ -261,10 +279,14 @@ export const validateEntries = (
 /**
  * Create the pinned root and the relocated config directory.
  *
- * Called **before** phases 2–5, not as part of phase 6: `setup.sh` writes
- * credential material under `<root>/.agent-config/credentials/`, so the
- * directory it is promised in `SISYPHUS_AGENT_CONFIG_DIR` has to exist by the
- * time the bundle runs.
+ * Called **before** phases 2–5, not as part of phase 6: `setup.sh` is promised
+ * `SISYPHUS_AGENT_CONFIG_DIR` and installs the agent CLI's own configuration
+ * beneath it, so the directory has to exist by the time the bundle runs.
+ *
+ * The credential subdirectory is **not** created here. It is created by
+ * bootstrap phase `credential_install`, which is the only thing that writes
+ * agent credential material at all (003/FR-048): the bundle no longer installs
+ * one, and a directory prepared for it here would suggest otherwise.
  */
 export const prepareWorkspaceRoot = async (root: string): Promise<string> => {
   await mkdir(root, { recursive: true })

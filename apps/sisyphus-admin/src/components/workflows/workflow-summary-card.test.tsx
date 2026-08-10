@@ -141,6 +141,59 @@ describe('WorkflowSummaryCard', () => {
     expect(markup).toContain('data-state="running"')
   })
 
+  it('says a run is waiting for an agent credential, and for how long (003/SC-006)', () => {
+    // Every other readout on this card is empty for a waiting run — no instance, no turns, no
+    // spend, no log — so without this the card is indistinguishable from a stalled one.
+    const markup = renderToStaticMarkup(
+      <WorkflowSummaryCard
+        detail={detail}
+        credentialWait={{
+          waiting: true,
+          headline: 'Waiting for an agent credential',
+          waitedFor: '4:30',
+          summary: 'Every agent credential this run can reach is held by another run.',
+          remedy: 'Wait for a run to finish, or register more credentials in these groups.',
+          groups: ['shared-seats', 'overflow'],
+          configurationFault: false,
+        }}
+      />,
+    )
+
+    expect(markup).toContain('Waiting for an agent credential')
+    expect(markup).toContain('4:30')
+    // FR-029: the sentence saying what is true, the sentence saying what to do, and the groups
+    // that were searched — because "no capacity" is what the requirement exists to prevent.
+    expect(markup).toContain('held by another run')
+    expect(markup).toContain('register more credentials')
+    expect(markup).toContain('shared-seats, overflow')
+    expect(markup).toContain('data-credential-wait="waiting"')
+  })
+
+  it('marks a configuration fault as one, rather than as a queue to wait out', () => {
+    const markup = renderToStaticMarkup(
+      <WorkflowSummaryCard
+        detail={detail}
+        credentialWait={{
+          waiting: true,
+          headline: 'Waiting for an agent credential that is not coming',
+          waitedFor: '1:00',
+          summary: 'The groups this run can reach hold no credentials at all.',
+          remedy: 'Register a credential in one of those groups.',
+          groups: ['empty-pool'],
+          configurationFault: true,
+        }}
+      />,
+    )
+
+    expect(markup).toContain('data-credential-wait="fault"')
+  })
+
+  it('says nothing about a credential wait for a run that never waited', () => {
+    const markup = renderToStaticMarkup(<WorkflowSummaryCard detail={detail} />)
+
+    expect(markup).not.toContain('agent credential')
+  })
+
   it('says nothing about storage for a run that never parked', () => {
     const markup = renderToStaticMarkup(<WorkflowSummaryCard detail={detail} />)
 

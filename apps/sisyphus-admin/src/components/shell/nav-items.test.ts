@@ -19,6 +19,9 @@ describe('the nav model', () => {
       '/admin/profiles#workspaces',
       '/admin/profiles',
       '/admin/integrations',
+      '/admin/credentials/pool',
+      '/admin/credentials',
+      '/admin/credentials/groups',
       '/admin/users',
       '/admin/audit',
       '/settings/notifications',
@@ -45,7 +48,7 @@ describe('filtering the nav by role', () => {
     expect(sectionIdsFor('engineer')).not.toContain('admin')
   })
 
-  it('gives an admin the Admin group with all six surfaces', () => {
+  it('gives an admin the Admin group with every surface', () => {
     const admin = navSectionsForRole('admin').find((section) => section.id === 'admin')
 
     expect(admin?.items.map((item) => item.label)).toStrictEqual([
@@ -53,9 +56,22 @@ describe('filtering the nav by role', () => {
       'Workspaces',
       'Execution profiles',
       'Integrations',
+      'Credential pool',
+      'Agent credentials',
+      'Credential groups',
       'Users',
       'Audit',
     ])
+  })
+
+  it('hands an engineer no link to any credential surface (003 access scoping)', () => {
+    // Stricter than 002's profile-scoped model, and worth its own assertion rather than leaning on
+    // the general `/admin` sweep: a credential is platform infrastructure, and its state reveals
+    // nothing an engineer can act on. The one credential fact they see is on their own workflow —
+    // that it is waiting for a seat — reached through workflow scoping, not through these screens.
+    expect(linkTargetsFor('engineer').filter((href) => href.includes('credential'))).toStrictEqual(
+      [],
+    )
   })
 
   it('hands an engineer no link to any surface behind the admin gate (FR-190)', () => {

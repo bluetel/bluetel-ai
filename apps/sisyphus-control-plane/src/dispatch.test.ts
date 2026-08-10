@@ -28,22 +28,36 @@ const failed = (jobName: string, message: string): JobOutcome<unknown> => ({
 
 const runAdmitWorkflow = vi.fn(() => Promise.resolve(succeeded('admit-workflow')))
 const runBootstrapAdmins = vi.fn(() => Promise.resolve(succeeded('bootstrap-admins')))
+const runCredentialAlerts = vi.fn(() => Promise.resolve(succeeded('credential-alerts')))
 const runDrainQueue = vi.fn(() => Promise.resolve(succeeded('drain-queue')))
 const runIntegrationTick = vi.fn(() => Promise.resolve(succeeded('integration-tick')))
 const runReconcile = vi.fn(() => Promise.resolve(succeeded('reconcile')))
 const runStartWorkflow = vi.fn(() => Promise.resolve(succeeded('start-workflow')))
 const runSyncSchedules = vi.fn(() => Promise.resolve(succeeded('sync-schedules')))
 const runTeardownWorkflow = vi.fn(() => Promise.resolve(succeeded('teardown-workflow')))
+const sweepKeepAlive = vi.fn(() => Promise.resolve({ considered: 0 }))
 
 const everyJob = {
   runAdmitWorkflow,
   runBootstrapAdmins,
+  runCredentialAlerts,
   runDrainQueue,
   runIntegrationTick,
   runReconcile,
   runStartWorkflow,
   runSyncSchedules,
   runTeardownWorkflow,
+  sweepKeepAlive,
+  // The keep-alive sweep has no `runKeepAlive` of its own — it lives in `credentials/liveness/`,
+  // which cannot import this directory's job envelope without a cycle — so the router wraps it.
+  // Both pieces have to be in the mock for that route to reach anything.
+  KEEP_ALIVE_JOB_NAME: 'keep-alive',
+  runJob: async (jobName: string, handler: () => Promise<unknown>) => ({
+    ok: true,
+    jobName,
+    durationMs: 1,
+    value: await handler(),
+  }),
 }
 
 vi.mock('./jobs', () => everyJob)
@@ -71,17 +85,26 @@ const context = {
   readCredential: 'the-credential-reader',
   buckets: { logs: 'logs-bucket', artifacts: 'artifacts-bucket', snapshots: 'snapshots-bucket' },
   ceiling: 7,
+  credentialWaitLimitMs: 900_000,
+  keepAliveIdleHours: 24,
+  coolingOffRetryMs: 900_000,
+  credentialExerciser: 'the-credential-exerciser',
   machineSurfaceUrl: 'https://machine.example',
   credentialSecret: 'the-credential-secret',
   bootstrapAdminEmails: ['admin@example.com'],
   starter: 'the-starter',
   queueDrain: 'the-queue-drain',
   notifier: 'the-notifier',
+  credentialAlerter: 'the-credential-alerter',
 } as unknown as ControlPlaneContext
 
 beforeEach(() => {
   for (const job of Object.values(everyJob)) {
-    job.mockClear()
+    // Not everything in the mocked module is a spy: the router also needs the job envelope and a
+    // job name from `./jobs`, and neither has calls to clear.
+    if (vi.isMockFunction(job)) {
+      job.mockClear()
+    }
   }
 })
 
@@ -134,7 +157,7 @@ describe('parseControlPlaneEvent', () => {
 
   it('names every job it would have accepted, so the refusal is actionable', () => {
     expect(() => parseControlPlaneEvent({ job: 'unknown' })).toThrow(
-      'admit-workflow, bootstrap-admins, drain-queue, integration-tick, reconcile, start-workflow, sync-schedules, teardown-workflow, control-plane-tick',
+      'admit-workflow, bootstrap-admins, credential-alerts, drain-queue, integration-tick, keep-alive, reconcile, start-workflow, sync-schedules, teardown-workflow, control-plane-tick',
     )
   })
 })
@@ -167,6 +190,10 @@ describe('runControlPlaneEvent', () => {
       ceiling: 7,
       starter: 'the-starter',
       limit: 3,
+      // The drain is where a wait is expired and announced (003/FR-028, FR-136), so it takes the
+      // configured limit and the notifier rather than reading either itself.
+      credentialWaitLimitMs: 900_000,
+      notifier: 'the-notifier',
     })
   })
 
@@ -194,7 +221,7 @@ describe('runControlPlaneEvent', () => {
     expect(runIntegrationTick).toHaveBeenCalledWith(expect.objectContaining({ trigger: undefined }))
   })
 
-  it('routes the reconcile with compute and the drain that re-admits what it frees', async () => {
+  it('routes the reconcile with compute, the drain, and the cooling-off retry interval', async () => {
     await runControlPlaneEvent(context, { job: 'reconcile' })
 
     expect(runReconcile).toHaveBeenCalledWith({
@@ -202,7 +229,45 @@ describe('runControlPlaneEvent', () => {
       compute: 'the-compute',
       queueDrain: 'the-queue-drain',
       notifier: 'the-notifier',
+      // 003/FR-078. Converted once, in the composition root, so the job never reads configuration.
+      coolingOffRetryMs: 900_000,
     })
+  })
+
+  it('routes the keep-alive sweep with the provider seam and the idle threshold (003/FR-035)', async () => {
+    await runControlPlaneEvent(context, { job: 'keep-alive' })
+
+    expect(sweepKeepAlive).toHaveBeenCalledWith({
+      db: 'the-database',
+      exerciser: 'the-credential-exerciser',
+      idleHours: 24,
+    })
+  })
+
+  it('keeps keep-alive out of the stage tick, so it runs independently of demand (003/FR-035)', () => {
+    // FR-035 requires the pool to be exercised independently of workflow demand. A sweep that only
+    // ran inside the stage tick would stop running whenever the tick did, and SC-009's failure —
+    // a pool that has quietly expired — is invisible until a workflow tries to use it.
+    expect(CONTROL_PLANE_TICK_SEQUENCE.map((step) => step.job)).not.toContain('keep-alive')
+  })
+
+  it('routes the FR-056 alert sweep with the alerter and no threshold of its own', async () => {
+    await runControlPlaneEvent(context, { job: 'credential-alerts' })
+
+    // The two hour knobs are bound into the alerter in the composition root, so the job is handed
+    // neither — there is nowhere for a second opinion about them to live.
+    expect(runCredentialAlerts).toHaveBeenCalledWith({
+      db: 'the-database',
+      alerter: 'the-credential-alerter',
+    })
+  })
+
+  it('keeps the alert sweep out of both the stage tick and keep-alive (003/FR-056)', () => {
+    // One of the four conditions it raises is a seat keep-alive has stopped exercising, so an alert
+    // that only ran inside keep-alive would go silent in the case it was written for. The stage
+    // tick is wrong for a different reason: it runs once a minute and nothing in the alert path
+    // coalesces.
+    expect(CONTROL_PLANE_TICK_SEQUENCE.map((step) => step.job)).not.toContain('credential-alerts')
   })
 
   it('routes provisioning with the machine surface and the credential secret', async () => {

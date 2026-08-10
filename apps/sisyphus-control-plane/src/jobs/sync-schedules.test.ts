@@ -6,7 +6,12 @@ import { createFakeScheduleRegistry } from '../aws'
 
 import { createIntegrationFixtures, readTestDatabaseUrl } from './integration-fixtures'
 import {
+  CREDENTIAL_ALERTS_SCHEDULE_EXPRESSION,
+  CREDENTIAL_ALERTS_SCHEDULE_NAME,
   integrationIdFromScheduleName,
+  KEEP_ALIVE_SCHEDULE_EXPRESSION,
+  KEEP_ALIVE_SCHEDULE_NAME,
+  PLATFORM_SCHEDULE_PREFIX,
   removeSchedule,
   runSyncSchedules,
   SCHEDULE_NAME_PREFIX,
@@ -147,10 +152,13 @@ describeWithDatabase('syncSchedules against a live database (T118, FR-100, FR-15
 
     await syncSchedules({ db: fixtures.db(), schedules })
 
-    expect(schedules.upserts.map((upsert) => upsert.expression)).toEqual([
-      'cron(0/15 * * * ? *)',
-      'cron(0 * * * ? *)',
-    ])
+    // Integration schedules only: the platform schedules are re-registered on every pass by design, and
+    // counting them here would make this assertion about the wrong thing.
+    expect(
+      schedules.upserts
+        .filter((upsert) => upsert.name.startsWith(SCHEDULE_NAME_PREFIX))
+        .map((upsert) => upsert.expression),
+    ).toEqual(['cron(0/15 * * * ? *)', 'cron(0 * * * ? *)'])
   })
 
   it('brings a schedule to disabled when the integration is disabled (FR-100)', async () => {
@@ -180,7 +188,11 @@ describeWithDatabase('syncSchedules against a live database (T118, FR-100, FR-15
     await syncSchedules({ db: fixtures.db(), schedules })
 
     expect(schedules.removals).toEqual([])
-    expect(await schedules.list()).toEqual([scheduleNameFor(integration.id)])
+    expect(await schedules.list()).toEqual([
+      scheduleNameFor(integration.id),
+      CREDENTIAL_ALERTS_SCHEDULE_NAME,
+      KEEP_ALIVE_SCHEDULE_NAME,
+    ])
   })
 
   it('is idempotent: running it twice leaves the same group', async () => {
@@ -207,7 +219,12 @@ describeWithDatabase('syncSchedules against a live database (T118, FR-100, FR-15
     const result = await syncSchedules({ db: fixtures.db(), schedules })
 
     expect(result.swept).toEqual([scheduleNameFor('11111111-1111-4111-8111-111111111111')])
-    expect(await schedules.list()).toEqual([])
+    // The platform's own schedules survive: they belong to no integration, so no integration going
+    // away can make them unnecessary (003/FR-035).
+    expect(await schedules.list()).toEqual([
+      CREDENTIAL_ALERTS_SCHEDULE_NAME,
+      KEEP_ALIVE_SCHEDULE_NAME,
+    ])
   })
 
   it('leaves a schedule this platform did not create alone', async () => {
@@ -222,7 +239,91 @@ describeWithDatabase('syncSchedules against a live database (T118, FR-100, FR-15
     const result = await syncSchedules({ db: fixtures.db(), schedules })
 
     expect(result.swept).toEqual([])
-    expect(await schedules.list()).toEqual(['nightly-report'])
+    expect(await schedules.list()).toEqual([
+      'nightly-report',
+      CREDENTIAL_ALERTS_SCHEDULE_NAME,
+      KEEP_ALIVE_SCHEDULE_NAME,
+    ])
+  })
+
+  describe('platform schedules (003/FR-035, SC-009)', () => {
+    it('registers the keep-alive sweep whether or not anything is configured', async () => {
+      // No integrations at all, and the pool still has to be kept alive. A keep-alive registered as
+      // a side effect of somebody configuring a board would be one that never ran on a deployment
+      // that had configured none.
+      const schedules = createFakeScheduleRegistry()
+
+      const result = await syncSchedules({ db: fixtures.db(), schedules })
+
+      expect(result.platform).toEqual([KEEP_ALIVE_SCHEDULE_NAME, CREDENTIAL_ALERTS_SCHEDULE_NAME])
+      expect(schedules.current(KEEP_ALIVE_SCHEDULE_NAME)).toMatchObject({
+        expression: KEEP_ALIVE_SCHEDULE_EXPRESSION,
+        enabled: true,
+      })
+    })
+
+    it('names the job in the payload, so the target does not have to parse the name', async () => {
+      const schedules = createFakeScheduleRegistry()
+      await syncSchedules({ db: fixtures.db(), schedules })
+
+      expect(JSON.parse(schedules.current(KEEP_ALIVE_SCHEDULE_NAME)?.payload ?? '{}')).toEqual({
+        job: 'keep-alive',
+      })
+    })
+
+    it('carries a prefix the integration sweep does not recognise', () => {
+      // This is what stops the sweep deleting it, and it is a property of the name rather than a
+      // special case anybody has to remember.
+      expect(KEEP_ALIVE_SCHEDULE_NAME.startsWith(PLATFORM_SCHEDULE_PREFIX)).toBe(true)
+      expect(integrationIdFromScheduleName(KEEP_ALIVE_SCHEDULE_NAME)).toBeUndefined()
+    })
+
+    it('registers the FR-056 alert sweep as a schedule of its own', async () => {
+      // Its own timer rather than a step inside keep-alive, because one of the four conditions it
+      // raises is a seat keep-alive has stopped exercising — an alert that only ran inside the job
+      // it is watching would go quiet in the case it exists for.
+      const schedules = createFakeScheduleRegistry()
+
+      await syncSchedules({ db: fixtures.db(), schedules })
+
+      expect(schedules.current(CREDENTIAL_ALERTS_SCHEDULE_NAME)).toMatchObject({
+        expression: CREDENTIAL_ALERTS_SCHEDULE_EXPRESSION,
+        enabled: true,
+      })
+      expect(
+        JSON.parse(schedules.current(CREDENTIAL_ALERTS_SCHEDULE_NAME)?.payload ?? '{}'),
+      ).toEqual({ job: 'credential-alerts' })
+      expect(integrationIdFromScheduleName(CREDENTIAL_ALERTS_SCHEDULE_NAME)).toBeUndefined()
+    })
+
+    it('looks more often than the idle threshold it is protecting', () => {
+      // The cadence and `SISYPHUS_KEEPALIVE_IDLE_HOURS` are different numbers: the threshold says
+      // how stale a credential may get, this says how often the platform looks. A cadence coarser
+      // than the threshold would let a credential sit a whole extra interval past it.
+      expect(KEEP_ALIVE_SCHEDULE_EXPRESSION).toBe('rate(1 hour)')
+    })
+
+    it('records a platform schedule the registry refused rather than abandoning the sweep', async () => {
+      const schedules = createFakeScheduleRegistry()
+      const refusing = {
+        ...schedules,
+        upsert: (definition: { readonly name: string }) =>
+          definition.name === KEEP_ALIVE_SCHEDULE_NAME
+            ? Promise.reject(new Error('Scheduler refused'))
+            : schedules.upsert(definition as never),
+      }
+      await fixtures.seedIntegration()
+
+      const result = await syncSchedules({ db: fixtures.db(), schedules: refusing })
+
+      expect(result.platform).toEqual([CREDENTIAL_ALERTS_SCHEDULE_NAME])
+      expect(result.platformErrors).toHaveLength(1)
+      expect(result.platformErrors[0]).toContain('Scheduler refused')
+      // Counted as a failure, because a keep-alive timer that is not there is the one that ends in
+      // an expired pool — and the integrations still got their schedules.
+      expect(result.failures).toBe(1)
+      expect(result.actions.filter((action) => action.action === 'registered')).toHaveLength(1)
+    })
   })
 
   it('records a failing row rather than abandoning the sweep', async () => {
@@ -244,7 +345,10 @@ describeWithDatabase('syncSchedules against a live database (T118, FR-100, FR-15
     await removeSchedule(schedules, integration.id)
     await removeSchedule(schedules, integration.id)
 
-    expect(await schedules.list()).toEqual([])
+    expect(await schedules.list()).toEqual([
+      CREDENTIAL_ALERTS_SCHEDULE_NAME,
+      KEEP_ALIVE_SCHEDULE_NAME,
+    ])
   })
 
   it('reports through the uniform job envelope', async () => {

@@ -58,10 +58,12 @@ import type { AgentAdapter, AgentFrame, AgentUsage } from '../agent'
 import type { BootstrapPhaseReporter, BundleArchiveStore } from '../bootstrap'
 import type { CapEnforcer } from '../caps'
 import { createCapEnforcer } from '../caps'
+import type { RotationWatch } from '../credential'
+import { watchForRotation } from '../credential'
 import type { WorkflowJobEnvelope } from '../job-envelope'
 import { capLimitsFrom } from '../job-envelope'
 import type { KnownSecret, SanitisedText, SegmentStore, SegmentWriter } from '../output'
-import { createSegmentWriter, sanitise } from '../output'
+import { createSecretRegistry, createSegmentWriter, sanitise } from '../output'
 import type { MachineSurfaceClient } from '../report'
 import type { ShutdownRegistry } from '../runtime'
 import type {
@@ -270,6 +272,15 @@ interface RunningState {
 export const runExecutor = async (options: RunExecutorOptions): Promise<ExecutorRunResult> => {
   const { client, envelope, workspaceRoot } = options
   const secrets = options.secrets ?? []
+  /**
+   * Every value this run must keep out of its log (003/FR-014, SC-014).
+   *
+   * Seeded with the bundle's credentials and **grown** by two things that happen later: bootstrap
+   * phase `credential_install`, and every rotation the agent makes while it works. It is handed to
+   * the segment writer as a source rather than as an array precisely because of the second — the
+   * writer is built here, in step 1, before either of them has happened.
+   */
+  const secretRegistry = createSecretRegistry(secrets)
   const running: RunningState = { state: 'provisioning' }
 
   const caps = createCapEnforcer({
@@ -285,7 +296,7 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
     workflowId: envelope.workflowId,
     store: options.segments,
     reporter: client,
-    ...(secrets.length === 0 ? {} : { secrets }),
+    secrets: secretRegistry.current,
   })
 
   const log = async (line: string): Promise<void> => {
@@ -327,6 +338,7 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
   )
 
   let bootstrapped: BootstrappedRun | undefined
+  let rotations: RotationWatch | undefined
   let poller: SupervisionPoller | undefined
   let polling: Promise<void> | undefined
   let watching: Promise<InterruptionWatchResult> | undefined
@@ -346,6 +358,9 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
       workspaceRoot,
       reporter,
       adapter: options.adapter,
+      // Phase 5a. Direct on the client, because its whole value is the response (003/FR-012).
+      credentials: { fetchAgentCredential: async () => client.fetchAgentCredential() },
+      credentialSecrets: secretRegistry,
       ...(secrets.length === 0 ? {} : { secrets }),
       onSetupOutput: (text) => {
         void log(text)
@@ -353,6 +368,35 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
     })
 
     running.state = 'running'
+
+    // Armed the moment the material is on disk, so a rotation made during the very first turn is
+    // written through rather than waiting for a teardown that may never come (003/FR-030, R3). The
+    // fence is the credential's value as at the fetch, which is the only value a write is judged
+    // against.
+    rotations = watchForRotation({
+      path: bootstrapped.credential.path,
+      fence: bootstrapped.credential.fence,
+      secrets: secretRegistry,
+      reporter: {
+        reportCredentialRotation: async (input) => client.reportCredentialRotation(input),
+      },
+      onRotationReported: () => {
+        // The event, never the value.
+        void log('[credential] the agent rotated its login; the new material has been stored\n')
+      },
+      onClaimLost: () => {
+        void log(
+          '[credential] this run’s claim on its agent credential has been superseded, so ' +
+            'rotations are no longer being written through (FR-020)\n',
+        )
+      },
+      onFailure: (error, detail) => {
+        options.onReportingFailure?.(error, detail)
+      },
+      // `installedMaterial` is deliberately not supplied: `BootstrappedRun` carries identifiers and
+      // a path and never the bytes (FR-012), and the cost of that is one request at the first flush
+      // answered `not_newer` — which is precisely the case that rejection exists for.
+    })
 
     // The agent's frames become the run's log. Started here rather than at construction because
     // `output` is a single-consumer stream and there is nothing on it until the agent is up.
@@ -375,6 +419,11 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
       snapshot: options.snapshots,
       sessionId: envelope.sessionId,
       workspaceRoot,
+      // One flush, for pause, stop and spot interruption alike, because `suspend()` is the single
+      // routine all three reach (003/FR-030, T060). Written here rather than at the three call
+      // sites for exactly the reason `session/interruption.ts` gives about the rest of the
+      // suspension: a second copy would be the one nobody exercised.
+      flushCredentialRotation: async () => rotations?.flush(),
       ...(options.parkBudget === undefined ? {} : { parkBudget: options.parkBudget }),
       registerSnapshot: async (registration) => {
         await client.registerSnapshot({
@@ -394,7 +443,7 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
       onParked: createParkReporter({
         client,
         log,
-        ...(secrets.length === 0 ? {} : { secrets }),
+        secrets: secretRegistry.current,
         ...(options.onReportingFailure === undefined
           ? {}
           : { onReportingFailure: options.onReportingFailure }),
@@ -408,8 +457,10 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
           const paused = await suspend({ ...suspension, reason: 'pause' })
           running.suspension = paused
           running.state = 'paused'
-          // The pause plan says `on-idle-ceiling` and this is the thing that eventually acts on
-          // it. Started from the suspension's own timestamp, not from here (FR-049, US2 §4).
+          // The pause plan releases no compute of its own, and since 003/FR-039 the control plane
+          // stops this instance from outside. The ceiling stays armed as the backstop for the case
+          // where that stop never comes — see `session/idle-ceiling.ts`. Started from the
+          // suspension's own timestamp, not from here (FR-049, US2 §4).
           pauseIdle.begin(paused.suspendedAt)
         },
         onStop: async () => {
@@ -525,6 +576,15 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
     poller?.stop()
     pauseIdle.cancel()
 
+    // The last chance to persist a rotation. A run that ended by finishing never went through
+    // `suspend()`, so this is the only flush it gets — and a rotation made during the final turn is
+    // as much a bricked seat as one made before a pause (003/FR-030, FR-032; the surface accepts a
+    // rotation whose workflow has already terminated, provided the fence is current).
+    await rotations?.flush().catch((error: unknown) => {
+      options.onReportingFailure?.(error, 'flushing a credential rotation')
+    })
+    rotations?.stop()
+
     await polling?.catch((error: unknown) => {
       options.onReportingFailure?.(error, 'the supervision loop')
     })
@@ -537,7 +597,7 @@ export const runExecutor = async (options: RunExecutorOptions): Promise<Executor
 
   running.state = outcome
   const usage = usageOf()
-  const sanitisedReason = sanitise(reason, secrets.length === 0 ? {} : { secrets })
+  const sanitisedReason = sanitise(reason, { secrets: secretRegistry.current })
 
   try {
     await segmentWriter.flush()

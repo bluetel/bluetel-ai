@@ -302,6 +302,75 @@ describeWithDatabase('the supervision queue against a live database', () => {
     ).toStrictEqual([])
   })
 
+  it('cancels a run waiting for an agent credential here and now (003/FR-027)', async () => {
+    // The one state a stop is *applied* rather than queued. A waiting run has no executor and will
+    // not have one until it is granted a seat, so a queued stop would sit uncollected for the whole
+    // wait — and the platform would then provision an instance for a run somebody cancelled an hour
+    // earlier. FR-027 requires the opposite: it terminates without ever provisioning one.
+    const owner = await fixture.seedUser('waiting-owner')
+    const workflowId = await fixture.seedWorkflow({
+      ownerUserId: owner.id,
+      state: 'awaiting_credential',
+    })
+    const scope = await fixture.scopeFor(owner.id)
+
+    const result = await requestSupervisionCommand({
+      db: fixture.db(),
+      scope,
+      userId: owner.id,
+      workflowId,
+      command: 'stop',
+    })
+
+    expect(result).toMatchObject({ applied: true, command: 'stop', outcome: 'acknowledged' })
+    expect(await stateOf(workflowId)).toBe('cancelled')
+
+    const [row] = await fixture.db().select().from(workflows).where(eq(workflows.id, workflowId))
+    expect(row.terminalOutcome).toBe('cancelled')
+    // The record says what happened *and* that nothing was held — the two halves of FR-027.
+    expect(row.outcomeReason).toMatch(/waiting for an agent credential/)
+    expect(row.outcomeReason).toMatch(/no instance was ever provisioned/i)
+
+    // The command row is written already acknowledged, so no executor ever collects it.
+    const commands = await fixture
+      .db()
+      .select()
+      .from(supervisionCommands)
+      .where(eq(supervisionCommands.workflowId, workflowId))
+    expect(commands).toHaveLength(1)
+    expect(commands[0]).toMatchObject({ command: 'stop', deliveryOutcome: 'acknowledged' })
+    expect(
+      await pullPendingSupervisionCommands(fixture.machineContextFor(workflowId)),
+    ).toStrictEqual([])
+
+    // And the cancellation is on the timeline, attributed to the person who pressed it.
+    const events = await fixture
+      .db()
+      .select({ event: workflowEvents.event, actorUserId: workflowEvents.actorUserId })
+      .from(workflowEvents)
+      .where(eq(workflowEvents.workflowId, workflowId))
+    expect(events).toMatchObject([{ event: 'cancelled', actorUserId: owner.id }])
+  })
+
+  it('still queues a stop for a running workflow, which has an executor to apply it', async () => {
+    // The narrowness is the point: the immediate cancellation above is for the one state where no
+    // executor exists. A running run's stop must still go through the collect-and-acknowledge loop,
+    // or the panel would claim a run had stopped while its agent was still mid-turn.
+    const { ownerId, workflowId } = await runningWorkflow('still-queued-owner')
+    const scope = await fixture.scopeFor(ownerId)
+
+    const result = await requestSupervisionCommand({
+      db: fixture.db(),
+      scope,
+      userId: ownerId,
+      workflowId,
+      command: 'stop',
+    })
+
+    expect(result).toMatchObject({ outcome: 'pending' })
+    expect(await stateOf(workflowId)).toBe('running')
+  })
+
   it('lets a parked run be resumed — the one exception to the terminal refusal (FR-151)', async () => {
     const owner = await fixture.seedUser('parked-owner')
     const workflowId = await fixture.seedWorkflow({

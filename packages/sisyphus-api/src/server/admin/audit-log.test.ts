@@ -150,6 +150,8 @@ describe('audit vocabularies', () => {
       'user',
       'profile_access_grant',
       'workflow',
+      'agent_credential',
+      'credential_group',
     ])
   })
 
@@ -157,6 +159,87 @@ describe('audit vocabularies', () => {
     for (const action of ['registered', 'replaced', 'enabled', 'disabled'] as const) {
       expect(AUDITED_ACTIONS).toContain(action)
     }
+  })
+
+  /**
+   * 003/FR-058 and 003/FR-067: the credential pool's vocabulary.
+   *
+   * All four actions land here in one change even though only some have writers yet, so the trail
+   * cannot acquire two spellings of the same event across the three later phases that write them.
+   * A divergence would be invisible to every test — both spellings are valid `text` — and visible
+   * only to somebody searching the table with the wrong word.
+   */
+  it('covers the credential entities the pool records against (003/FR-004, 003/FR-067)', () => {
+    expect(AUDITED_ENTITY_TYPES).toContain('agent_credential')
+    expect(AUDITED_ENTITY_TYPES).toContain('credential_group')
+  })
+
+  it('covers every lease event and credential state change (003/FR-058)', () => {
+    for (const action of ['leased', 'released', 'force_released', 'state_changed'] as const) {
+      expect(AUDITED_ACTIONS).toContain(action)
+    }
+  })
+
+  it('keeps a forced release distinct from an ordinary one', () => {
+    // A seat that came free because its run finished and a seat taken off a run are different
+    // events. Collapsed into one word, the trail could not answer "was anything forced?".
+    expect(AUDITED_ACTIONS).toContain('released')
+    expect(AUDITED_ACTIONS).toContain('force_released')
+  })
+
+  it('needs no migration to widen, because both columns are text', () => {
+    // `configuration_audit.entity_type` and `.action` are `text('…')` in `db/schema/notify.ts`,
+    // not `pgEnum`s — so these tuples are closed in TypeScript and open in Postgres. Asserted
+    // rather than assumed: the day either column became an enum, this test is what would say so.
+    expect(configurationAudit.entityType.getSQLType()).toBe('text')
+    expect(configurationAudit.action.getSQLType()).toBe('text')
+    expect(configurationAudit.entityType.enumValues).toBeUndefined()
+    expect(configurationAudit.action.enumValues).toBeUndefined()
+  })
+})
+
+describe('recording a credential change', () => {
+  it('writes a lease acquisition against the credential, naming the workflow (003/FR-058)', async () => {
+    const { writer, values } = createInsertWriter()
+
+    await recordConfigurationChange(writer, {
+      actorUserId: null,
+      entityType: 'agent_credential',
+      entityId: 'credential-1',
+      action: 'leased',
+      detail: { workflowId: 'workflow-1', fence: 4 },
+    })
+
+    // `actorUserId` is null because a workflow reservation has no human behind it — the same
+    // reading FR-174's bootstrap reconcile gets. The holder is in `detail`, where it belongs.
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: null,
+        entityType: 'agent_credential',
+        action: 'leased',
+        detail: { workflowId: 'workflow-1', fence: 4 },
+      }),
+    )
+  })
+
+  it('records an attachment change against the group, naming the profile (003/FR-067)', async () => {
+    const { writer, values } = createInsertWriter()
+
+    await recordConfigurationChange(writer, {
+      actorUserId: 'admin-1',
+      entityType: 'credential_group',
+      entityId: 'group-1',
+      action: 'updated',
+      detail: { executionProfileId: 'profile-1', position: 2 },
+    })
+
+    expect(values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: 'admin-1',
+        entityType: 'credential_group',
+        entityId: 'group-1',
+      }),
+    )
   })
 })
 

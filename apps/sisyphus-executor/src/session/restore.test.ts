@@ -3,10 +3,11 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import process from 'node:process'
 import { promisify } from 'node:util'
 
 import { afterEach, describe, expect, it } from 'vitest'
+
+import { gitFixtureEnvironment } from '../git-fixture-environment'
 
 import { sessionLogDirectory } from './conversation-log'
 import {
@@ -38,17 +39,15 @@ const run = promisify(execFile)
 const PREDECESSOR_SESSION = '0199a1f4-0000-7000-8000-0000000000a1'
 const SUCCESSOR_SESSION = '0199a1f4-0000-7000-8000-0000000000b2'
 
-const gitEnv = {
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
-  GIT_AUTHOR_NAME: 'restore-test',
-  GIT_AUTHOR_EMAIL: 'restore@example.invalid',
-  GIT_COMMITTER_NAME: 'restore-test',
-  GIT_COMMITTER_EMAIL: 'restore@example.invalid',
-}
+/**
+ * The child's whole environment, composed rather than merged over `process.env` — see
+ * `../git-fixture-environment.ts`. An inherited `GIT_DIR`, which is what git exports into a hook
+ * process, would have every `git` call below operate on the repository the hook is running in.
+ */
+const gitEnv = gitFixtureEnvironment()
 
 const git = async (cwd: string, args: readonly string[]): Promise<string> => {
-  const { stdout } = await run('git', [...args], { cwd, env: { ...process.env, ...gitEnv } })
+  const { stdout } = await run('git', [...args], { cwd, env: gitEnv })
 
   return stdout
 }

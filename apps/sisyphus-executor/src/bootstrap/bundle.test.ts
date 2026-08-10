@@ -151,6 +151,13 @@ describe('phases 2–5 — the happy path', () => {
     expect(result.notes).toContain(SETUP_SCRIPT_IDEMPOTENCY_NOTE)
     expect(SETUP_SCRIPT_IDEMPOTENCY_NOTE).toContain('idempotent')
     expect(SETUP_SCRIPT_IDEMPOTENCY_NOTE).toContain('restores a snapshot')
+    // 003/FR-048. The note still asks for the repository-host and third-party
+    // credentials to be reinstalled on every boot — those really are excluded
+    // from snapshots and the bundle really is how they come back — and it now
+    // tells an author not to install the agent's own login, which the platform
+    // installs from its pool in a later phase.
+    expect(SETUP_SCRIPT_IDEMPOTENCY_NOTE).toContain('repository-host')
+    expect(SETUP_SCRIPT_IDEMPOTENCY_NOTE).toContain('FR-048')
   }, 30_000)
 
   it('redacts a credential setup.sh echoed, before it leaves the phase (FR-089)', async () => {
@@ -188,6 +195,95 @@ describe('phases 2–5 — the happy path', () => {
 
     await runBundleBootstrap(options)
     await expect(runBundleBootstrap(options)).resolves.toBeDefined()
+  }, 30_000)
+})
+
+/**
+ * **003/T062, FR-048, FR-052 — superseding `002/FR-043` and `002/FR-075`.**
+ *
+ * A bundle validation run exercises phases 2–5 and stops. It never reaches
+ * `credential_install` and never reaches `agent_start`, which is exactly why
+ * proving a bundle can consume no pool capacity — and the property that makes
+ * that true is a negative one: nothing in these four phases asks for, receives,
+ * or fails without an agent credential.
+ *
+ * The bundle may still legitimately install *other* credentials — the
+ * repository-host credential `run/forge-credential.ts` reads back out of git,
+ * and whatever third-party material `contracts/setup-bundle.md` lets it put
+ * under `.agent-config/credentials/`. FR-048 is about the agent's own login and
+ * nothing else, so the first test below installs a non-agent credential and
+ * asserts it is untouched.
+ */
+describe('phases 2–5 without any agent credential (003/FR-048, FR-052)', () => {
+  it('completes, and leaves the bundle’s own non-agent credentials alone', async () => {
+    const configDir = join(await scratch(), '.agent-config')
+    const archive = await buildArchive({
+      'setup.sh': {
+        // What a bundle still does: install the CLI's configuration and the
+        // repository-host credential. It installs no agent login.
+        body:
+          '#!/bin/sh\n' +
+          'mkdir -p "$SISYPHUS_AGENT_CONFIG_DIR/credentials"\n' +
+          'printf %s "not-a-real-forge-credential-0001" > ' +
+          '"$SISYPHUS_AGENT_CONFIG_DIR/credentials/forge"\n' +
+          'exit 0\n',
+        mode: 0o755,
+      },
+    })
+    const reporter = recordingReporter()
+    const options = await bootstrapOptions(bundleRef(sha256Hex(archive)), archive, reporter)
+
+    const result = await runBundleBootstrap({ ...options, agentConfigDir: configDir })
+
+    expect(reporter.finished.map((event) => event.phase)).toEqual([
+      'bundle_download',
+      'bundle_verify',
+      'bundle_unpack',
+      'setup_script',
+    ])
+    expect(reporter.finished.every((event) => event.outcome === 'succeeded')).toBe(true)
+    expect(result.setupOutput).toBe('')
+    // The non-agent credential the bundle installed is exactly where it put it.
+    await expect(readFile(join(configDir, 'credentials', 'forge'), 'utf8')).resolves.toBe(
+      'not-a-real-forge-credential-0001',
+    )
+  }, 30_000)
+
+  it('never reports credential_install, because validation does not reach it (FR-052)', async () => {
+    const archive = await buildArchive({ 'setup.sh': { body: SUCCESSFUL_SETUP, mode: 0o755 } })
+    const reporter = recordingReporter()
+
+    await runBundleBootstrap(
+      await bootstrapOptions(bundleRef(sha256Hex(archive)), archive, reporter),
+    )
+
+    const phases = reporter.finished.map((event) => event.phase)
+
+    expect(phases).not.toContain('credential_install')
+    expect(phases).not.toContain('agent_start')
+  }, 30_000)
+
+  it('takes no option by which an agent credential could be supplied', async () => {
+    const archive = await buildArchive({ 'setup.sh': { body: SUCCESSFUL_SETUP, mode: 0o755 } })
+    const options = await bootstrapOptions(
+      bundleRef(sha256Hex(archive)),
+      archive,
+      nullPhaseReporter,
+    )
+
+    // `secrets` carries values for *redaction* and nothing installs from it;
+    // there is no `agentCredential`, no `material` and no fetch port anywhere on
+    // this surface. That absence is what makes "a validation run consumes no
+    // pool capacity" structural rather than a promise.
+    expect(Object.keys(options).sort()).toStrictEqual([
+      'agentConfigDir',
+      'bundle',
+      'bundleDir',
+      'reporter',
+      'store',
+      'workflowId',
+      'workspaceRoot',
+    ])
   }, 30_000)
 })
 

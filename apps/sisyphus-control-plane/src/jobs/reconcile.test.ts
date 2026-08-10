@@ -1,12 +1,21 @@
-import { computeLeases, sessionSnapshots, workflowEvents } from '@bluetel-ai/sisyphus-api/db'
+import type { Workflow } from '@bluetel-ai/sisyphus-api/db'
+import {
+  computeLeases,
+  sessionSnapshots,
+  workflowEvents,
+  workflows,
+} from '@bluetel-ai/sisyphus-api/db'
 import { createFakeWorkflowNotifier } from '@bluetel-ai/sisyphus-notify'
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import { createFakeComputeProvisioner } from '../aws'
 import { liveCredentialFor, mintScopedCredential } from '../credentials'
+import { createCredentialPoolFixtures } from '../credentials/allocate/pool-fixtures'
 
+import { admitWorkflow } from './admit-workflow'
 import { validationInstanceTag } from './instance-tag'
+import type { ReconcileResult } from './reconcile'
 import {
   HEARTBEAT_LAPSE_MS,
   PAUSE_IDLE_CEILING_MS,
@@ -443,6 +452,26 @@ describeWithDatabase('reconciling reality against recorded state', () => {
   })
 
   describe('leaves a healthy run alone', () => {
+    it('does not sweep a run waiting for an agent credential (003/FR-024, FR-025)', async () => {
+      // The trap in adding `awaiting_credential` to the platform's vocabulary. A waiting run holds
+      // no compute lease *by design* — that is the entire point of the state, and SC-004 measures
+      // it — so a sweep that judged it by the "no live compute lease" rule above would fail every
+      // waiter on the first pass after it started waiting, telling its owner that an instance it
+      // was never given had gone away. The FR-028 limit is what ends a wait, and it lives in
+      // `drain-queue.ts` with the clock and the reason.
+      const workflowId = await fixtures.seedWorkflow({
+        label: 'waiting-for-credential',
+        state: 'awaiting_credential',
+      })
+
+      const result = await sweep()
+
+      expect(result.moved).toStrictEqual([])
+      expect(await fixtures.stateOf(workflowId)).toBe('awaiting_credential')
+      // Nor counted as healthy: this direction does not look at it at all.
+      expect(result.healthy).toBe(0)
+    })
+
     it('does not sweep a run mid-provision that has never sent a heartbeat', async () => {
       const workflowId = await runHoldingCompute({
         label: 'provisioning',
@@ -751,4 +780,546 @@ describeWithDatabase('reconciling reality against recorded state', () => {
     expect(result.released.map((lease) => lease.workflowId)).toStrictEqual([finished])
     expect(result.moved.map((move) => move.workflowId)).toStrictEqual([abandoned])
   })
+})
+
+/**
+ * FR-022 — the stranded-seat sweep (T049).
+ *
+ * The assertion that matters most in this file is the negative one: **the sweep does not touch a
+ * lease held by a `paused` or `parked_resumable` workflow.** Getting it wrong silently steals seats
+ * from runs that are legitimately holding them, and it is the easy mistake to make, because
+ * `parked_resumable` is a terminal outcome — so the naive "is the run over?" test that is right for
+ * a compute lease is wrong here.
+ *
+ * The positives are the ones SC-015 is phrased over: a live lease whose workflow is terminal, or
+ * gone, is released within one interval, as `forced`, attributed to the sweep and not to a person.
+ */
+describeWithDatabase('sweeping seats no run is left to hand back (FR-022, SC-015)', () => {
+  const pool = createCredentialPoolFixtures(connectionString ?? '')
+
+  beforeAll(() => pool.open(), 60_000)
+  afterAll(() => pool.close())
+
+  afterEach(async () => {
+    await pool.db().delete(computeLeases)
+    // The FK first, then the rows: `workflows.current_snapshot_id` points at what the retention
+    // tests seed, and the sweep under test reads exactly that column.
+    await pool.db().update(workflows).set({ currentSnapshotId: null })
+    await pool.db().delete(sessionSnapshots)
+    await pool.clearLeases()
+  })
+
+  /**
+   * Give a run a current snapshot that stops being retained at the given instant.
+   *
+   * `expires_at` is the whole of FR-073's second clause: it is the moment a parked run stops being
+   * resumable, and therefore the moment the seat it was holding for a resume is holding it for
+   * nothing.
+   */
+  const snapshotExpiring = async (workflowId: string, expiresAt: Date): Promise<void> => {
+    const snapshot = firstRow(
+      await pool
+        .db()
+        .insert(sessionSnapshots)
+        .values({
+          workflowId,
+          sessionId: crypto.randomUUID(),
+          s3Key: `snapshots/${workflowId}/park.tar.zst`,
+          sizeBytes: 4_096,
+          boundary: 'pause',
+          hasConversationState: true,
+          hasWorktreeState: true,
+          isCurrent: true,
+          expiresAt,
+        })
+        .returning({ id: sessionSnapshots.id }),
+    )
+
+    await pool
+      .db()
+      .update(workflows)
+      .set({ currentSnapshotId: snapshot?.id ?? null })
+      .where(eq(workflows.id, workflowId))
+  }
+
+  /** A run in the given state, holding a seat taken through the real admission path. */
+  const runHoldingASeat = async (options: {
+    readonly label: string
+    readonly state: Workflow['state']
+  }): Promise<{ readonly workflowId: string; readonly agentCredentialId: string }> => {
+    const credentialGroupId = await pool.seedGroup({ label: `${options.label}-group` })
+    const agentCredentialId = await pool.seedCredential({
+      label: `${options.label}-cred`,
+      credentialGroupId,
+    })
+    const executionProfileId = await pool.seedProfile({
+      label: `${options.label}-profile`,
+      groups: [{ credentialGroupId, position: 1 }],
+    })
+    const workflowId = await pool.seedWorkflow({
+      label: options.label,
+      executionProfileId,
+      state: 'queued',
+    })
+
+    // Through admission, so the seat under test is one the production path took — and the compute
+    // lease it takes is deliberately left in place: a live run without one reads to direction two
+    // as a run whose instance vanished, and this suite would then be testing that path instead.
+    await admitWorkflow({ db: pool.db(), workflowId, ceiling: 16 })
+    await pool
+      .db()
+      .update(workflows)
+      .set({ state: options.state })
+      .where(eq(workflows.id, workflowId))
+
+    return { workflowId, agentCredentialId }
+  }
+
+  const sweep = async (): Promise<ReconcileResult> =>
+    reconcile({ db: pool.db(), compute: createFakeComputeProvisioner(), now: () => NOW })
+
+  it('does not touch a seat held by a paused or parked workflow', async () => {
+    // The assertion this whole task turns on. A pause holds its instance and a park holds its
+    // identity so FR-151 can resume onto it; both are live claims by design, and `parked_resumable`
+    // is nevertheless a terminal outcome, so a sweep judging by
+    // the terminal enum alone takes both.
+    const paused = await runHoldingASeat({ label: 'sweep-paused', state: 'paused' })
+    const parked = await runHoldingASeat({ label: 'sweep-parked', state: 'parked_resumable' })
+
+    const result = await sweep()
+
+    expect(result.releasedSeats).toStrictEqual([])
+    expect(await pool.liveLeases()).toHaveLength(2)
+    expect(await pool.credential(paused.agentCredentialId)).toMatchObject({ state: 'held' })
+    expect(await pool.credential(parked.agentCredentialId)).toMatchObject({ state: 'held' })
+
+    // And nothing was written about either: a `force_released` entry for a seat still held would be
+    // worse than the silence, because it would be a trail that cannot be believed.
+    expect(await pool.auditFor(paused.agentCredentialId)).toMatchObject([{ action: 'leased' }])
+    expect(await pool.auditFor(parked.agentCredentialId)).toMatchObject([{ action: 'leased' }])
+  }, 60_000)
+
+  it('releases the seat of a parked run whose snapshot passed its retention period (FR-073)', async () => {
+    // The one path by which a parked run's seat comes back. Nothing else is looking: the run is
+    // already terminal, so no state change is coming and no executor is left to report one, and the
+    // pool view would go on showing a `parked` holder for a resume that can never happen.
+    const { agentCredentialId, workflowId } = await runHoldingASeat({
+      label: 'park-expired',
+      state: 'parked_resumable',
+    })
+    await snapshotExpiring(workflowId, ago(60_000))
+
+    const result = await sweep()
+
+    expect(result.releasedSeats).toMatchObject([
+      {
+        workflowId,
+        agentCredentialId,
+        workflowState: 'parked_resumable',
+        credentialState: 'available',
+      },
+    ])
+    expect(result.releasedSeats[0].reason).toContain('stopped being retained')
+
+    // The run's own state is left exactly where it was. `parked_resumable` is already the outcome
+    // in force and FR-064 allows one; rewriting it to `failed` would recast a run that parked in an
+    // orderly way as one that broke. What changed is that the platform stopped holding the option.
+    expect(
+      firstRow(
+        await pool
+          .db()
+          .select({ state: workflows.state })
+          .from(workflows)
+          .where(eq(workflows.id, workflowId)),
+      ),
+    ).toMatchObject({ state: 'parked_resumable' })
+    expect(await pool.credential(agentCredentialId)).toMatchObject({
+      state: 'available',
+      heldBy: null,
+    })
+  }, 60_000)
+
+  it('keeps the seat of a parked run whose snapshot is still retained', async () => {
+    // The other half of FR-073, and the half that costs a seat: while the snapshot is retained the
+    // run can still be resumed, and it must resume under the identity it already holds (SC-018).
+    const { agentCredentialId, workflowId } = await runHoldingASeat({
+      label: 'park-retained',
+      state: 'parked_resumable',
+    })
+    await snapshotExpiring(workflowId, new Date(NOW.getTime() + 60_000))
+
+    const result = await sweep()
+
+    expect(result.releasedSeats).toStrictEqual([])
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'held' })
+  }, 60_000)
+
+  it('does not touch a seat held by a run that is still alive, in any state', async () => {
+    // `awaiting_credential` is the one worth naming: a seat just granted to a waiter is a live
+    // lease whose workflow is not yet `provisioning`, and a sweep reading that as "not running"
+    // would take back the grant it had come to make possible.
+    const waiting = await runHoldingASeat({
+      label: 'sweep-waiting',
+      state: 'awaiting_credential',
+    })
+    const running = await runHoldingASeat({ label: 'sweep-running', state: 'running' })
+
+    const result = await sweep()
+
+    expect(result.releasedSeats).toStrictEqual([])
+    expect(await pool.credential(waiting.agentCredentialId)).toMatchObject({ state: 'held' })
+    expect(await pool.credential(running.agentCredentialId)).toMatchObject({ state: 'held' })
+  }, 60_000)
+
+  it('releases a seat whose run is terminal, as `forced` and attributed to the sweep', async () => {
+    const { workflowId, agentCredentialId } = await runHoldingASeat({
+      label: 'sweep-failed',
+      state: 'failed',
+    })
+
+    const result = await sweep()
+
+    expect(result.releasedSeats).toMatchObject([
+      { workflowId, agentCredentialId, workflowState: 'failed', credentialState: 'available' },
+    ])
+    expect(result.releasedSeats[0].reason).toContain('the seat outlived the run')
+
+    // The attribution. FR-057 records an administrator's force-release against that administrator;
+    // this is the platform tidying up after a run that is not there to do it, and the null actor on
+    // the `force_released` entry is exactly what distinguishes the two (FR-058, SC-015).
+    expect(await pool.auditFor(agentCredentialId)).toMatchObject([
+      { action: 'leased', actorUserId: null },
+      { action: 'force_released', actorUserId: null, detail: { releaseReason: 'forced' } },
+    ])
+
+    const [lease] = await pool.leases()
+    expect(lease).toMatchObject({ releaseReason: 'forced', releasedByUserId: null })
+    expect(await pool.credential(agentCredentialId)).toMatchObject({
+      state: 'available',
+      heldBy: null,
+    })
+  }, 60_000)
+
+  it('releases a seat in the same pass that declared its run dead, not the next one', async () => {
+    // SC-015 is phrased in reconciliation intervals, so a seat freed one pass later than the run it
+    // belonged to would be a seat held for twice as long as the criterion allows.
+    const credentialGroupId = await pool.seedGroup({ label: 'same-pass-group' })
+    const agentCredentialId = await pool.seedCredential({
+      label: 'same-pass-cred',
+      credentialGroupId,
+    })
+    const executionProfileId = await pool.seedProfile({
+      label: 'same-pass-profile',
+      groups: [{ credentialGroupId, position: 1 }],
+    })
+    const workflowId = await pool.seedWorkflow({
+      label: 'same-pass',
+      executionProfileId,
+      state: 'queued',
+    })
+
+    await admitWorkflow({ db: pool.db(), workflowId, ceiling: 16 })
+    await pool
+      .db()
+      .update(computeLeases)
+      .set({ providerInstanceId: 'i-same-pass', requestedAt: ago(PROVISIONING_GRACE_MS * 2) })
+      .where(eq(computeLeases.workflowId, workflowId))
+    await pool
+      .db()
+      .update(workflows)
+      .set({ state: 'provisioning' })
+      .where(eq(workflows.id, workflowId))
+
+    // The instance never came up: direction two fails the run, direction one releases its compute,
+    // and the seat sweep — which runs last, on a re-read — catches it in the same pass.
+    const result = await sweep()
+
+    expect(result.moved.map((move) => move.to)).toStrictEqual(['failed'])
+    expect(result.releasedSeats.map((seat) => seat.agentCredentialId)).toStrictEqual([
+      agentCredentialId,
+    ])
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'available' })
+  }, 60_000)
+
+  it('does not repair a credential that fell ill while it was held (FR-033)', async () => {
+    const { agentCredentialId } = await runHoldingASeat({
+      label: 'sweep-unwell',
+      state: 'cancelled',
+    })
+
+    await pool.execute(
+      `update agent_credentials set state = 'cooling_off' where id = '${agentCredentialId}'`,
+    )
+
+    const result = await sweep()
+
+    // Freed, but no capacity added — which is why the seat's own record carries the state it landed
+    // in rather than leaving a reader to infer `available` from the word "released".
+    expect(result.releasedSeats).toMatchObject([
+      { agentCredentialId, credentialState: 'cooling_off' },
+    ])
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'cooling_off' })
+  }, 60_000)
+
+  it('drains the queue after freeing a seat, even when it freed no compute', async () => {
+    // A seat is capacity as much as a slot is, and Phase 6's grant path hangs off the drain — so a
+    // pass that released only seats still has a queue worth re-examining.
+    const { workflowId } = await runHoldingASeat({ label: 'sweep-drain', state: 'succeeded' })
+    // No compute to free, so the only thing this pass can hand back is the seat.
+    await pool.db().delete(computeLeases).where(eq(computeLeases.workflowId, workflowId))
+    let drained = 0
+
+    const result = await reconcile({
+      db: pool.db(),
+      compute: createFakeComputeProvisioner(),
+      now: () => NOW,
+      queueDrain: {
+        drain: () => {
+          drained += 1
+          return Promise.resolve()
+        },
+      },
+    })
+
+    expect(result.released).toStrictEqual([])
+    expect(result.releasedSeats).toHaveLength(1)
+    expect(drained).toBe(1)
+  }, 60_000)
+
+  it('is idempotent across passes, freeing each seat exactly once', async () => {
+    const { agentCredentialId } = await runHoldingASeat({
+      label: 'sweep-twice',
+      state: 'succeeded',
+    })
+
+    await sweep()
+    const second = await sweep()
+
+    // The sweep runs on a timer. A second release would append a second `force_released` entry, or
+    // free a seat some later run had since been granted.
+    expect(second.releasedSeats).toStrictEqual([])
+    expect(await pool.auditFor(agentCredentialId)).toHaveLength(2)
+  }, 60_000)
+})
+
+/**
+ * **T086 — the cooling-off return sweep (003/FR-076, FR-078, SC-019).**
+ *
+ * `cooling_off` is the one credential state that is supposed to end without anybody doing anything,
+ * and this is the thing that ends it. Two populations, and the second is the one that would
+ * otherwise be lost for ever: a provider that refuses a quota **without saying when it clears**
+ * leaves nothing to wait on, and a null `cooling_off_until` read as "wait until told" is a seat that
+ * never comes back. FR-078 forbids exactly that.
+ *
+ * The negative assertions are the interesting ones here, as they were for the seat sweep above. A
+ * credential still cooling off must not be returned early, a credential a run is waiting on must
+ * come back as `held` rather than into the pool, and `unhealthy` must be left entirely alone —
+ * returning a broken login to service on a timer is how SC-010 is lost.
+ */
+describeWithDatabase('returning cooling-off seats to the pool (FR-076, FR-078)', () => {
+  const pool = createCredentialPoolFixtures(connectionString ?? '')
+
+  let groupId = ''
+
+  beforeAll(async () => {
+    await pool.open()
+    groupId = await pool.seedGroup({ label: 'cooling' })
+  }, 60_000)
+
+  afterAll(() => pool.close())
+
+  afterEach(async () => {
+    await pool.clearLeases()
+    await pool.execute('delete from agent_credentials')
+  })
+
+  const sweep = async (coolingOffRetryMs?: number): Promise<ReconcileResult> =>
+    reconcile({
+      db: pool.db(),
+      compute: createFakeComputeProvisioner(),
+      now: () => NOW,
+      ...(coolingOffRetryMs === undefined ? {} : { coolingOffRetryMs }),
+    })
+
+  it('returns a credential past the reset time the provider stated', async () => {
+    const agentCredentialId = await pool.seedCredential({
+      label: 'stated-elapsed',
+      credentialGroupId: groupId,
+      state: 'cooling_off',
+      coolingOffUntil: ago(60_000),
+    })
+
+    const result = await sweep()
+
+    expect(result.returnedToPool).toStrictEqual([
+      {
+        agentCredentialId,
+        returnedBecause: 'stated',
+        returnedTo: 'available',
+        reason: expect.stringContaining('stated limit cleared') as string,
+      },
+    ])
+    expect(await pool.credential(agentCredentialId)).toMatchObject({
+      state: 'available',
+      coolingOffUntil: null,
+    })
+  }, 60_000)
+
+  it('leaves a credential whose stated limit has not cleared', async () => {
+    const agentCredentialId = await pool.seedCredential({
+      label: 'stated-pending',
+      credentialGroupId: groupId,
+      state: 'cooling_off',
+      coolingOffUntil: new Date(NOW.getTime() + 600_000),
+    })
+
+    const result = await sweep()
+
+    // Returning it early would offer the seat to a workflow the provider is still refusing, which
+    // is a failed run with nothing in its own history to explain it.
+    expect(result.returnedToPool).toStrictEqual([])
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'cooling_off' })
+  }, 60_000)
+
+  it('retries a credential the provider gave no return time for (FR-078)', async () => {
+    // The population that would otherwise cool off for ever. `updated_at` is the clock — see the
+    // module note for why, and why inventing a `cooling_off_until` would be the worse option.
+    const agentCredentialId = await pool.seedCredential({
+      label: 'unstated',
+      credentialGroupId: groupId,
+      state: 'cooling_off',
+      coolingOffUntil: null,
+    })
+    // An hour before the pinned sweep clock, not before the wall clock: the row's `updated_at` is
+    // when the credential entered `cooling_off`, and the sweep judges it against its own `now`.
+    await pool.execute(
+      `update agent_credentials set updated_at = '${ago(60 * 60_000).toISOString()}' where id = '${agentCredentialId}'`,
+    )
+
+    const result = await sweep(15 * 60_000)
+
+    expect(result.returnedToPool).toMatchObject([
+      { agentCredentialId, returnedBecause: 'unstated', returnedTo: 'available' },
+    ])
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'available' })
+  }, 60_000)
+
+  it('waits out the configured interval before retrying one with no stated time', async () => {
+    const agentCredentialId = await pool.seedCredential({
+      label: 'unstated-fresh',
+      credentialGroupId: groupId,
+      state: 'cooling_off',
+      coolingOffUntil: null,
+    })
+    // Ten minutes before the sweep's clock, against an hour-long interval.
+    await pool.execute(
+      `update agent_credentials set updated_at = '${ago(10 * 60_000).toISOString()}' where id = '${agentCredentialId}'`,
+    )
+
+    const result = await sweep(60 * 60_000)
+
+    expect(result.returnedToPool).toStrictEqual([])
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'cooling_off' })
+  }, 60_000)
+
+  it('gives a seat back to the run that was waiting the limit out, not to the pool (FR-077)', async () => {
+    // The bug this sweep could most easily introduce. That credential is still the run's — FR-023
+    // forbids substituting another — so `available` would put one agent identity in front of a
+    // second workflow while the first was still authenticated as it.
+    const agentCredentialId = await pool.seedCredential({
+      label: 'still-waiting',
+      credentialGroupId: groupId,
+      state: 'cooling_off',
+      heldBy: 'workflow',
+      coolingOffUntil: ago(60_000),
+    })
+
+    const result = await sweep()
+
+    expect(result.returnedToPool).toMatchObject([{ agentCredentialId, returnedTo: 'held' }])
+    expect(await pool.credential(agentCredentialId)).toMatchObject({
+      state: 'held',
+      heldBy: 'workflow',
+    })
+  }, 60_000)
+
+  it('never returns an unhealthy credential, whatever the clock says (SC-010)', async () => {
+    const agentCredentialId = await pool.seedCredential({
+      label: 'broken',
+      credentialGroupId: groupId,
+      state: 'unhealthy',
+      coolingOffUntil: ago(600_000),
+    })
+
+    const result = await sweep()
+
+    // A broken login is not a limit, and no amount of waiting repairs it. Returning it on a timer
+    // would hand it to the next workflow that asked.
+    expect(result.returnedToPool).toStrictEqual([])
+    expect(await pool.credential(agentCredentialId)).toMatchObject({ state: 'unhealthy' })
+  }, 60_000)
+
+  it('records the return as a credential state change (FR-058)', async () => {
+    const agentCredentialId = await pool.seedCredential({
+      label: 'audited',
+      credentialGroupId: groupId,
+      state: 'cooling_off',
+      coolingOffUntil: ago(60_000),
+    })
+
+    await sweep()
+
+    expect(await pool.auditFor(agentCredentialId)).toMatchObject([
+      {
+        action: 'state_changed',
+        actorUserId: null,
+        detail: { from: 'cooling_off', to: 'available' },
+      },
+    ])
+  }, 60_000)
+
+  it('drains the queue, so a returned seat reaches a waiting run in the same pass (FR-076)', async () => {
+    // "Returns to selection automatically" is this line. Without it the credential would be
+    // available and the run waiting for it would sit until the next tick — SC-005 gives it 30
+    // seconds, and a tick is not a guarantee of that.
+    await pool.seedCredential({
+      label: 'drains',
+      credentialGroupId: groupId,
+      state: 'cooling_off',
+      coolingOffUntil: ago(60_000),
+    })
+    let drained = 0
+
+    const result = await reconcile({
+      db: pool.db(),
+      compute: createFakeComputeProvisioner(),
+      now: () => NOW,
+      queueDrain: {
+        drain: () => {
+          drained += 1
+          return Promise.resolve()
+        },
+      },
+    })
+
+    expect(result.returnedToPool).toHaveLength(1)
+    expect(drained).toBe(1)
+  }, 60_000)
+
+  it('is idempotent across passes', async () => {
+    const agentCredentialId = await pool.seedCredential({
+      label: 'twice',
+      credentialGroupId: groupId,
+      state: 'cooling_off',
+      coolingOffUntil: ago(60_000),
+    })
+
+    await sweep()
+    const second = await sweep()
+
+    // The sweep runs on a timer. A second return would append a second `state_changed` entry for a
+    // transition that only happened once.
+    expect(second.returnedToPool).toStrictEqual([])
+    expect(await pool.auditFor(agentCredentialId)).toHaveLength(1)
+  }, 60_000)
 })

@@ -34,7 +34,7 @@
  * proves a park does not stop it.
  */
 
-import type { KnownSecret, SanitisedText } from '../output'
+import type { SanitisedText, SecretSource } from '../output'
 import { sanitise } from '../output'
 import type { MachineSurfaceClient } from '../report'
 import type { ParkReport } from '../session'
@@ -44,8 +44,14 @@ export interface ParkReporterOptions {
   readonly client: Pick<MachineSurfaceClient, 'reportSnapshotPark'>
   /** The run's log stream, so the operator watching output sees it as it happens. */
   readonly log: (line: string) => Promise<void>
-  /** The credentials the setup bundle installed, so a quoted request URL is redacted (FR-072). */
-  readonly secrets?: readonly KnownSecret[]
+  /**
+   * The values this run knows, so a quoted request URL is redacted (FR-072, 003/FR-014).
+   *
+   * A {@link SecretSource} rather than an array, because a park can happen at any point in a run —
+   * including after the agent has rotated its own credential — and a snapshot of the values taken
+   * when this reporter was built would not know the newest one.
+   */
+  readonly secrets?: SecretSource
   /** Reported and never fatal — a lost park report must not cost a snapshot. */
   readonly onReportingFailure?: (error: unknown, detail: string) => void
 }
@@ -71,7 +77,7 @@ export const parkLogLine = (report: ParkReport): string =>
 export const createParkReporter = (
   options: ParkReporterOptions,
 ): ((report: ParkReport) => void) => {
-  const secrets = options.secrets ?? []
+  const secrets = options.secrets
 
   return (report) => {
     // Caught rather than `void`-ed. The run's own `log` swallows its failures, but this seam takes
@@ -81,7 +87,7 @@ export const createParkReporter = (
       options.onReportingFailure?.(error, 'logging a park')
     })
 
-    const detail: SanitisedText = sanitise(report.reason, secrets.length === 0 ? {} : { secrets })
+    const detail: SanitisedText = sanitise(report.reason, secrets === undefined ? {} : { secrets })
 
     // Deliberately not awaited. See the module comment: the caller is a retry loop holding a
     // quiesced agent, and the cost of a lost report is one timeline entry.

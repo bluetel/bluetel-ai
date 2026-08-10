@@ -8,6 +8,8 @@
  * without going through the sanitiser first.
  */
 
+export { AGENT_CREDENTIAL_SECRET_NAME, agentCredentialSecret } from './agent-credential'
+
 export { scanControlTokens } from './control-tokens'
 export type { ControlToken, ControlTokenScan, ControlTokenScanOptions } from './control-tokens'
 
@@ -28,8 +30,11 @@ export { MIN_SECRET_LENGTH, secretEncodings } from './secret-encodings'
 export { redactPatterns, SECRET_PATTERNS } from './secret-patterns'
 export type { SecretPattern } from './secret-patterns'
 
+export { createSecretRegistry } from './secret-registry'
+export type { SecretRegistry } from './secret-registry'
+
 export { buildSecretIndex } from './secret-values'
-export type { KnownSecret, SecretIndex } from './secret-values'
+export type { KnownSecret, SecretIndex, SecretSource } from './secret-values'
 
 export { createSegmentWriter } from './segments'
 export type {

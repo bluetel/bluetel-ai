@@ -74,6 +74,15 @@ export type {
   WriteBackSkipReason,
 } from './connector'
 
+/**
+ * The one threshold three applications enforce independently (003/FR-044, FR-047, FR-049).
+ *
+ * Here rather than in an application for the reason the connector interface is: the executor's
+ * timer, the control plane's backstop sweep and the panel's countdown all need the same number and
+ * none of the three can import either of the others. See `./pause-idle.ts`.
+ */
+export { PAUSE_IDLE_CEILING_MS } from './pause-idle'
+
 export { EXTERNAL_ACTION_KEY_SEPARATOR, externalActionKey, NO_WORKFLOW } from './external-action'
 export type {
   ExternalActionDisposition,

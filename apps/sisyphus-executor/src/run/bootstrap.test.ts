@@ -1,16 +1,28 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import type { AgentAdapter, AgentFrame, AgentStartOptions } from '../agent'
 import type { BootstrapPhaseFinished, BootstrapPhaseReporter } from '../bootstrap'
 import { createFakeArchiveStore, runCommand, sha256Hex } from '../bootstrap'
+import { GIT_FIXTURE_ENVIRONMENT, stripAmbientGitEnvironment } from '../git-fixture-environment'
 import type { WorkflowJobEnvelope } from '../job-envelope'
 import { parseJobEnvelope } from '../job-envelope'
+import { createSecretRegistry, sanitise } from '../output'
 
 import { bootstrapRun, setupBundleReference, workspaceEntries } from './bootstrap'
+
+/**
+ * The leased seat this fixture hands out. Synthetic, and deliberately opaque: research R3 records
+ * that the real on-disk format was never read, so nothing here should imply one.
+ */
+const AGENT_CREDENTIAL = {
+  credentialId: '019fd631-15bf-7a03-a1c6-ff6d568c2670',
+  fence: 4,
+  material: 'not-a-real-agent-credential-0123456789-opaque\n',
+}
 
 /**
  * Bootstrap phases 2–7 in sequence (FR-112, FR-145, FR-146).
@@ -38,14 +50,15 @@ afterEach(async () => {
   )
 })
 
-const GIT_ENV = {
-  GIT_AUTHOR_NAME: 'Sisyphus Test',
-  GIT_AUTHOR_EMAIL: 'test@example.invalid',
-  GIT_COMMITTER_NAME: 'Sisyphus Test',
-  GIT_COMMITTER_EMAIL: 'test@example.invalid',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
-}
+/**
+ * The origin below is a real repository built by real `git`, so the ambient one has to go first —
+ * see `../git-fixture-environment.ts` for what a git hook exports into this process.
+ */
+const restoreGitEnvironment = stripAmbientGitEnvironment()
+
+afterAll(restoreGitEnvironment)
+
+const GIT_ENV = GIT_FIXTURE_ENVIRONMENT
 
 const BASE_BRANCH = 'integration-line'
 
@@ -184,12 +197,16 @@ const harness = async (options: { readonly secondOrigin?: boolean } = {}) => {
   })
   const reporter = recordingReporter()
   const adapter = recordingAdapter()
+  const fetches: number[] = []
+  const credentialSecrets = createSecretRegistry()
 
   return {
     reporter,
     adapter,
     envelope,
     root,
+    fetches,
+    credentialSecrets,
     options: {
       envelope,
       archives: store,
@@ -197,6 +214,14 @@ const harness = async (options: { readonly secondOrigin?: boolean } = {}) => {
       workspaceRoot: root,
       reporter,
       adapter,
+      credentials: {
+        fetchAgentCredential: () => {
+          fetches.push(fetches.length + 1)
+
+          return Promise.resolve(AGENT_CREDENTIAL)
+        },
+      },
+      credentialSecrets,
       bundleDir: join(await scratch(), 'bundle'),
       env: GIT_ENV,
     },
@@ -214,6 +239,10 @@ describe('bootstrapRun', () => {
       'bundle_verify',
       'bundle_unpack',
       'setup_script',
+      // After the bundle, because the bundle is what puts the agent CLI on the box; before the
+      // checkout, because there is no reason to clone anything for a run that cannot authenticate
+      // (003/FR-049).
+      'credential_install',
       'entry_checkout',
       'agent_start',
     ])
@@ -254,8 +283,111 @@ describe('bootstrapRun', () => {
     })
 
     expect(world.adapter.started[0]?.resumeSessionId).toBe('019fd631-15bf-7a03-a1c6-ff6d568c2656')
-    // Phases 2–5 still ran: the bundle is how a resumed run gets its credentials back (FR-072).
+    // Phases 2–5 still ran: the bundle is how a resumed run gets its repository-host and
+    // third-party credentials back (FR-072).
     expect(world.reporter.finished.map((event) => event.phase)).toContain('setup_script')
+  })
+
+  /**
+   * **003/T056, FR-050.** The phase existed and was individually timed before this; what did not
+   * exist was a caller, so it ran on no boot at all. These are the assertions that it now runs on
+   * every one — and they are made against the *envelope shapes* the three boots differ by, because
+   * that is where a conditional would have to live if anybody added one.
+   */
+  describe('the credential install runs on every boot (003/FR-050)', () => {
+    it('runs on a first boot', async () => {
+      const world = await harness()
+
+      const result = await bootstrapRun(world.options)
+
+      expect(world.fetches).toHaveLength(1)
+      expect(result.credential).toStrictEqual({
+        credentialId: AGENT_CREDENTIAL.credentialId,
+        fence: AGENT_CREDENTIAL.fence,
+        path: join(world.root, '.agent-config', 'credentials', '.credentials.json'),
+      })
+      await expect(readFile(result.credential.path, 'utf8')).resolves.toBe(
+        AGENT_CREDENTIAL.material,
+      )
+    })
+
+    it('runs on a restore boot, where the snapshot carried no credential (FR-013)', async () => {
+      const world = await harness()
+
+      const result = await bootstrapRun({
+        ...world.options,
+        envelope: {
+          ...world.envelope,
+          resumeFromSnapshot: {
+            s3Key: 'snapshots/w/1.tar.zst',
+            sessionId: '019fd631-15bf-7a03-a1c6-ff6d568c2656',
+          },
+        },
+      })
+
+      expect(world.fetches).toHaveLength(1)
+      expect(world.reporter.finished.map((event) => event.phase)).toContain('credential_install')
+      await expect(readFile(result.credential.path, 'utf8')).resolves.toBe(
+        AGENT_CREDENTIAL.material,
+      )
+    })
+
+    it('runs on a resumed-instance boot, over material the previous boot left on the disk', async () => {
+      const world = await harness()
+
+      // The disk state a stopped instance boots back into: the previous boot's credential file is
+      // still there. It may nevertheless be stale — the credential can have rotated while the
+      // instance was not running — which is why there is no "already installed, skip it" branch
+      // anywhere in this sequence (003/FR-050).
+      const stale = 'not-a-real-agent-credential-from-before-the-stop\n'
+      const credentialDir = join(world.root, '.agent-config', 'credentials')
+
+      await mkdir(credentialDir, { recursive: true })
+      await writeFile(join(credentialDir, '.credentials.json'), stale)
+
+      const result = await bootstrapRun({
+        ...world.options,
+        credentials: {
+          fetchAgentCredential: () => Promise.resolve({ ...AGENT_CREDENTIAL, fence: 5 }),
+        },
+      })
+
+      expect(result.credential.fence).toBe(5)
+      await expect(readFile(result.credential.path, 'utf8')).resolves.toBe(
+        AGENT_CREDENTIAL.material,
+      )
+    })
+
+    it('registers the material as a known redaction value (FR-014)', async () => {
+      const world = await harness()
+
+      await bootstrapRun(world.options)
+
+      const sanitised = sanitise(`echo ${AGENT_CREDENTIAL.material}`, {
+        secrets: world.credentialSecrets.current,
+      })
+
+      expect(sanitised).not.toContain(AGENT_CREDENTIAL.material.trim())
+      expect(sanitised).toContain('[redacted:agent-credential]')
+    })
+
+    it('never starts the agent when the credential could not be installed (FR-051)', async () => {
+      const world = await harness()
+
+      await expect(
+        bootstrapRun({
+          ...world.options,
+          credentials: {
+            fetchAgentCredential: () => Promise.reject(new Error('machine surface returned 503')),
+          },
+        }),
+      ).rejects.toThrow(/credential_install/u)
+
+      // And nothing was cloned either: the phase sits before the checkout precisely so a run that
+      // cannot authenticate does not pull a customer's repositories onto the box first.
+      expect(world.adapter.started).toHaveLength(0)
+      expect(world.reporter.finished.map((event) => event.phase)).not.toContain('entry_checkout')
+    })
   })
 
   it('checks every entry out before the agent starts (FR-112)', async () => {

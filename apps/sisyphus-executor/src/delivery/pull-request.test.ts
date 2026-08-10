@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
+import { stripAmbientGitEnvironment } from '../git-fixture-environment'
 import type { ReviewerSummary } from '../report'
 import { buildReviewerSummary } from '../report'
 
@@ -11,6 +12,15 @@ import type { TestRepository } from './test-repository'
 import { createTestRepository } from './test-repository'
 
 const WORKFLOW_ID = '3f7b6d2a-1c5e-4a9b-8d3f-2e6c9a4b1d70'
+
+/**
+ * The commit verification runs through the production git reader, which spawns `git` with the
+ * environment it was started in. See the same note in `./git.test.ts` and
+ * `../git-fixture-environment.ts`.
+ */
+const restoreGitEnvironment = stripAmbientGitEnvironment()
+
+afterAll(restoreGitEnvironment)
 
 let repository: TestRepository | undefined
 

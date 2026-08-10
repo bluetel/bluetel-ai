@@ -1,3 +1,4 @@
+import type { AgentCredentialReference } from '@bluetel-ai/sisyphus-api/contracts'
 import type { Workflow } from '@bluetel-ai/sisyphus-api/db'
 
 /**
@@ -29,6 +30,33 @@ import type { Workflow } from '@bluetel-ai/sisyphus-api/db'
  * one audience, and a window that is fifteen minutes and revoked outright at teardown. A
  * long-lived secret has none of those bounds, so the same channel that is acceptable for the one
  * is unacceptable for the other.
+ *
+ * ## The agent credential is named here and fetched elsewhere (003/FR-012, T050)
+ *
+ * {@link WorkflowJobEnvelope.agentCredential} is the seat the run holds, and it is **identifiers
+ * only**: the credential's id and the fence its lease was issued. The agent's own login material
+ * is not here and cannot be, because the same paragraph above applies to it with none of the
+ * scoped credential's mitigations — an agent credential is long-lived, it is the platform's
+ * scarcest resource, and a copy of it in user data would be readable by every process on the box
+ * for the instance's whole life and would survive into any image taken of it.
+ *
+ * The shape is `agentCredentialReference` from `@bluetel-ai/sisyphus-api/contracts` rather than an
+ * interface restated here, and that is load-bearing rather than tidy. That schema is `.strict()`,
+ * so "the envelope cannot carry material" is a property of a value the tests can execute —
+ * `job-envelope.test.ts` parses the envelope's own field with it and watches a `material` key be
+ * refused — instead of a promise about what nobody has added yet. `AGENT_CREDENTIAL_MATERIAL_FIELD`
+ * names the one field in that contract that ever holds material, so the same test can sweep the
+ * serialised envelope for it by name.
+ *
+ * How the instance gets the material is the other half: it calls `fetchAgentCredential` on the
+ * machine surface, authorised by the `scopedCredential` this envelope does carry. That is all the
+ * authority the box needs, and it is revocable — which a copy in user data would not be.
+ *
+ * The field is optional for one reason and it is temporary. Admission reserves a seat before any
+ * compute is committed to (FR-016, T046), but until the FR-024 waiting state is wired (T064) a
+ * workflow whose execution profile reaches no credential — an ad-hoc run with no profile at all,
+ * most often — is still admitted rather than made to wait, and such a run has no seat to name. Once
+ * admission refuses to provision without one, an envelope without this field is unreachable.
  *
  * ## Size
  *
@@ -95,6 +123,17 @@ export interface WorkflowJobEnvelope {
   readonly sessionId: string
   readonly machineSurfaceUrl: string
   readonly scopedCredential: string
+  /**
+   * Which agent credential this run holds, and under which fence (FR-012, FR-020).
+   *
+   * Identifiers only — see the module note. `leaseFence` rather than `fence` because the value is
+   * the one *this lease* was issued and the credential's current fence may already be higher; an
+   * instance whose two disagree has lost its claim, which is exactly what the executor needs to be
+   * able to notice.
+   *
+   * Absent only for a run admitted before the FR-024 waiting state existed to catch it (T064).
+   */
+  readonly agentCredential?: AgentCredentialReference
   readonly setupBundle: EnvelopeSetupBundle
   readonly workspace: EnvelopeWorkspace
   readonly job: EnvelopeJob

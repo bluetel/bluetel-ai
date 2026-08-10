@@ -7,6 +7,9 @@ import {
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
+import { createCredentialPoolFixtures } from '../credentials/allocate/pool-fixtures'
+import { releaseLease } from '../credentials/lease'
+
 import {
   ADMISSION_LOCK_CLASS,
   ADMISSION_LOCK_KEY,
@@ -303,5 +306,372 @@ describeWithDatabase('admission against a live database', () => {
     expect(outcomes.filter((outcome) => outcome.outcome === 'admitted')).toHaveLength(1)
     expect(outcomes.filter((outcome) => outcome.outcome === 'queued')).toHaveLength(1)
     expect(await fixtures.countLiveLeases()).toBe(1)
+  }, 30_000)
+})
+
+/**
+ * FR-016 — the seat, before the compute (T046).
+ *
+ * A separate scope with its own scratch database, because these tests need a graph
+ * `workflow-fixtures.ts` cannot seed: an execution profile with ordered credential-group
+ * attachments, credentials in chosen states, and workflows pinned to that profile.
+ * `createCredentialPoolFixtures` is that seeder, and reusing it is the point — a fourth
+ * scratch-database harness would be a fourth thing to keep in step.
+ *
+ * The test that earns its place is "claims the seat before it takes any compute lease". Everything
+ * else here observes the *result* of an ordering, which a reversed implementation could still
+ * produce; that one observes the world **between** the two writes, by parking admission on a table
+ * lock the compute-lease insert needs and reading the database from outside while it waits. It is
+ * the only assertion in the file that a credential-after-compute implementation cannot pass.
+ */
+describeWithDatabase('reserving an agent credential at admission (FR-016)', () => {
+  const pool = createCredentialPoolFixtures(connectionString ?? '')
+
+  beforeAll(() => pool.open(), 60_000)
+  afterAll(() => pool.close())
+
+  /**
+   * `clearLeases` returns the credential pool to its seeded state; the compute side is this
+   * directory's and has to be cleared here. Without it the FR-040 ceiling counts leases every
+   * earlier test left behind, and admissions start reporting `queued` for reasons that have nothing
+   * to do with what is under test.
+   */
+  afterEach(async () => {
+    await pool.db().delete(workflowEvents)
+    await pool.db().delete(computeLeases)
+    await pool.clearLeases()
+  })
+
+  /** A pool of one group holding `size` credentials, and a profile attached to it. */
+  const seedPool = async (label: string, size: number): Promise<string> => {
+    const credentialGroupId = await pool.seedGroup({ label: `${label}-group` })
+
+    for (let index = 0; index < size; index += 1) {
+      await pool.seedCredential({ label: `${label}-cred-${String(index)}`, credentialGroupId })
+    }
+
+    return pool.seedProfile({
+      label: `${label}-profile`,
+      groups: [{ credentialGroupId, position: 1 }],
+    })
+  }
+
+  const computeLeasesFor = async (workflowId: string): Promise<number> =>
+    (
+      await pool
+        .db()
+        .select({ id: computeLeases.id })
+        .from(computeLeases)
+        .where(eq(computeLeases.workflowId, workflowId))
+    ).length
+
+  it('claims a seat and names it on the admission, the workflow row and the timeline', async () => {
+    const executionProfileId = await seedPool('reserve', 1)
+    const workflowId = await pool.seedWorkflow({ label: 'reserve-run', executionProfileId })
+
+    const outcome = await admitWorkflow({ db: pool.db(), workflowId, ceiling: 4 })
+
+    expect(outcome).toMatchObject({ outcome: 'admitted', reservation: 'acquired' })
+
+    const [lease] = await pool.liveLeases()
+    expect(lease).toBeDefined()
+    expect(outcome.outcome === 'admitted' ? outcome.agentCredential : undefined).toStrictEqual({
+      credentialId: lease.agentCredentialId,
+      leaseFence: lease.fence,
+    })
+
+    // FR-059: the run's own record names the identity it used, for the retention period.
+    const [workflow] = await pool
+      .db()
+      .select({ agentCredentialId: workflows.agentCredentialId })
+      .from(workflows)
+      .where(eq(workflows.id, workflowId))
+    expect(workflow.agentCredentialId).toBe(lease.agentCredentialId)
+
+    // And on the timeline, so a run that started with a seat can be told from one that did not.
+    const [admitted] = await pool
+      .db()
+      .select({ detail: workflowEvents.detail })
+      .from(workflowEvents)
+      .where(eq(workflowEvents.workflowId, workflowId))
+    expect(admitted.detail).toMatchObject({
+      agentCredentialId: lease.agentCredentialId,
+      credentialReservation: 'acquired',
+    })
+  }, 30_000)
+
+  it('claims the seat before it takes any compute lease (FR-016)', async () => {
+    // The ordering proof. `compute_leases` is locked in EXCLUSIVE mode by a gate transaction, which
+    // conflicts with the ROW EXCLUSIVE an INSERT needs but not with the ACCESS SHARE a SELECT takes.
+    // So admission runs, reserves, and then parks on the compute-lease insert — and while it is
+    // parked the database can be read from outside, at the one instant that distinguishes
+    // "credential first" from "credential second".
+    const executionProfileId = await seedPool('ordering', 1)
+    const workflowId = await pool.seedWorkflow({ label: 'ordering-run', executionProfileId })
+
+    const locked = createGate()
+    const release = createGate()
+
+    const gate = pool.db().transaction(async (tx) => {
+      await tx.execute(sql`lock table compute_leases in exclusive mode`)
+      locked.open()
+      await release.opened
+    })
+
+    await locked.opened
+
+    let admissionSettled = false
+    const admission = admitWorkflow({ db: pool.db(), workflowId, ceiling: 4 }).finally(() => {
+      admissionSettled = true
+    })
+
+    // Wait for Postgres to report the admitting backend parked. Without this the read below could
+    // land after admission had finished, and would prove nothing about the order of its writes.
+    let blocked = 0
+    for (let attempt = 0; attempt < 200 && blocked === 0; attempt += 1) {
+      await sleep(25)
+      blocked = await pool.backendsWaitingOnLocks()
+    }
+    expect(blocked).toBeGreaterThan(0)
+    expect(admissionSettled).toBe(false)
+
+    // Mid-admission: the seat is claimed, committed and visible, and no compute lease exists.
+    const held = await pool.liveLeases()
+    expect(held).toHaveLength(1)
+    expect(held[0].workflowId).toBe(workflowId)
+    expect(await pool.credential(held[0].agentCredentialId)).toMatchObject({ state: 'held' })
+    expect(await computeLeasesFor(workflowId)).toBe(0)
+
+    release.open()
+    await gate
+    await expect(admission).resolves.toMatchObject({ outcome: 'admitted' })
+    expect(await computeLeasesFor(workflowId)).toBe(1)
+  }, 60_000)
+
+  it('reserves nothing for a workflow the ceiling refuses, rather than churning the pool', async () => {
+    // At the ceiling admission refuses constantly — every drain pass asks about every queued run —
+    // and a reservation taken before that check would be acquired and handed straight back on each
+    // one, advancing the fence and writing a leased/released pair for a lease that meant nothing.
+    const executionProfileId = await seedPool('ceiling', 2)
+    const running = await pool.seedWorkflow({ label: 'ceiling-holder', executionProfileId })
+    const waiting = await pool.seedWorkflow({ label: 'ceiling-waiter', executionProfileId })
+
+    await expect(
+      admitWorkflow({ db: pool.db(), workflowId: running, ceiling: 1 }),
+    ).resolves.toMatchObject({ outcome: 'admitted' })
+
+    const before = await pool.audit()
+
+    await expect(
+      admitWorkflow({ db: pool.db(), workflowId: waiting, ceiling: 1 }),
+    ).resolves.toMatchObject({ outcome: 'queued' })
+
+    expect(await pool.liveLeases()).toHaveLength(1)
+    expect(await pool.audit()).toHaveLength(before.length)
+  }, 30_000)
+
+  it('reserves nothing for a run that is not queued', async () => {
+    const executionProfileId = await seedPool('cancelled', 1)
+    const workflowId = await pool.seedWorkflow({
+      label: 'cancelled-run',
+      executionProfileId,
+      state: 'cancelled',
+    })
+
+    await expect(admitWorkflow({ db: pool.db(), workflowId, ceiling: 4 })).resolves.toMatchObject({
+      outcome: 'not_admissible',
+      state: 'cancelled',
+    })
+
+    expect(await pool.liveLeases()).toHaveLength(0)
+  }, 30_000)
+
+  it('takes the seat exactly once when the same run is admitted twice (FR-015, FR-078)', async () => {
+    const executionProfileId = await seedPool('coalesce', 3)
+    const workflowId = await pool.seedWorkflow({ label: 'coalesce-run', executionProfileId })
+
+    await expect(admitWorkflow({ db: pool.db(), workflowId, ceiling: 4 })).resolves.toMatchObject({
+      outcome: 'admitted',
+      reservation: 'acquired',
+    })
+
+    // The second admission coalesces, and must not take a second identity for one run — nor hand
+    // back the one the first admission took, which the run is now using.
+    await expect(admitWorkflow({ db: pool.db(), workflowId, ceiling: 4 })).resolves.toMatchObject({
+      outcome: 'coalesced',
+    })
+
+    expect(await pool.liveLeases()).toHaveLength(1)
+    expect(await pool.leases()).toHaveLength(1)
+  }, 30_000)
+
+  it('gives exactly one seat to each of several runs admitted at once (FR-017, SC-003)', async () => {
+    const executionProfileId = await seedPool('concurrent', 3)
+    const ids = await Promise.all(
+      [0, 1, 2].map(async (index) =>
+        pool.seedWorkflow({ label: `concurrent-${String(index)}`, executionProfileId }),
+      ),
+    )
+
+    const outcomes = await Promise.all(
+      ids.map(async (workflowId) => admitWorkflow({ db: pool.db(), workflowId, ceiling: 8 })),
+    )
+
+    expect(outcomes.filter((outcome) => outcome.outcome === 'admitted')).toHaveLength(3)
+
+    const live = await pool.liveLeases()
+    expect(live).toHaveLength(3)
+    expect(new Set(live.map((lease) => lease.agentCredentialId)).size).toBe(3)
+  }, 60_000)
+
+  it('admits a run with no execution profile rather than making it wait for ever (T064)', async () => {
+    // The carve-out, and the reason it is not an inconsistency. `selectFor` joins out from the
+    // workflow to its execution profile's attachments and **so does the grant path**, so a run with
+    // no profile — the ad-hoc case 002/FR-126 leaves null — is one no release, no registration and
+    // no administrator action can ever be granted a seat to. Putting it in `awaiting_credential`
+    // would enqueue it in a queue nothing can serve it from, and FR-028 would eventually fail it
+    // naming an exhaustion that never happened.
+    const workflowId = await pool.seedWorkflow({ label: 'no-profile' })
+
+    const outcome = await admitWorkflow({ db: pool.db(), workflowId, ceiling: 4 })
+
+    expect(outcome).toMatchObject({
+      outcome: 'admitted',
+      reservation: 'none_available',
+      agentCredential: undefined,
+    })
+    expect(await pool.liveLeases()).toHaveLength(0)
+
+    const [admitted] = await pool
+      .db()
+      .select({ detail: workflowEvents.detail })
+      .from(workflowEvents)
+      .where(eq(workflowEvents.workflowId, workflowId))
+    // Recorded, and named: a run that started without a seat is visible, and the reason it did
+    // distinguishes "there is no profile" from "the pool would not settle".
+    expect(admitted.detail).toMatchObject({
+      agentCredentialId: null,
+      credentialReservation: 'none_available',
+      credentialWaitReason: 'no_execution_profile',
+    })
+  }, 30_000)
+
+  it('waits instead of provisioning when every reachable credential is held (FR-024, FR-025)', async () => {
+    const executionProfileId = await seedPool('exhausted', 1)
+    const holder = await pool.seedWorkflow({ label: 'exhausted-holder', executionProfileId })
+    const later = await pool.seedWorkflow({ label: 'exhausted-later', executionProfileId })
+
+    await admitWorkflow({ db: pool.db(), workflowId: holder, ceiling: 8 })
+
+    const outcome = await admitWorkflow({ db: pool.db(), workflowId: later, ceiling: 8 })
+
+    expect(outcome).toMatchObject({ outcome: 'awaiting_credential', entered: true })
+    expect(outcome.outcome === 'awaiting_credential' ? outcome.reason.kind : undefined).toBe(
+      'all_held',
+    )
+
+    const [waiting] = await pool
+      .db()
+      .select({ state: workflows.state })
+      .from(workflows)
+      .where(eq(workflows.id, later))
+    expect(waiting.state).toBe('awaiting_credential')
+
+    // SC-004: zero billed compute for the entire wait, and it is zero because nothing was taken.
+    expect(await computeLeasesFor(later)).toBe(0)
+    // Nor a seat: the holder's is the only one out.
+    expect(await pool.liveLeases()).toHaveLength(1)
+
+    const events = await pool
+      .db()
+      .select({ event: workflowEvents.event, detail: workflowEvents.detail })
+      .from(workflowEvents)
+      .where(eq(workflowEvents.workflowId, later))
+
+    // No `admitted` entry, because it was not admitted. A timeline that said otherwise would make
+    // a run that never started look like one that did.
+    expect(events.map((entry) => entry.event)).toEqual(['queued'])
+    expect(events[0]?.detail).toMatchObject({
+      waitingOn: 'agent_credential',
+      kind: 'all_held',
+      configurationFault: false,
+    })
+    // FR-029: the groups that were searched, named on the run's own timeline.
+    expect(
+      (events[0]?.detail as { groups?: { name: string }[] } | null)?.groups?.[0]?.name,
+    ).toContain('exhausted-group')
+  }, 30_000)
+
+  it('waits, and says so as a configuration fault, when the groups hold no credentials', async () => {
+    // Nothing is held, so nothing will be released. The run still waits — an administrator
+    // registering a credential in one of these groups is enough, and the drain then grants it — but
+    // the flag is what stops an engineer being told to wait for capacity that is not coming.
+    const credentialGroupId = await pool.seedGroup({ label: 'empty-group' })
+    const executionProfileId = await pool.seedProfile({
+      label: 'empty-profile',
+      groups: [{ credentialGroupId, position: 1 }],
+    })
+    const workflowId = await pool.seedWorkflow({ label: 'empty-run', executionProfileId })
+
+    const outcome = await admitWorkflow({ db: pool.db(), workflowId, ceiling: 4 })
+
+    expect(outcome).toMatchObject({ outcome: 'awaiting_credential' })
+    expect(
+      outcome.outcome === 'awaiting_credential' ? outcome.reason.configurationFault : undefined,
+    ).toBe(true)
+    expect(await computeLeasesFor(workflowId)).toBe(0)
+  }, 30_000)
+
+  it('re-offers a waiting run without restarting its clock or its timeline (FR-028)', async () => {
+    const executionProfileId = await seedPool('reoffer', 1)
+    const holder = await pool.seedWorkflow({ label: 'reoffer-holder', executionProfileId })
+    const waiter = await pool.seedWorkflow({ label: 'reoffer-waiter', executionProfileId })
+
+    await admitWorkflow({ db: pool.db(), workflowId: holder, ceiling: 8 })
+    const first = await admitWorkflow({ db: pool.db(), workflowId: waiter, ceiling: 8 })
+    const second = await admitWorkflow({ db: pool.db(), workflowId: waiter, ceiling: 8 })
+
+    expect(first).toMatchObject({ outcome: 'awaiting_credential', entered: true })
+    expect(second).toMatchObject({ outcome: 'awaiting_credential', entered: false })
+    // The same instant, from the entry the first call wrote. A clock restarted on every drain pass
+    // is a limit that never fires, and a panel that says an hour-old wait is four seconds old.
+    expect(second.outcome === 'awaiting_credential' ? second.since : undefined).toStrictEqual(
+      first.outcome === 'awaiting_credential' ? first.since : undefined,
+    )
+
+    // And exactly one entry on the timeline, not one per pass.
+    const events = await pool
+      .db()
+      .select({ event: workflowEvents.event })
+      .from(workflowEvents)
+      .where(eq(workflowEvents.workflowId, waiter))
+    expect(events).toHaveLength(1)
+  }, 30_000)
+
+  it('admits a waiting run once a seat frees, through the same admission (FR-026)', async () => {
+    const executionProfileId = await seedPool('granted', 1)
+    const holder = await pool.seedWorkflow({ label: 'granted-holder', executionProfileId })
+    const waiter = await pool.seedWorkflow({ label: 'granted-waiter', executionProfileId })
+
+    await admitWorkflow({ db: pool.db(), workflowId: holder, ceiling: 8 })
+    await expect(
+      admitWorkflow({ db: pool.db(), workflowId: waiter, ceiling: 8 }),
+    ).resolves.toMatchObject({ outcome: 'awaiting_credential' })
+
+    await releaseLease({ db: pool.db(), workflowId: holder, reason: 'terminal' })
+
+    // `awaiting_credential` is admissible, so the grant is not a second implementation of the
+    // ceiling, the row lock and the FR-078 index — it is this function, run again.
+    const granted = await admitWorkflow({ db: pool.db(), workflowId: waiter, ceiling: 8 })
+
+    expect(granted).toMatchObject({ outcome: 'admitted', reservation: 'acquired' })
+    expect(await computeLeasesFor(waiter)).toBe(1)
+
+    const [state] = await pool
+      .db()
+      .select({ state: workflows.state })
+      .from(workflows)
+      .where(eq(workflows.id, waiter))
+    expect(state.state).toBe('provisioning')
   }, 30_000)
 })

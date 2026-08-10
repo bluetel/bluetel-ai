@@ -3,14 +3,18 @@ import { z } from 'zod'
 import type { ControlPlaneContext } from './context'
 import type { JobOutcome } from './jobs'
 import {
+  KEEP_ALIVE_JOB_NAME,
   runAdmitWorkflow,
   runBootstrapAdmins,
+  runCredentialAlerts,
   runDrainQueue,
   runIntegrationTick,
+  runJob,
   runReconcile,
   runStartWorkflow,
   runSyncSchedules,
   runTeardownWorkflow,
+  sweepKeepAlive,
 } from './jobs'
 
 /**
@@ -55,8 +59,10 @@ import {
 export const CONTROL_PLANE_JOB_NAMES = [
   'admit-workflow',
   'bootstrap-admins',
+  'credential-alerts',
   'drain-queue',
   'integration-tick',
+  'keep-alive',
   'reconcile',
   'start-workflow',
   'sync-schedules',
@@ -81,6 +87,13 @@ const workflowIdField = z.string().min(1)
 const controlPlaneEventSchema = z.discriminatedUnion('job', [
   z.object({ job: z.literal('admit-workflow'), workflowId: workflowIdField }),
   z.object({ job: z.literal('bootstrap-admins') }),
+  /**
+   * The FR-056 administrator alert sweep. Its own event and **not** part of the stage tick, and
+   * deliberately not part of `keep-alive` either — one of the four conditions it raises is a seat
+   * that keep-alive has stopped exercising, so an alert that only ran inside keep-alive would be
+   * silent in the case it exists for. `sync-schedules.ts` registers its timer.
+   */
+  z.object({ job: z.literal('credential-alerts') }),
   z.object({ job: z.literal('drain-queue'), limit: z.number().int().positive().optional() }),
   z.object({
     job: z.literal('integration-tick'),
@@ -88,6 +101,13 @@ const controlPlaneEventSchema = z.discriminatedUnion('job', [
     /** `manual` is an admin pressing Run now (FR-097); the schedule writes `scheduled`. */
     trigger: z.enum(['scheduled', 'manual']).optional(),
   }),
+  /**
+   * The keep-alive sweep (003/FR-035). Its own event and **not** part of the stage tick, because
+   * FR-035 requires it to run independently of workflow demand — a sweep that only happened inside
+   * something else would stop happening whenever that something else did. `sync-schedules.ts`
+   * registers the timer that fires this.
+   */
+  z.object({ job: z.literal('keep-alive') }),
   z.object({ job: z.literal('reconcile') }),
   z.object({ job: z.literal('start-workflow'), workflowId: workflowIdField }),
   z.object({ job: z.literal('sync-schedules') }),
@@ -154,12 +174,23 @@ const runControlPlaneJob = (
     case 'bootstrap-admins':
       return runBootstrapAdmins({ db: context.db, emails: context.bootstrapAdminEmails })
 
+    case 'credential-alerts':
+      // The alerter carries both thresholds, bound in the composition root — see `context.ts`. The
+      // job is handed no hour value of its own, so there is nowhere for a second opinion about
+      // `SISYPHUS_KEEPALIVE_IDLE_HOURS` to live.
+      return runCredentialAlerts({ db: context.db, alerter: context.credentialAlerter })
+
     case 'drain-queue':
       return runDrainQueue({
         db: context.db,
         ceiling: context.ceiling,
         starter: context.starter,
         limit: event.limit,
+        // The FR-028 limit and the notifier travel together: the drain is the job that fails a run
+        // for waiting too long, and a run failed by the platform that never tells its owner is a
+        // failure nobody hears about (FR-136).
+        credentialWaitLimitMs: context.credentialWaitLimitMs,
+        notifier: context.notifier,
       })
 
     case 'integration-tick':
@@ -176,12 +207,22 @@ const runControlPlaneJob = (
         trigger: event.trigger,
       })
 
+    case 'keep-alive':
+      return runJob(KEEP_ALIVE_JOB_NAME, () =>
+        sweepKeepAlive({
+          db: context.db,
+          exerciser: context.credentialExerciser,
+          idleHours: context.keepAliveIdleHours,
+        }),
+      )
+
     case 'reconcile':
       return runReconcile({
         db: context.db,
         compute: context.compute,
         queueDrain: context.queueDrain,
         notifier: context.notifier,
+        coolingOffRetryMs: context.coolingOffRetryMs,
       })
 
     case 'start-workflow':

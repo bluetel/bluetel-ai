@@ -20,6 +20,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
+import { gitFixtureEnvironment } from '../git-fixture-environment'
+
 const execFileAsync = promisify(execFile)
 
 /** A committer identity, so `git commit` works on a machine with no global config. */
@@ -56,6 +58,11 @@ export const createTestRepository = async (
     const { stdout } = await execFileAsync('git', [...IDENTITY, ...args], {
       cwd,
       encoding: 'utf8',
+      // The caller's environment minus anything naming the caller's repository. Without it this
+      // helper inherits `process.env` wholesale, and under a git hook that includes `GIT_DIR` and
+      // `GIT_INDEX_FILE` — at which point `git init --bare` and the commits below operate on the
+      // repository the hook is running in rather than on `root`. See `../git-fixture-environment.ts`.
+      env: gitFixtureEnvironment(),
     })
 
     return stdout.trim()

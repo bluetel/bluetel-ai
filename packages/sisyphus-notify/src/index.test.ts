@@ -31,6 +31,21 @@ describe('the notify barrel', () => {
     expect(notify.notificationEventForState('parked_resumable')).toBe('workflow_parked_resumable')
   })
 
+  it('exports the FR-056 administrator alerts as a vocabulary of their own (003/T111)', () => {
+    expect(typeof notify.createCredentialPoolAlerter).toBe('function')
+    expect(typeof notify.planCredentialAlerts).toBe('function')
+
+    // Kept apart from `NotificationEvent` on purpose: these are about a seat rather than a run,
+    // their audience is whoever administers capacity, and none of them may be switched off by a
+    // notification preference. 003/FR-079 leaves administrator alerting untouched while making
+    // waiting, cooling off and parking silent to a workflow's owner — and the owner-facing enum
+    // still has no member for any pool condition, which is what keeps the two audiences apart.
+    for (const kind of notify.CREDENTIAL_ALERT_KINDS) {
+      expect(Object.keys(notify)).not.toContain(`workflow_${kind}`)
+    }
+    expect(notify.notificationEventForState('awaiting_credential')).toBeUndefined()
+  })
+
   it('does not export the live-database fixture seeder', () => {
     expect(Object.keys(notify)).not.toContain('createNotifyFixtures')
     expect(Object.keys(notify)).not.toContain('readTestDatabaseUrl')

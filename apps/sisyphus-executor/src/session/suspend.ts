@@ -15,13 +15,55 @@
  *
  * ```
  * 1. quiesce()                            turn boundary, process alive
+ * 1a. flushCredentialRotation()           write through anything the agent rotated (003/FR-030)
  * 2. snapshot()                           capture the workspace, park and retry on failure
  * 3. registerSnapshot(boundary)           machine surface
  * 4. acknowledge()                        <- the user is told only here
  * 5. mark suspended
- * 6. release compute                      immediate for interruption and stop; on the idle
- *                                         ceiling for pause
+ * 6. end the agent                        all three causes, since 003/FR-039
+ * 7. release compute                      immediate for interruption and stop; for a pause the
+ *                                         control plane stops the instance from outside
  * ```
+ *
+ * ## Step 6, and what changed about pause (003/T098, FR-039)
+ *
+ * 002 paused by holding the agent process alive on a running instance (`002/FR-049`), so the
+ * conversation stayed in memory and a resume was instant — and the instance billed the whole time,
+ * which is why pauses were something to avoid. 003/FR-039 replaces that: the instance is **stopped**
+ * with its disk retained, and a resume is `StartInstances` against the same box. The stop is issued
+ * by the control plane, because an instance may never stop itself — see
+ * {@link suspensionPlanFor}'s pause plan for both halves of why, and for why the agent is now ended
+ * on a pause as it always was on the other two.
+ *
+ * The rotation flush at step 1a stays exactly where it is, and moves up in importance rather than
+ * down: an instance that is about to be frozen for an hour is an instance whose credential file is
+ * about to stop being written to, and a rotation still inside its debounce window when that happens
+ * is a seat that comes back needing an administrator to log in again.
+ *
+ * ## Step 1a, and why it is here rather than at three call sites (003/T060, FR-030, R3)
+ *
+ * The agent refreshes its own login as it works, and `credential/rotation-watch.ts` debounces those
+ * changes before writing them through. A rotation observed moments before a suspension is therefore
+ * still inside its debounce window when the instance stops — and losing it is not a lost log line,
+ * it is the difference between a seat that resumes and a seat that needs an administrator to log in
+ * again, because the material the platform holds no longer works.
+ *
+ * One flush here covers all three causes precisely because this routine is the only way any of them
+ * is reached: `run/execute.ts` calls it for a pause and a stop, and `session/interruption.ts` calls
+ * it for a reclamation notice, all three through the same options object. A flush written at those
+ * call sites would be three flushes, and the spot-interruption one would be the one nobody
+ * exercised — which is the failure FR-054 made this a single routine to prevent in the first place.
+ *
+ * **After the quiesce, before the snapshot.** After, because a turn boundary is the point at which
+ * the agent is no longer writing, so the file being read is a whole file rather than a half-written
+ * one. Before, because everything below step 2 can park for minutes against unreachable storage,
+ * and a rotation is small, fast and completely independent of the object store — putting it after
+ * would mean an instance reclaimed during a park lost a credential it had already observed, for the
+ * sake of an ordering that buys nothing.
+ *
+ * A quiesce that times out rejects before this runs, and that loses nothing: the run carries on, the
+ * watcher is still armed, and the next suspension flushes what this one did not. The flush itself
+ * never rejects — see {@link SuspendOptions.flushCredentialRotation}.
  *
  * **Acknowledgement comes after step 3.** That is FR-049 and it is the reason this routine exists as
  * a routine rather than as five calls at a call site: the working tree must be captured *and
@@ -80,8 +122,15 @@ import { parkAndRetry } from './park'
 /** Why the run is being suspended. All three go through this one routine (FR-054, R3). */
 export type SuspendReason = 'pause' | 'interruption' | 'stop'
 
-/** When the instance gives its compute back. */
-export type ComputeRelease = 'immediate' | 'on-idle-ceiling'
+/**
+ * What happens to the compute this run is holding.
+ *
+ * `immediate` is the executor handing the instance back itself. `on-instance-stop` is 003/FR-039:
+ * the executor hands nothing back, and the **control plane** stops the instance from outside with
+ * its disk retained. The two are different actors, which is why they are different values rather
+ * than a boolean — see {@link SuspensionPlan.computeRelease}.
+ */
+export type ComputeRelease = 'immediate' | 'on-instance-stop'
 
 /** How one cause differs from the other two. Data, not branches. */
 export interface SuspensionPlan {
@@ -89,27 +138,51 @@ export interface SuspensionPlan {
   /** Recorded on the snapshot, so a resume knows what it is resuming from. */
   readonly boundary: SnapshotBoundary
   readonly computeRelease: ComputeRelease
-  /** True when the agent process is ended as part of the suspension. */
+  /**
+   * True when the agent process is ended as part of the suspension.
+   *
+   * True for all three causes since 003/FR-039. It was false for a pause under `002/FR-049`, when a
+   * pause kept the process alive on a running instance; see the pause plan for why that is now the
+   * opposite of what a pause wants.
+   */
   readonly stopsAgent: boolean
 }
 
 const PLANS: Readonly<Record<SuspendReason, SuspensionPlan>> = {
   /**
-   * Pause holds the process. Compute is released only when the pause idle limit is reached, which
-   * moves the workflow to `parked_resumable` — **not** to failed (FR-050, US2 §4). Releasing
-   * immediately would make every pause a restore cycle and would defeat the point of keeping the
-   * conversation in memory.
+   * **Pause stops the agent and waits to be stopped (003/T098, 003/FR-039).**
    *
-   * The limit itself is `./idle-ceiling.ts`, and {@link SuspendResult.suspendedAt} is when it
-   * starts counting. Until T181 this plan value meant "do not release" and nothing else: there was
-   * no threshold, no clock and nothing that ever acted on it, so `on-idle-ceiling` was in practice
-   * "hold this instance for ever".
+   * Until 003 this plan said `stopsAgent: false` and held the process alive on a running instance,
+   * which is `002/FR-049` and which 003/FR-039 supersedes: a pause now brings the agent to a turn
+   * boundary, captures a durable snapshot, and then the **control plane** stops the instance with
+   * its disk retained. Two things about this plan follow from that, and both are the change.
+   *
+   * **The agent is ended.** Not to save anything — the process dies the moment the instance stops
+   * either way — but because of what it could do in the seconds before that. The snapshot has just
+   * been captured; an agent still running could write to the working tree afterwards, and the disk
+   * and the snapshot would then disagree. On an on-demand pause that divergence is confusing. On
+   * the FR-043 fallback — where the instance is given up and the snapshot is the only thing that
+   * survives — it is silent data loss, because the writes that were lost are exactly the ones
+   * nobody recorded. Quiescing and then leaving the agent running would be keeping a writer alive
+   * over a frozen copy of what it was writing to.
+   *
+   * **Compute is not released here, and is not held for ever either.** The executor cannot stop its
+   * own instance: every instance the platform launches carries
+   * `InstanceInitiatedShutdownBehavior: 'terminate'`, so an executor that shut itself down would
+   * destroy the disk this pause exists to keep. So `on-instance-stop` means "somebody else, from
+   * outside, and soon" — `apps/sisyphus-control-plane/src/jobs/pause-instance.ts`, off the
+   * acknowledged pause.
+   *
+   * `./idle-ceiling.ts` still runs and is still worth having. It is no longer the mechanism that
+   * ends a pause — the control plane's stop lands first, and a stopped instance's in-process timer
+   * can never fire — it is the backstop for the case where that stop never comes at all, which is
+   * the same reason `jobs/reconcile.ts` enforces the ceiling a second time from the other side.
    */
   pause: {
     reason: 'pause',
     boundary: 'pause',
-    computeRelease: 'on-idle-ceiling',
-    stopsAgent: false,
+    computeRelease: 'on-instance-stop',
+    stopsAgent: true,
   },
   /**
    * An interruption has a deadline set by somebody else. Nothing is held: the snapshot is the only
@@ -199,6 +272,22 @@ export interface SuspendOptions {
    * interruption, which nobody asked for and so has no command to acknowledge.
    */
   readonly acknowledge?: () => Promise<void>
+  /**
+   * Write through any rotation the agent has made but the watcher has not yet reported
+   * (003/FR-030, 003/T060, research R3).
+   *
+   * Supplied by `run/execute.ts` from `credential/rotation-watch.ts`, once, for all three causes —
+   * see the module note for why this is the right place for it and why it sits where it does in the
+   * order.
+   *
+   * **It must not reject, and the contract is the watch's rather than this routine's**: a suspension
+   * that failed because a credential write failed would take the snapshot down with it, and the
+   * snapshot is the work. `RotationWatch.flush` is written to that rule and reports its failures
+   * through its own `onFailure`. A rejection here is nevertheless caught rather than trusted not to
+   * happen, because "an optional callback somebody else supplies" is not a place to rely on a
+   * convention.
+   */
+  readonly flushCredentialRotation?: () => Promise<unknown>
   /** Record the suspension against the workflow. */
   readonly markSuspended?: (plan: SuspensionPlan) => Promise<void>
   /** Hand the instance back. Called only when the plan says `immediate`. */
@@ -285,6 +374,11 @@ export const suspend = async (options: SuspendOptions): Promise<SuspendResult> =
     budgetMs: quiesceBudgetMs,
   })
 
+  // 1a. The agent has stopped writing, so whatever is in its credential file is a whole file.
+  //     Write it through before anything that can park (003/FR-030). Never fatal: losing a
+  //     rotation is bad, and losing the snapshot to it would be worse.
+  await options.flushCredentialRotation?.().catch(() => undefined)
+
   // 2. Capture. Parking holds *here* — at the boundary step 1 reached — so the cost of an
   //    unreachable store is storage retries rather than re-run inference. No turn is sent between
   //    attempts because there is no code between them that could send one.
@@ -349,11 +443,15 @@ export const suspend = async (options: SuspendOptions): Promise<SuspendResult> =
   // 5. Record the suspension.
   await options.markSuspended?.(plan)
 
-  // 6. Release compute — immediately for an interruption or a stop, on the idle ceiling for a
-  //    pause, which is a decision the platform makes later and not here.
+  // 6. End the agent. On all three causes since 003/FR-039: whatever happens to the instance next,
+  //    nothing may write to the working tree after the snapshot of it has been taken.
   if (plan.stopsAgent) {
     await options.agent.stop({ force: false })
   }
+
+  // 7. Release compute — immediately for an interruption or a stop. A pause releases nothing here
+  //    and cannot: the control plane stops the instance from outside, because an executor that
+  //    shut itself down would terminate the disk the pause exists to keep.
 
   const computeReleased = plan.computeRelease === 'immediate'
 

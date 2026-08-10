@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import type {
   AgentAdapter,
@@ -11,6 +11,7 @@ import type {
   AgentStopResult,
   AgentTurnDelivery,
 } from '../agent'
+import { GIT_FIXTURE_ENVIRONMENT, stripAmbientGitEnvironment } from '../git-fixture-environment'
 
 import { startAgentPhase } from './agent-start'
 import { BootstrapPhaseError, nullPhaseReporter } from './phases'
@@ -35,6 +36,14 @@ afterEach(async () => {
       .map((directory) => rm(directory, { recursive: true, force: true })),
   )
 })
+
+/**
+ * `readyWorkspace` builds a real repository with real `git`, so the ambient one has to go first —
+ * see `../git-fixture-environment.ts` for what a git hook exports into this process.
+ */
+const restoreGitEnvironment = stripAmbientGitEnvironment()
+
+afterAll(restoreGitEnvironment)
 
 interface FakeAdapter extends AgentAdapter {
   readonly starts: AgentStartOptions[]
@@ -76,18 +85,7 @@ const readyWorkspace = async (): Promise<ReadyWorkspace> => {
   const origin = join(await scratch(), 'origin')
 
   const git = async (args: readonly string[]): Promise<void> => {
-    const result = await runCommand({
-      command: 'git',
-      args,
-      env: {
-        GIT_AUTHOR_NAME: 'Sisyphus Test',
-        GIT_AUTHOR_EMAIL: 'test@example.invalid',
-        GIT_COMMITTER_NAME: 'Sisyphus Test',
-        GIT_COMMITTER_EMAIL: 'test@example.invalid',
-        GIT_CONFIG_GLOBAL: '/dev/null',
-        GIT_CONFIG_SYSTEM: '/dev/null',
-      },
-    })
+    const result = await runCommand({ command: 'git', args, env: GIT_FIXTURE_ENVIRONMENT })
 
     expect(result.exitCode, result.output).toBe(0)
   }

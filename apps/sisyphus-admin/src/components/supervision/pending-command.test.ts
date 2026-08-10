@@ -133,6 +133,20 @@ describe('nextPendingCommand — what the panel waits on', () => {
       }),
     ).toBe(held)
   })
+
+  it('waits on nothing when the platform applied the command itself (003/FR-027)', () => {
+    // A `stop` against a run waiting for an agent credential is applied in the same transaction
+    // that answered it — there is no executor to collect it and the run is already terminal. A
+    // "stop requested" card here would invite somebody to press it again.
+    expect(
+      nextPendingCommand({
+        held: undefined,
+        command: 'stop',
+        result: queued({ command: 'stop', outcome: 'acknowledged' }),
+        requestedAt: 1_000,
+      }),
+    ).toBeUndefined()
+  })
 })
 
 describe('what the server said, verbatim', () => {

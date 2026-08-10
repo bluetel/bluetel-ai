@@ -25,6 +25,8 @@ describe('the schemas barrel', () => {
       'createProfileInput',
       'createIntegrationInput',
       'grantProfileAccessInput',
+      'createCredentialGroupInput',
+      'attachCredentialGroupInput',
       // common
       'uuidInput',
       'moneyAmount',

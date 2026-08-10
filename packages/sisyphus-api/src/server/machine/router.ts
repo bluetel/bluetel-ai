@@ -16,6 +16,10 @@ import {
 } from '../workflow/corrections'
 import { acknowledgeCommandProcedure, pullPendingCommandsProcedure } from '../workflow/supervision'
 
+import {
+  fetchAgentCredentialProcedure,
+  reportCredentialRotationProcedure,
+} from './agent-credential'
 import { registerArtifact } from './artifacts'
 import type { RenewedCredential } from './credential'
 import { renewCredential } from './credential'
@@ -113,6 +117,32 @@ export const machineSurfaceRouter = createTRPCRouter({
     .mutation(
       async ({ ctx, input }): Promise<TerminalReport> => reportTerminal(machineContext(ctx), input),
     ),
+
+  /**
+   * The material of the seat this run already holds, for bootstrap phase `credential_install`
+   * (FR-012).
+   *
+   * The one procedure on this surface whose **response carries credential material**, and the
+   * reason it is safe is that there is no parameter by which a caller could ask for anybody else's:
+   * the input schema is empty and `.strict()`, and the seat is resolved from the live lease that
+   * `ctx.workflowId` names. The envelope this instance booted from carries identifiers only,
+   * because it becomes EC2 user-data — which is what this call exists to avoid. See
+   * `./agent-credential.ts`.
+   */
+  fetchAgentCredential: fetchAgentCredentialProcedure,
+
+  /**
+   * A refreshed credential, written back under the fence the caller was issued (FR-020, FR-030,
+   * FR-032).
+   *
+   * The other direction of the same material, and the only inbound path it has. A superseded fence
+   * is **answered** `stale_fence` rather than thrown — a rejected write means the caller has
+   * already lost its seat, and an error would turn that into a retry storm. A rotation arriving
+   * after its workflow has ended is accepted whenever its fence is current, because the seat's
+   * future usability depends on the material and not on the run's state; see `./agent-credential.ts`
+   * for why that is true by construction rather than by a special case.
+   */
+  reportCredentialRotation: reportCredentialRotationProcedure,
 
   /** Extend the caller's own short-lived, workflow-scoped credential (FR-037). */
   renewCredential: machineProcedure.mutation(

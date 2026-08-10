@@ -99,6 +99,26 @@ export type ExternalActionInput = MachineRouterInputs['reportExternalAction']
 export type PendingCommands = MachineRouterOutputs['pullPendingCommands']
 export type RenewedCredential = MachineRouterOutputs['renewCredential']
 /**
+ * The agent credential's two calls (003/FR-012, FR-020, FR-030).
+ *
+ * Inferred rather than restated, like everything else here. `fetchAgentCredential` takes an
+ * **empty** input by design — the seat is the one this caller's live lease names, resolved
+ * server-side from the scoped credential, so there is no parameter by which one run could ask for
+ * another's — and the empty object is still sent, because a `.strict()` schema is what turns an
+ * invented parameter into a refusal the caller sees.
+ */
+export type FetchedAgentCredentialResult = MachineRouterOutputs['fetchAgentCredential']
+export type CredentialRotationReport = MachineRouterInputs['reportCredentialRotation']
+/**
+ * The rotation answer, which is the **second** response on this surface a caller branches on.
+ *
+ * Inferred for the reason `ExternalActionClaim` gives, and the stakes are the same shape: a
+ * hand-written copy that drifted would not fail to compile, it would make `stale_fence` and
+ * `not_newer` indistinguishable — and those mean opposite things about whether this instance still
+ * holds its seat.
+ */
+export type CredentialRotationResult = MachineRouterOutputs['reportCredentialRotation']
+/**
  * The claim, and the two booleans a delivery step acts on.
  *
  * Inferred rather than restated for the usual reason, but the stakes are higher here than
@@ -157,6 +177,10 @@ export interface MachineSurfaceTransport {
   readonly acknowledgeCommand: (input: AcknowledgeCommandInput) => Promise<void>
   readonly reportSkillReference: (input: SkillReferenceInput) => Promise<void>
   readonly reportExternalAction: (input: ExternalActionInput) => Promise<ExternalActionClaim>
+  readonly fetchAgentCredential: () => Promise<FetchedAgentCredentialResult>
+  readonly reportCredentialRotation: (
+    input: CredentialRotationReport,
+  ) => Promise<CredentialRotationResult>
 }
 
 export interface HttpMachineTransportOptions {
@@ -224,6 +248,9 @@ export const createHttpMachineTransport = (
       await client.reportSkillReference.mutate(input)
     },
     reportExternalAction: async (input) => client.reportExternalAction.mutate(input),
+    // The empty object is the payload. See the note on the inferred types.
+    fetchAgentCredential: async () => client.fetchAgentCredential.mutate({}),
+    reportCredentialRotation: async (input) => client.reportCredentialRotation.mutate(input),
   }
 }
 
@@ -297,6 +324,31 @@ export interface MachineSurfaceClient extends SegmentReporter {
    * asking.
    */
   readonly reportExternalAction: (input: ExternalActionInput) => Promise<ExternalActionClaim>
+  /**
+   * The leased seat's material, for bootstrap phase `credential_install` (003/FR-012).
+   *
+   * **Direct, and for the same reason as `renewCredential`: its whole value is the response.** A
+   * buffered fetch would return before the material existed, and the phase that called it would
+   * write nothing and report success. It is also the one call on this surface where a failure is
+   * *supposed* to end the run — `bootstrap/credential-install.ts` turns it into a named phase
+   * failure — and a buffered call cannot fail its caller at all.
+   */
+  readonly fetchAgentCredential: () => Promise<FetchedAgentCredentialResult>
+  /**
+   * Write a rotated credential back under the lease fence (003/FR-030, FR-032).
+   *
+   * **Direct**, and for two reasons at once. Its response is branched on: `stale_fence` means this
+   * instance has lost its seat and must stop writing to it, `not_newer` means carry on, and a
+   * buffered call would hand back neither. And the FIFO outbox is the wrong queue for it — a
+   * rotation replayed minutes later, behind whatever else is stuck, can be superseded by then, and
+   * FR-030 is explicit that rotations are persisted *as they occur* rather than deferred.
+   *
+   * Failing loudly to its caller is safe: the caller is `credential/rotation-watch.ts`, which keeps
+   * the material pending and sends it again on the next change or at the suspend flush.
+   */
+  readonly reportCredentialRotation: (
+    input: CredentialRotationReport,
+  ) => Promise<CredentialRotationResult>
   /** Deliver everything buffered. Part of the FR-047 pre-termination path. */
   readonly flush: () => Promise<void>
   readonly pendingReports: number
@@ -379,6 +431,11 @@ export const createMachineSurfaceClient = (
 
     // Direct: see the note on the interface. A buffered claim is not a claim.
     reportExternalAction: async (input) => options.transport.reportExternalAction(input),
+
+    // Direct: both are answers a caller acts on, and a deferred rotation is the
+    // thing FR-030 exists to forbid.
+    fetchAgentCredential: async () => options.transport.fetchAgentCredential(),
+    reportCredentialRotation: async (input) => options.transport.reportCredentialRotation(input),
 
     flush: async () => outbox.drain(),
 

@@ -9,7 +9,24 @@
  * Consumers import this barrel, never a module underneath it.
  */
 
+export {
+  fetchAgentCredential,
+  fetchAgentCredentialProcedure,
+  noCredentialForWorkflowError,
+  noLiveLeaseError,
+  noSecretForCredentialError,
+  reportCredentialRotation,
+  reportCredentialRotationProcedure,
+} from './agent-credential'
+
 export { registerArtifact, REGISTER_ARTIFACT_PATH, artifactLocationError } from './artifacts'
+
+export {
+  agentCredentialMaterialStore,
+  createRefusingMaterialStore,
+  MATERIAL_STORE_NOT_CONFIGURED_REASON,
+} from './credential-material'
+export type { AgentCredentialMaterialStore } from './credential-material'
 
 export {
   credentialSigningKey,
