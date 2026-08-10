@@ -96,6 +96,15 @@ export type AcknowledgeCommandInput = MachineRouterInputs['acknowledgeCommand']
 export type SkillReferenceInput = MachineRouterInputs['reportSkillReference']
 export type SnapshotParkInput = MachineRouterInputs['reportSnapshotPark']
 export type ExternalActionInput = MachineRouterInputs['reportExternalAction']
+/**
+ * One completed pass of the autonomous loop (T196, FR-061, FR-062).
+ *
+ * Inferred like everything else, and the inference matters here for a specific reason: `ordinal` is
+ * `min(1).max(3)` on the schema and bounded again by the `iterations_ordinal_bounds` check
+ * constraint, and `iteration-record.ts` is explicit that the database is the authority because a
+ * run is snapshotted, restored and re-invoked and an in-memory count survives none of that.
+ */
+export type IterationInput = MachineRouterInputs['reportIteration']
 export type PendingCommands = MachineRouterOutputs['pullPendingCommands']
 export type RenewedCredential = MachineRouterOutputs['renewCredential']
 /**
@@ -176,6 +185,7 @@ export interface MachineSurfaceTransport {
   readonly pullPendingCommands: () => Promise<PendingCommands>
   readonly acknowledgeCommand: (input: AcknowledgeCommandInput) => Promise<void>
   readonly reportSkillReference: (input: SkillReferenceInput) => Promise<void>
+  readonly reportIteration: (input: IterationInput) => Promise<void>
   readonly reportExternalAction: (input: ExternalActionInput) => Promise<ExternalActionClaim>
   readonly fetchAgentCredential: () => Promise<FetchedAgentCredentialResult>
   readonly reportCredentialRotation: (
@@ -247,6 +257,9 @@ export const createHttpMachineTransport = (
     reportSkillReference: async (input) => {
       await client.reportSkillReference.mutate(input)
     },
+    reportIteration: async (input) => {
+      await client.reportIteration.mutate(input)
+    },
     reportExternalAction: async (input) => client.reportExternalAction.mutate(input),
     // The empty object is the payload. See the note on the inferred types.
     fetchAgentCredential: async () => client.fetchAgentCredential.mutate({}),
@@ -313,6 +326,20 @@ export interface MachineSurfaceClient extends SegmentReporter {
    * one loses the only answer to which version of a convention the run followed.
    */
   readonly reportSkillReference: (input: SkillReferenceInput) => Promise<void>
+  /**
+   * One completed pass of the autonomous loop, and the bound it is checked against (FR-061).
+   *
+   * Assignable to `IterationReporter` in `../workflows`, which is the point: `recordIteration`
+   * already calls a reporter of that shape after every pass, and until this existed the autonomous
+   * loop could not be assembled at all — the port was required and nothing produced one.
+   *
+   * **Direct, and not because a replayed iteration would be stale.** It is because the *refusal*
+   * is the value. `recordIteration` treats a rejection as final rather than retryable, precisely so
+   * a fourth pass is stopped by the check constraint rather than by a counter this process holds;
+   * a buffered call would return before the bound had been checked, hand back success, and leave
+   * the loop to spend real money on a pass the database was about to refuse.
+   */
+  readonly reportIteration: (input: IterationInput) => Promise<void>
   /**
    * Claim an action before taking it outside the platform (FR-076, FR-077).
    *
@@ -428,6 +455,9 @@ export const createMachineSurfaceClient = (
         procedure: 'reportSkillReference',
         send: async () => options.transport.reportSkillReference(input),
       }),
+
+    // Direct: see the note on the interface. A buffered iteration is a bound nobody checked.
+    reportIteration: async (input) => options.transport.reportIteration(input),
 
     // Direct: see the note on the interface. A buffered claim is not a claim.
     reportExternalAction: async (input) => options.transport.reportExternalAction(input),

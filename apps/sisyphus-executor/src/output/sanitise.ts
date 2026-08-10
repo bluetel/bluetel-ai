@@ -15,8 +15,9 @@
  * way.
  */
 
-import { createStreamingRedactor } from './redact'
-import type { SecretSource } from './secret-values'
+import type { SecretSource } from '@bluetel-ai/sisyphus-redaction'
+import { createStreamingRedactor } from '@bluetel-ai/sisyphus-redaction'
+
 import { createControlStripper } from './strip-control'
 
 declare const sanitisedTextBrand: unique symbol

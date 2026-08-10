@@ -10,19 +10,27 @@ import { createSisyphusAdditionalContext } from './context'
 import { createTRPCSetup } from './trpc'
 
 /**
- * The five procedure types, and the guarantee each one carries.
+ * The six procedure types, and the guarantee each one carries.
  *
- * | Procedure          | Guarantees                                                              |
- * | ------------------ | ----------------------------------------------------------------------- |
- * | `publicProcedure`  | Nothing. Health check only.                                             |
- * | `authedProcedure`  | An **active** human session; sets `ctx.user`.                           |
- * | `adminProcedure`   | `authedProcedure` + `role = 'admin'`; the denial is recorded.            |
- * | `scopedProcedure`  | `authedProcedure` + a resolved `ctx.scope` every workflow query uses.    |
- * | `machineProcedure` | A valid workflow-scoped credential; sets `ctx.workflowId`.              |
+ * | Procedure             | Guarantees                                                            |
+ * | --------------------- | --------------------------------------------------------------------- |
+ * | `publicProcedure`     | Nothing. Health check only.                                           |
+ * | `authedProcedure`     | An **active** human session; sets `ctx.user`.                         |
+ * | `adminProcedure`      | `authedProcedure` + `role = 'admin'`; the denial is recorded.          |
+ * | `scopedProcedure`     | `authedProcedure` + a resolved `ctx.scope` every workflow query uses.  |
+ * | `machineProcedure`    | A valid workflow-scoped credential; sets `ctx.workflowId`.            |
+ * | `validationProcedure` | A valid validation credential; sets `ctx.validationRunId`.            |
  *
  * Each is built from the one before it with `.use()` rather than from a shared middleware list,
  * so the chained context type is what the next middleware sees — `adminProcedure` reads
  * `ctx.user` because `authedProcedure` put it there, not because it re-derives it.
+ *
+ * The last two are siblings rather than a chain, and that is the whole of T200's authorisation
+ * story: `validationProcedure` is **not** built on `machineProcedure`, because a validation run has
+ * no workflow and `machineProcedure`'s entire purpose is to establish one. Building it on top would
+ * have required a nullable `ctx.workflowId`, which every existing machine resolver would then have
+ * had to handle. Both are built on `publicProcedure` and each resolves its own credential from its
+ * own table.
  */
 
 export const { t, createTRPCContext, createCallerFactory, createTRPCRouter, publicProcedure } =
@@ -140,6 +148,76 @@ export const machineProcedure = publicProcedure.use(async ({ ctx, path, next }) 
   }
 
   return next({ ctx: { workflowId: credential.workflowId, credential } })
+})
+
+/**
+ * Requires a valid **bundle validation** credential and pins the request to one validation run
+ * (T200, FR-147, 003/FR-052).
+ *
+ * ## Why this exists at all
+ *
+ * Every other procedure on the machine surface is scoped to `ctx.workflowId`, and a validation run
+ * has no workflow — which is why, until this existed, a validation-mode executor could not report
+ * anything and halted at the boundary rather than provisioning. FR-147 requires per-phase results to
+ * be reported and recorded; this is the authorisation that makes reporting them possible.
+ *
+ * ## Written as a sibling of `machineProcedure`, deliberately
+ *
+ * Same three checks in the same order, against a different table:
+ *
+ * 1. **A credential, or `UNAUTHORIZED`.** An unwired host resolves `null` here exactly as a missing
+ *    header does, and both are recorded as `machine_credential_missing`. A deployment that has not
+ *    supplied `resolveValidationCredential` therefore refuses reports rather than accepting
+ *    unauthenticated ones — see the dependency's own note.
+ * 2. **The row's expiry, never the token's.** The token's `exp` is a twelve-hour ceiling; the row's
+ *    `expires_at` is the short window. A validation is bounded at 45 minutes and its window is 15,
+ *    so this check is reached in practice by any run whose `setup.sh` is slow.
+ * 3. **No human session.** FR-005 in both directions: an executor credential grants nothing on the
+ *    interactive surface, and a request carrying a panel cookie is refused here even when it also
+ *    presents a valid credential, so the two surfaces cannot lend each other authority.
+ *
+ * What it deliberately does **not** do is put a `workflowId` on the context under any name. There is
+ * none, and inventing one — the validation run's id, say — would make a validation credential
+ * capable of satisfying `assertMachineWorkflowMatches` against a row that does not exist.
+ */
+export const validationProcedure = publicProcedure.use(async ({ ctx, path, next }) => {
+  const credential = await ctx.validationCredential()
+
+  if (credential === null) {
+    await ctx.dependencies.recordDenial({ reason: 'machine_credential_missing', path })
+    throw new TRPCError({
+      code: 'UNAUTHORIZED',
+      message: 'This surface requires a validation-scoped credential.',
+    })
+  }
+
+  if (credential.expiresAt.getTime() <= Date.now()) {
+    await ctx.dependencies.recordDenial({
+      reason: 'machine_credential_invalid',
+      validationRunId: credential.validationRunId,
+      path,
+      detail: 'expired',
+    })
+    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Credential expired.' })
+  }
+
+  if (ctx.session !== null) {
+    await ctx.dependencies.recordDenial({
+      reason: 'surface_confusion',
+      userId: ctx.session.user.id,
+      validationRunId: credential.validationRunId,
+      path,
+      detail: 'human session presented on the machine surface',
+    })
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'The machine surface does not accept an interactive session.',
+    })
+  }
+
+  return next({
+    ctx: { validationRunId: credential.validationRunId, validationCredential: credential },
+  })
 })
 
 /** The context a `machineProcedure` resolver runs with. */

@@ -51,10 +51,20 @@ import {
  * ## Why an unrecognised subject is refused rather than trusted
  *
  * `workflowIdFromSubject` returns `undefined` for anything that is not `workflow:<id>`, including
- * the `validation:<id>` subject a bundle validation run carries. A validation run has no workflow,
- * and there is no procedure on the machine surface that is not scoped to one — so the safe answer
- * is `null`, and the reason FR-147's reporting is unfinished stays visible instead of being
- * papered over by a credential that resolves to *some* workflow.
+ * the `validation:<id>` subject a bundle validation run carries, and this module refuses it with
+ * `subject_names_no_workflow`.
+ *
+ * That refusal survives T200 unchanged, and it is now load-bearing in a way it was not before.
+ * `validation_credentials` and `machine.reportValidation` exist, so a validation credential is no
+ * longer a token that authorises nothing — it is a token that authorises **one procedure against a
+ * `validation_runs` row**. It must still never resolve to a {@link MachineCredential}, because every
+ * `machineProcedure` reads `ctx.workflowId` and would be given the id of a run that does not exist.
+ * The two subject spaces are resolved by two functions against two tables:
+ * {@link inspectScopedCredential} here, and `inspectValidationCredential` in
+ * `./validation-credential.ts`. Neither can answer for the other, and
+ * {@link inspectCredentialToken} — the signature-and-claims half both share — deliberately returns
+ * the raw `sub` rather than an id, so the choice of subject space is made by the caller and not by
+ * whatever turned up on the wire.
  */
 
 /** The header the executor presents its credential in. */
@@ -119,6 +129,18 @@ export type ScopedCredentialRefusal =
   | 'credential_not_found'
   | 'credential_revoked'
   | 'credential_workflow_mismatch'
+
+/**
+ * The refusals that are decided before either subject space is consulted.
+ *
+ * Named as a subset so `./validation-credential.ts` can reuse {@link inspectCredentialToken}'s
+ * verdict without restating it, and without inheriting `subject_names_no_workflow` — which would be
+ * an untrue thing for the validation path to record.
+ */
+export type CredentialTokenRefusal = Extract<
+  ScopedCredentialRefusal,
+  'signature_or_claims_rejected' | 'algorithm_not_pinned' | 'issuer_mismatch' | 'audience_mismatch'
+>
 
 /** The outcome of inspecting one token: the credential, or the reason there is none. */
 export interface ScopedCredentialOutcome {
@@ -186,6 +208,67 @@ const refused = (refusal: ScopedCredentialRefusal): ScopedCredentialOutcome => (
   refusal,
 })
 
+/** What a token proved about itself, before anybody has decided what it is allowed to name. */
+export interface CredentialTokenClaims {
+  /** The `sub` claim verbatim. Deliberately not an id — see below. */
+  readonly subject: string | undefined
+  readonly jti: string | undefined
+}
+
+/**
+ * The signature-and-claims half of verification, shared by both subject spaces (T200).
+ *
+ * Everything up to and including "this token was signed by the control plane, uses the pinned
+ * algorithm, and is addressed to the machine surface" is identical for a workflow credential and a
+ * validation credential, and it is the half where a mistake is a forgery rather than a mis-scoped
+ * write. So it is written once. `./validation-credential.ts` calls this and then does its own
+ * lookup; {@link inspectScopedCredential} below does the same.
+ *
+ * **It returns `sub` rather than an id, and that is the point of the split.** Handing back a
+ * discriminated `{ kind, id }` would put the choice of subject space inside a `switch` at each call
+ * site, and the failure mode of a missing case is a validation credential resolving to a workflow.
+ * Returning the raw claim means each caller applies its own `…FromSubject`, and a caller that wants
+ * workflows has no way to obtain a validation run id.
+ *
+ * @param options - The signing secret and the host's JOSE binding. The handle is unused here.
+ * @param token - The compact JWT as presented.
+ * @returns The claims, or the reason the token was refused before its subject was read.
+ */
+export const inspectCredentialToken = async (
+  options: Pick<ScopedCredentialResolverOptions, 'jwtVerify' | 'secret'>,
+  token: string,
+): Promise<{ claims: CredentialTokenClaims } | { refusal: CredentialTokenRefusal }> => {
+  let verified: ScopedCredentialJwtResult
+
+  try {
+    // The algorithm is pinned so a token presenting `alg: none` — or any asymmetric algorithm
+    // against a key this process treats as symmetric — fails rather than being negotiated with.
+    verified = await options.jwtVerify(token, credentialSigningKey(options.secret), {
+      algorithms: [SCOPED_CREDENTIAL_ALGORITHM],
+      issuer: SCOPED_CREDENTIAL_ISSUER,
+      audience: SCOPED_CREDENTIAL_AUDIENCE,
+    })
+  } catch {
+    return { refusal: 'signature_or_claims_rejected' }
+  }
+
+  // Re-checked rather than assumed. A host binding that dropped these options — or a library that
+  // treated them as advisory — must not be able to widen what this platform accepts.
+  if (verified.protectedHeader.alg !== SCOPED_CREDENTIAL_ALGORITHM) {
+    return { refusal: 'algorithm_not_pinned' }
+  }
+
+  if (verified.payload.iss !== SCOPED_CREDENTIAL_ISSUER) {
+    return { refusal: 'issuer_mismatch' }
+  }
+
+  if (!audienceIncludes(verified.payload.aud)) {
+    return { refusal: 'audience_mismatch' }
+  }
+
+  return { claims: { subject: verified.payload.sub, jti: verified.payload.jti } }
+}
+
 /**
  * Verify one token and resolve it to the credential row behind it, keeping the reason.
  *
@@ -200,40 +283,18 @@ export const inspectScopedCredential = async (
   options: ScopedCredentialResolverOptions,
   token: string,
 ): Promise<ScopedCredentialOutcome> => {
-  let verified: ScopedCredentialJwtResult
+  const inspected = await inspectCredentialToken(options, token)
 
-  try {
-    // The algorithm is pinned so a token presenting `alg: none` — or any asymmetric algorithm
-    // against a key this process treats as symmetric — fails rather than being negotiated with.
-    verified = await options.jwtVerify(token, credentialSigningKey(options.secret), {
-      algorithms: [SCOPED_CREDENTIAL_ALGORITHM],
-      issuer: SCOPED_CREDENTIAL_ISSUER,
-      audience: SCOPED_CREDENTIAL_AUDIENCE,
-    })
-  } catch {
-    return refused('signature_or_claims_rejected')
+  if ('refusal' in inspected) {
+    return refused(inspected.refusal)
   }
 
-  // Re-checked rather than assumed. A host binding that dropped these options — or a library that
-  // treated them as advisory — must not be able to widen what this platform accepts.
-  if (verified.protectedHeader.alg !== SCOPED_CREDENTIAL_ALGORITHM) {
-    return refused('algorithm_not_pinned')
-  }
-
-  if (verified.payload.iss !== SCOPED_CREDENTIAL_ISSUER) {
-    return refused('issuer_mismatch')
-  }
-
-  if (!audienceIncludes(verified.payload.aud)) {
-    return refused('audience_mismatch')
-  }
-
-  const workflowId = workflowIdFromSubject(verified.payload.sub)
+  const workflowId = workflowIdFromSubject(inspected.claims.subject)
   if (workflowId === undefined) {
     return refused('subject_names_no_workflow')
   }
 
-  const jti = verified.payload.jti
+  const jti = inspected.claims.jti
   if (jti === undefined) {
     return refused('jti_absent')
   }

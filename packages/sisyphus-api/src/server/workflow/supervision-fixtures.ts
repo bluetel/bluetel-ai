@@ -195,6 +195,7 @@ export const createSupervisionFixture = (connectionString: string): SupervisionF
         session,
         scope: memoiseScope(() => Promise.resolve(scope)),
         machineCredential: () => Promise.resolve(null),
+        validationCredential: () => Promise.resolve(null),
       }
     },
 

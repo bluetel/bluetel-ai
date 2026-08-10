@@ -11,6 +11,7 @@ import {
   createWebApiSlackMessenger,
   createWorkflowNotifier,
 } from '@bluetel-ai/sisyphus-notify'
+import { createRedactor } from '@bluetel-ai/sisyphus-redaction'
 import { WebClient } from '@slack/web-api'
 
 import type { ComputeProvisioner, ObjectStore, ScheduleRegistry } from './aws'
@@ -31,7 +32,6 @@ import type {
 } from './jobs'
 import {
   createRefusingCredentialExerciser,
-  createRefusingPromptRedactor,
   createRegisteredConnectorRegistry,
   createWorkflowStarter,
   drainQueue,
@@ -56,10 +56,23 @@ import {
  * ## Why every port is overridable
  *
  * The overrides are not a testing convenience bolted on; they are the seam a deployment wires
- * through. The prompt redactor is the case that matters: {@link createRefusingPromptRedactor} is
- * the default because the standard FR-163 sets lives in the executor's output pipeline and no
- * package publishes it yet, and a deployment that has wired none must fail its ticks loudly rather
- * than write unredacted ticket bodies into `workflows.assembled_prompt`.
+ * through. A port with no real implementation defaults to one that refuses — see
+ * {@link ControlPlaneContext.credentialExerciser} — because a deployment that has wired none must
+ * fail loudly rather than look configured.
+ *
+ * ## The prompt redactor is no longer one of those
+ *
+ * It was, and the refusal was not a design choice so much as a description of where the code lived:
+ * the standard FR-163 sets is the executor's, and an app must not depend on another app, so the
+ * default was `createRefusingPromptRedactor()` and **every integration tick that found a candidate
+ * ticket threw** (T198). The standard now lives in `@bluetel-ai/sisyphus-redaction`, which both apps
+ * depend on, so the default below is the real thing: {@link createRedactor}, built with no known
+ * values because the control plane redacts a customer's ticket rather than a run's output and has
+ * no bundle of installed credentials to hand it. Its key-block and pattern stages are what FR-163
+ * rests on here, and the package's own suite asserts they hold in exactly that configuration.
+ *
+ * `createRefusingPromptRedactor` stays exported from `jobs/` for the suites that assert the refusal
+ * propagates rather than being swallowed — it is no longer wired to anything.
  */
 
 /** The validated environment, without importing it — `import type` is erased. */
@@ -110,12 +123,12 @@ export interface ControlPlaneContext {
   /**
    * The provider round trip keep-alive makes (003/FR-035, research R1/R2).
    *
-   * A port like every other, and the one with no real implementation yet: what "exercise" means
-   * against a provider is not determined by the specification, so it is a seam and the default
-   * **refuses**. That is the `createRefusingPromptRedactor` choice repeated, and for a sharper
-   * reason — a stub reporting success would mark every seat in the pool as freshly proven without
-   * reaching anything, which is SC-009 defeated silently and discovered when every login has
-   * already expired.
+   * A port like every other, and — since T198 packaged the redactor — the only one with no real
+   * implementation: what "exercise" means against a provider is not determined by the
+   * specification, so it is a seam and the default **refuses**. The refusal is right here for a
+   * sharper reason than it ever was for the redactor: a stub reporting success would mark every
+   * seat in the pool as freshly proven without reaching anything, which is SC-009 defeated silently
+   * and discovered when every login has already expired.
    */
   readonly credentialExerciser: CredentialExerciser
   readonly machineSurfaceUrl: string
@@ -268,7 +281,9 @@ export const createControlPlaneContext = (
     objectStore,
     schedules,
     connectors: options.connectors ?? createRegisteredConnectorRegistry(),
-    redactor: options.redactor ?? createRefusingPromptRedactor(),
+    // FR-163's "same standard as run output", as the one implementation of it (T198). A supplied
+    // override still wins verbatim, which is how a suite states the redactor it is asserting about.
+    redactor: options.redactor ?? createRedactor(),
     readCredential,
     buckets: {
       logs: env.SISYPHUS_LOGS_BUCKET,

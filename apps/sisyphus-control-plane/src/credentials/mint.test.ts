@@ -1,4 +1,5 @@
-import { scopedCredentials } from '@bluetel-ai/sisyphus-api/db'
+import type { ValidationCredential } from '@bluetel-ai/sisyphus-api/db'
+import { scopedCredentials, validationCredentials } from '@bluetel-ai/sisyphus-api/db'
 import {
   credentialSigningKey,
   SCOPED_CREDENTIAL_AUDIENCE,
@@ -6,13 +7,14 @@ import {
   SCOPED_CREDENTIAL_MAX_LIFETIME_MS,
   SCOPED_CREDENTIAL_WINDOW_MS,
 } from '@bluetel-ai/sisyphus-api/server'
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { decodeJwt, decodeProtectedHeader, jwtVerify } from 'jose'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 // The fixture harness is deliberately absent from `jobs/index.ts` — exporting a seeder from a
 // barrel would put it one import away from a job — so a test reaches the module directly. That is
 // the only sanctioned way in, and it is why this import looks like a barrel violation and is not.
+import type { WorkflowFixtures } from '../jobs/workflow-fixtures'
 import { createWorkflowFixtures, readTestDatabaseUrl } from '../jobs/workflow-fixtures'
 
 import { liveCredentialFor, mintScopedCredential, mintValidationCredential } from './mint'
@@ -165,21 +167,159 @@ describeWithDatabase('minting a workflow-scoped credential', () => {
   })
 })
 
-describe('minting a validation-run token', () => {
-  it('signs a subject in the validation space and writes no row', async () => {
-    // No database: a validation run has no workflow, so there is no `scoped_credentials` row it
-    // could be backed by — `workflow_id` on that table is `not null`.
+/**
+ * The validation half (T200, FR-147).
+ *
+ * This suite used to assert the opposite of what it asserts now, and the change is the task: a
+ * validation token was signed and backed by **no row**, because `scoped_credentials.workflow_id` is
+ * `not null` and a validation run has no workflow. `validation_credentials` supplies the row without
+ * touching that column or its index, so the same four FR-037 properties now hold for a validation
+ * credential as for a workflow one — and the fifth, supersession, holds for the same reason.
+ */
+describeWithDatabase('minting a validation-run credential', () => {
+  const fixtures = createWorkflowFixtures(connectionString ?? '')
+
+  beforeAll(() => fixtures.open(), 60_000)
+  afterEach(() => fixtures.removeAll())
+  afterAll(() => fixtures.close())
+
+  it('writes a row and returns a token backed by it', async () => {
+    const validationRunId = await fixtures.seedValidationRun()
+    const issuedAt = new Date('2026-08-05T10:00:00.000Z')
+
     const minted = await mintValidationCredential({
-      validationRunId: '22222222-2222-2222-2222-222222222222',
+      db: fixtures.db(),
+      validationRunId,
       secret: SECRET,
+      now: issuedAt,
     })
 
+    const stored = await liveValidationCredentialFor(fixtures.db(), validationRunId)
+
+    expect(stored).toBeDefined()
+    expect(stored?.id).toBe(minted.credentialId)
+    expect(stored?.jti).toBe(minted.jti)
+    expect(stored?.revokedAt).toBeNull()
+    expect(stored?.renewalCount).toBe(0)
+    expect(minted.supersededCredentialId).toBeUndefined()
+  })
+
+  it('signs a subject in the validation space, and nothing that could name a workflow', async () => {
+    const validationRunId = await fixtures.seedValidationRun()
+
+    const minted = await mintValidationCredential({
+      db: fixtures.db(),
+      validationRunId,
+      secret: SECRET,
+    })
     const { payload } = await jwtVerify(minted.token, credentialSigningKey(SECRET), {
       issuer: SCOPED_CREDENTIAL_ISSUER,
       audience: SCOPED_CREDENTIAL_AUDIENCE,
     })
 
-    expect(payload.sub).toBe('validation:22222222-2222-2222-2222-222222222222')
-    expect(payload.cid).toBeUndefined()
+    expect(payload.sub).toBe(`validation:${validationRunId}`)
+    expect(payload.aud).toBe(SCOPED_CREDENTIAL_AUDIENCE)
+    expect(payload.cid).toBe(minted.credentialId)
+    // The same enumeration `mintScopedCredential`'s claims get, for the same reason: a `scope` or
+    // `workflows` claim appearing here would be a widening the format cannot currently express.
+    expect(Object.keys(payload).sort()).toStrictEqual([
+      'aud',
+      'cid',
+      'exp',
+      'iat',
+      'iss',
+      'jti',
+      'nbf',
+      'sub',
+    ])
+  })
+
+  it('expires the row short and the token long, with the row governing', async () => {
+    const validationRunId = await fixtures.seedValidationRun()
+    const issuedAt = new Date('2026-08-05T10:00:00.000Z')
+
+    const minted = await mintValidationCredential({
+      db: fixtures.db(),
+      validationRunId,
+      secret: SECRET,
+      now: issuedAt,
+    })
+
+    expect(minted.expiresAt.getTime()).toBe(issuedAt.getTime() + SCOPED_CREDENTIAL_WINDOW_MS)
+    expect((decodeJwt(minted.token).exp ?? 0) * 1000).toBe(
+      Math.floor(issuedAt.getTime() + SCOPED_CREDENTIAL_MAX_LIFETIME_MS),
+    )
+  })
+
+  it('supersedes the incumbent rather than losing on validation_credentials_live_key', async () => {
+    // A launch that failed after the row was written and is retried arrives here twice for one run.
+    const validationRunId = await fixtures.seedValidationRun()
+
+    const first = await mintValidationCredential({
+      db: fixtures.db(),
+      validationRunId,
+      secret: SECRET,
+    })
+    const second = await mintValidationCredential({
+      db: fixtures.db(),
+      validationRunId,
+      secret: SECRET,
+    })
+
+    expect(second.supersededCredentialId).toBe(first.credentialId)
+
+    const rows = await fixtures
+      .db()
+      .select()
+      .from(validationCredentials)
+      .where(eq(validationCredentials.validationRunId, validationRunId))
+
+    expect(rows).toHaveLength(2)
+    expect(rows.filter((row) => row.revokedAt === null).map((row) => row.id)).toStrictEqual([
+      second.credentialId,
+    ])
+  })
+
+  it('gives every issue a fresh jti, so a replay is recognisable rather than merely unexpired', async () => {
+    const validationRunId = await fixtures.seedValidationRun()
+
+    const first = await mintValidationCredential({
+      db: fixtures.db(),
+      validationRunId,
+      secret: SECRET,
+    })
+    const second = await mintValidationCredential({
+      db: fixtures.db(),
+      validationRunId,
+      secret: SECRET,
+    })
+
+    expect(second.jti).not.toBe(first.jti)
+  })
+
+  it('refuses to sign with an empty secret, and writes nothing when it does', async () => {
+    const validationRunId = await fixtures.seedValidationRun()
+
+    await expect(
+      mintValidationCredential({ db: fixtures.db(), validationRunId, secret: '' }),
+    ).rejects.toThrow(/empty/)
   })
 })
+
+/** The live credential for a validation run, if it has one. Local to this suite. */
+const liveValidationCredentialFor = async (
+  db: ReturnType<WorkflowFixtures['db']>,
+  validationRunId: string,
+): Promise<ValidationCredential | undefined> =>
+  (
+    await db
+      .select()
+      .from(validationCredentials)
+      .where(
+        and(
+          eq(validationCredentials.validationRunId, validationRunId),
+          isNull(validationCredentials.revokedAt),
+        ),
+      )
+      .limit(1)
+  ).at(0)

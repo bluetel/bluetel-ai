@@ -125,6 +125,19 @@ export type {
   PullRequestSetOutcome,
 } from './pull-request-set'
 
+export {
+  createHttpReviewForge,
+  REVIEW_CREDENTIAL_SECRET_NAME,
+  reviewTargetStateFrom,
+} from './review-forge'
+export type {
+  HttpReviewForgeOptions,
+  PostedReviewComment,
+  PublishFindings,
+  ReviewedPullRequest,
+  ReviewForge,
+} from './review-forge'
+
 export { PROMOTION_SKILL_NAME, promotionOrderError, requirePromotionOrder } from './promotion-order'
 export type { DeclaredPromotionOrder, OrderableEntry, PromotionStep } from './promotion-order'
 

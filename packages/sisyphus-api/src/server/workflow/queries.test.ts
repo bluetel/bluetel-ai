@@ -453,6 +453,7 @@ describe.skipIf(connectionString === undefined)('workflow read paths are scoped 
         session,
         scope: { resolve: () => Promise.resolve(scope) },
         machineCredential: () => Promise.resolve(null),
+        validationCredential: () => Promise.resolve(null),
       }
 
       return createCallerFactory(workflowRouter)(context)

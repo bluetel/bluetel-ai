@@ -171,6 +171,7 @@ describeWithDatabase(
           Promise.resolve({ userId: admin.id, isAdmin: true, visibleProfileIds: [] }),
         ),
         machineCredential: () => Promise.resolve(null),
+        validationCredential: () => Promise.resolve(null),
       }
     }
 

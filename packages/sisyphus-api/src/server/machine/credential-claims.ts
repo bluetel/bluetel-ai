@@ -75,14 +75,24 @@ export const SCOPED_CREDENTIAL_ALGORITHM = 'HS256'
 export const WORKFLOW_SUBJECT_PREFIX = 'workflow:'
 
 /**
- * `sub` for a bundle validation run (T047, FR-147), which has no workflow row and therefore no
- * `scoped_credentials` row — that table's `workflow_id` is `not null`.
+ * `sub` for a bundle validation run (T047, T200, FR-147), which has no workflow row.
  *
- * {@link import('./credential-verification').createScopedCredentialResolver} **refuses** this
- * subject form, and that refusal is the honest state of the platform rather than an oversight: the
- * machine surface has no validation-run reporting procedure, so there is nothing for such a
- * credential to authorise. Minting it keeps the envelope the shape `executor-protocol.md`
- * specifies; refusing it keeps it from silently authorising anything until the surface exists.
+ * ## The refusal this replaces, and what changed under it
+ *
+ * This constant used to carry a note saying that
+ * {@link import('./credential-verification').createScopedCredentialResolver} refuses this subject
+ * form on purpose, because there was no row a validation credential could name —
+ * `scoped_credentials.workflow_id` is `not null` — and no procedure on the machine surface it could
+ * have authorised. Both halves are now closed: `validation_credentials` is the row (see
+ * `db/schema/bundle.ts` for why a second table rather than a nullable column) and
+ * `machine.reportValidation` is the procedure.
+ *
+ * **The refusal on the workflow path is unchanged, and must stay.** {@link workflowIdFromSubject}
+ * still returns `undefined` for this prefix and `createScopedCredentialResolver` still refuses it
+ * with `subject_names_no_workflow`. That is not a leftover: a validation credential must not resolve
+ * to a `MachineCredential`, because every `machineProcedure` in the platform reads `ctx.workflowId`
+ * and would be handed one that names a run that does not exist. The two subject spaces are resolved
+ * by two functions against two tables, and neither can answer for the other.
  */
 export const VALIDATION_SUBJECT_PREFIX = 'validation:'
 
@@ -132,6 +142,36 @@ export const workflowIdFromSubject = (subject: string | undefined): string | und
 
   const workflowId = subject.slice(WORKFLOW_SUBJECT_PREFIX.length)
   return workflowId === '' ? undefined : workflowId
+}
+
+/**
+ * The validation run a subject names, or `undefined` when it names something else (T200, FR-147).
+ *
+ * The exact mirror of {@link workflowIdFromSubject}, and a separate function rather than a
+ * parameterised one for the same reason the two subject prefixes exist at all: **the caller must
+ * choose which subject space it is willing to accept, and must not be able to accept whichever one
+ * arrived.** A single `idFromSubject` returning `{ kind, id }` would put that choice inside a
+ * `switch` at every call site, and the failure mode of forgetting a case is a validation credential
+ * authorising a workflow write. Here `createScopedCredentialResolver` can only reach the workflow
+ * table and `createValidationCredentialResolver` can only reach the validation table, because
+ * neither has a function that will hand it the other kind of id.
+ *
+ * Deliberately total and deliberately strict, on the same terms: absent, empty, another kind, or a
+ * bare id with no prefix all yield `undefined`.
+ *
+ * @param subject - The `sub` claim as verified, which may be missing entirely.
+ */
+export const validationRunIdFromSubject = (subject: string | undefined): string | undefined => {
+  if (subject === undefined) {
+    return undefined
+  }
+
+  if (!subject.startsWith(VALIDATION_SUBJECT_PREFIX)) {
+    return undefined
+  }
+
+  const validationRunId = subject.slice(VALIDATION_SUBJECT_PREFIX.length)
+  return validationRunId === '' ? undefined : validationRunId
 }
 
 /**

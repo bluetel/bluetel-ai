@@ -49,16 +49,20 @@ export {
   CREDENTIAL_HEADER,
   CREDENTIAL_SCHEME,
   createScopedCredentialResolver,
+  createValidationCredentialResolver,
   credentialSigningKey,
   inspectScopedCredential,
+  inspectValidationCredential,
   SCOPED_CREDENTIAL_ALGORITHM,
   SCOPED_CREDENTIAL_AUDIENCE,
   SCOPED_CREDENTIAL_ISSUER,
   SCOPED_CREDENTIAL_MAX_LIFETIME_MS,
   SCOPED_CREDENTIAL_WINDOW_MS,
   VALIDATION_SUBJECT_PREFIX,
+  validationRunIdFromSubject,
   validationSubject,
   verifyScopedCredential,
+  verifyValidationCredential,
   WORKFLOW_SUBJECT_PREFIX,
   workflowIdFromSubject,
   workflowSubject,
@@ -68,10 +72,17 @@ export type {
   ScopedCredentialOutcome,
   ScopedCredentialRefusal,
   ScopedCredentialResolverOptions,
+  ValidationCredentialOutcome,
+  ValidationCredentialRefusal,
+  ValidationRunCredential,
 } from '@bluetel-ai/sisyphus-api/server'
 
 export { liveCredentialFor, mintScopedCredential, mintValidationCredential } from './mint'
-export type { MintedScopedCredential, MintScopedCredentialOptions } from './mint'
+export type {
+  MintedScopedCredential,
+  MintedValidationCredential,
+  MintScopedCredentialOptions,
+} from './mint'
 
 export { revokeScopedCredentials } from './revoke'
 export type { RevocationOutcome } from './revoke'

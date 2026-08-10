@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import { integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 import {
@@ -93,9 +94,81 @@ export const validationRuns = pgTable('validation_runs', {
   endedAt: timestampColumn('ended_at'),
 })
 
+/**
+ * **The credential a validation run authenticates with (T200, FR-147, 003/FR-052).**
+ *
+ * Until this table existed a validation run could not reach the machine surface at all. The control
+ * plane minted it a token with a `validation:<id>` subject, the verifier refused that subject
+ * outright, and `apps/sisyphus-executor` halted on a named error rather than running: there was no
+ * row for the token to name, because `scoped_credentials.workflow_id` is `not null` and a validation
+ * has no workflow. FR-147's per-phase reporting was therefore unreachable by construction.
+ *
+ * ## Why a second table rather than a nullable `scoped_credentials.workflow_id`
+ *
+ * The alternative was to make that column nullable and let a validation row sit in the same table.
+ * It is rejected here for the reason `jobs/validate-bundle.ts` already gives for *not* recording a
+ * validation as a workflow: loosening a `not null` column so a handful of rows can omit it makes
+ * every other row in the table one `null` away from being unattributable, and pushes the check into
+ * every consumer. That cost is concrete rather than stylistic —
+ * `server/machine/credential-verification.ts` compares `stored.workflowId` against the subject and
+ * `MachineCredential.workflowId` is a `string` that `machineProcedure` puts on `ctx.workflowId`, so
+ * a nullable column would have widened the type every workflow-scoped write in the platform is
+ * built on, to express a state none of them can ever be in.
+ *
+ * It also keeps `scoped_credentials_live_key` **untouched**. That index is a partial unique index on
+ * `(workflow_id) WHERE revoked_at is null` — at most one live credential per run, which is what
+ * makes a re-mint supersede rather than duplicate and what makes a replayed token from a previous
+ * instance recognisably dead. Reworking a live safety index to accommodate rows it was not written
+ * for is a change whose failure mode is silent; not touching it is the strongest available proof it
+ * was not weakened.
+ *
+ * ## What it does keep from `scoped_credentials`, and why
+ *
+ * The same shape, deliberately: a unique `jti` so a replayed token resolves to a row that is
+ * *recognisably* superseded rather than merely unexpired; a short `expires_at` that the verifier
+ * reads instead of the token's much longer ceiling; and a partial unique index on the run, so a
+ * second mint for the same validation revokes the incumbent rather than creating a second live
+ * credential for one instance.
+ *
+ * `renewal_count` exists and is expected to stay zero. A validation is bounded by
+ * `VALIDATION_BUDGET_MS` (45 minutes) and its credential window is 15, so a long `setup.sh` will
+ * legitimately renew; the column is here so that when it does, the count says so.
+ *
+ * ## What it deliberately does not have (003/FR-052)
+ *
+ * No agent credential, no lease, no reference to `credential_groups` — nothing that touches the
+ * pool. 003/FR-052 requires that proving a bundle consumes no pool capacity, and the way that is
+ * held is that there is no column here through which a validation could take a seat. A validation
+ * instance never reaches bootstrap phase `credential_install` and never calls
+ * `machine.fetchAgentCredential`, because `validationProcedure` resolves no workflow and every
+ * procedure that touches the pool is a `machineProcedure` scoped to one.
+ */
+export const validationCredentials = pgTable(
+  'validation_credentials',
+  {
+    id: idColumn(),
+    validationRunId: uuid('validation_run_id')
+      .notNull()
+      .references(() => validationRuns.id),
+    jti: text('jti').notNull(),
+    issuedAt: timestampColumn('issued_at').notNull().defaultNow(),
+    expiresAt: timestampColumn('expires_at').notNull(),
+    renewalCount: integer('renewal_count').notNull().default(0),
+    revokedAt: timestampColumn('revoked_at'),
+  },
+  (table) => [
+    uniqueIndex('validation_credentials_jti_key').on(table.jti),
+    uniqueIndex('validation_credentials_live_key')
+      .on(table.validationRunId)
+      .where(sql`${table.revokedAt} is null`),
+  ],
+)
+
 export type SetupBundle = typeof setupBundles.$inferSelect
 export type NewSetupBundle = typeof setupBundles.$inferInsert
 export type SetupBundleVersion = typeof setupBundleVersions.$inferSelect
 export type NewSetupBundleVersion = typeof setupBundleVersions.$inferInsert
 export type ValidationRun = typeof validationRuns.$inferSelect
 export type NewValidationRun = typeof validationRuns.$inferInsert
+export type ValidationCredential = typeof validationCredentials.$inferSelect
+export type NewValidationCredential = typeof validationCredentials.$inferInsert

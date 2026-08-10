@@ -1,7 +1,7 @@
+import { buildSecretIndex } from '@bluetel-ai/sisyphus-redaction'
 import { describe, expect, it } from 'vitest'
 
 import { createSecretRegistry } from './secret-registry'
-import { buildSecretIndex } from './secret-values'
 
 /**
  * 003/T054. The registry's contract is two sentences long and both of them are

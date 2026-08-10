@@ -38,6 +38,8 @@ const VOCABULARIES = [
   'TERMINAL_OUTCOMES',
   'TERMINAL_WORKFLOW_STATES',
   'USER_ROLES',
+  'VALIDATION_BOOTSTRAP_PHASES',
+  'VALIDATION_OUTCOMES',
   'WORKFLOW_STATES',
   'WORKFLOW_TYPES',
 ] as const
@@ -63,6 +65,8 @@ const GUARDS = [
   'isSupervisionDeliveryOutcome',
   'isTerminalOutcome',
   'isUserRole',
+  'isValidationBootstrapPhase',
+  'isValidationOutcome',
   'isWorkflowState',
   'isWorkflowType',
 ] as const

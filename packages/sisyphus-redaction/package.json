@@ -1,0 +1,14 @@
+{
+  "name": "@bluetel-ai/sisyphus-redaction",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@bluetel-ai/eslint-config-base": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "~5.9.2",
+    "vitest": "^4.1.0"
+  }
+}

@@ -53,6 +53,29 @@ export interface MachineCredential {
   readonly expiresAt: Date
 }
 
+/**
+ * The credential a **bundle validation** instance presents on the machine surface (T200, FR-147).
+ *
+ * The sibling of {@link MachineCredential} and deliberately not a widening of it. A validation run
+ * has no workflow — `validation_runs` is its own table precisely so `workflows.owner_user_id`,
+ * `assembled_prompt` and `workspace_version_id` can stay `not null` — so there is no `workflowId`
+ * this could carry, and a `workflowId: string | null` on the machine credential would have made
+ * every `machineProcedure` in the platform handle a state none of them can be in.
+ *
+ * Two separate types is therefore what makes "a validation credential cannot authorise a workflow
+ * write" a compile-time fact: `machineProcedure` puts a {@link MachineCredential} on the context and
+ * `validationProcedure` puts one of these, and no resolver can be reached with the wrong one.
+ *
+ * It authorises exactly one procedure — `machine.reportValidation` — and grants nothing on the
+ * interactive surface and nothing in the agent credential pool (003/FR-052).
+ */
+export interface ValidationRunCredential {
+  readonly credentialId: string
+  readonly validationRunId: string
+  readonly jti: string
+  readonly expiresAt: Date
+}
+
 /** Why a request was refused, recorded for the audit trail (FR-169, FR-180, FR-018). */
 export interface AuthorisationDenial {
   readonly reason:
@@ -73,6 +96,15 @@ export interface AuthorisationDenial {
     | 'profile_not_granted'
   readonly userId?: string
   readonly workflowId?: string
+  /**
+   * The bundle validation run a refusal on `validationProcedure` concerns (T200, FR-147).
+   *
+   * A separate field rather than a second meaning for `workflowId`, because a reader of the trail
+   * has to be able to tell "an executor presented a credential for a workflow it does not cover"
+   * from "an executor presented a credential for a validation run" — and a shared column would make
+   * a validation run id look like a workflow id that had been deleted.
+   */
+  readonly validationRunId?: string
   readonly path?: string
   readonly detail?: string
 }
@@ -91,6 +123,25 @@ export interface SisyphusDependencies {
   readonly resolveSession: (headers: Headers) => Promise<SisyphusSession | null>
   /** Verifies a workflow-scoped credential, or `null` when the request carries none. */
   readonly resolveMachineCredential: (headers: Headers) => Promise<MachineCredential | null>
+  /**
+   * Verifies a **bundle validation** credential, or `null` when the request carries none (T200,
+   * FR-147).
+   *
+   * A second resolver rather than a widening of {@link SisyphusDependencies.resolveMachineCredential},
+   * for the reason {@link ValidationRunCredential} gives: the two credentials authorise disjoint
+   * things and returning a union here would make every caller responsible for narrowing it
+   * correctly.
+   *
+   * Optional, and an omitted one **refuses** every validation report rather than behaving like an
+   * omitted {@link SisyphusDependencies.notifier}. A host that has not wired it has no way to
+   * authenticate a validation instance, and answering `null` silently is exactly right: the
+   * procedure records `machine_credential_missing` and the executor retries, which is what a
+   * misconfigured deployment should look like. What must not happen is a validation result being
+   * accepted unauthenticated, and there is no branch here that could.
+   */
+  readonly resolveValidationCredential?: (
+    headers: Headers,
+  ) => Promise<ValidationRunCredential | null>
   /** Records a refusal. Failures here must not mask the refusal itself. */
   readonly recordDenial: (denial: AuthorisationDenial) => Promise<void>
   /**
@@ -177,6 +228,15 @@ export interface SisyphusAdditionalContext {
    * that no interactive request needs.
    */
   readonly machineCredential: () => Promise<MachineCredential | null>
+  /**
+   * The validation credential, **unresolved**, for the same reason again (T200).
+   *
+   * Memoised separately from {@link SisyphusAdditionalContext.machineCredential} rather than sharing
+   * one lookup, because the two read different tables: one request never needs both, and a
+   * validation instance's single report should not pay for a `scoped_credentials` query that can
+   * only ever miss.
+   */
+  readonly validationCredential: () => Promise<ValidationRunCredential | null>
 }
 
 /** The full context object a procedure receives. */
@@ -207,5 +267,12 @@ export const createSisyphusAdditionalContext = async ({
             identity: { userId: session.user.id, isAdmin: session.user.role === 'admin' },
           }),
     machineCredential: memoiseAsync(() => dependencies.resolveMachineCredential(headers)),
+    // An unwired host resolves to `null`, which `validationProcedure` refuses and records. It is
+    // never an accepted-but-unauthenticated report; see the dependency's own note.
+    validationCredential: memoiseAsync(async () =>
+      dependencies.resolveValidationCredential === undefined
+        ? null
+        : dependencies.resolveValidationCredential(headers),
+    ),
   }
 }

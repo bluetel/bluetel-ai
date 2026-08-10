@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { BOOTSTRAP_PHASES, isBootstrapPhase } from './bootstrap-phase'
+import {
+  BOOTSTRAP_PHASES,
+  isBootstrapPhase,
+  isValidationBootstrapPhase,
+  VALIDATION_BOOTSTRAP_PHASES,
+} from './bootstrap-phase'
 
 describe('BOOTSTRAP_PHASES', () => {
   it('runs in executor-protocol order, which is what lets a timeout name a step (FR-146)', () => {
@@ -45,5 +50,30 @@ describe('BOOTSTRAP_PHASES', () => {
   it('guards membership', () => {
     expect(isBootstrapPhase('setup_script')).toBe(true)
     expect(isBootstrapPhase('warming_up')).toBe(false)
+  })
+})
+
+describe('VALIDATION_BOOTSTRAP_PHASES', () => {
+  it('is a prefix of the full sequence rather than an arbitrary subset (FR-147)', () => {
+    // The claim a validation makes is "the beginning of a real boot works". A subset with holes in
+    // it would be a different sequence wearing the same names, and would prove less than it looks.
+    expect([...BOOTSTRAP_PHASES].slice(0, VALIDATION_BOOTSTRAP_PHASES.length)).toStrictEqual([
+      ...VALIDATION_BOOTSTRAP_PHASES,
+    ])
+  })
+
+  it('stops at the setup script, before anything a validation has no input for', () => {
+    expect(VALIDATION_BOOTSTRAP_PHASES.at(-1)).toBe('setup_script')
+    // No workspace, no prompt, no leased seat — so these three are not phases a validation skipped,
+    // they are phases that do not exist for it (FR-147, 003/FR-052).
+    for (const phase of ['credential_install', 'entry_checkout', 'agent_start'] as const) {
+      expect(isValidationBootstrapPhase(phase)).toBe(false)
+      expect(isBootstrapPhase(phase)).toBe(true)
+    }
+  })
+
+  it('guards membership', () => {
+    expect(isValidationBootstrapPhase('bundle_verify')).toBe(true)
+    expect(isValidationBootstrapPhase('warming_up')).toBe(false)
   })
 })

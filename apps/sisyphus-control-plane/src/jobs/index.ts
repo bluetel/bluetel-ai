@@ -247,6 +247,7 @@ export {
   completeBundleValidation,
   runValidateBundle,
   startBundleValidation,
+  terminateFinishedValidationInstances,
   VALIDATE_BUNDLE_JOB_NAME,
   VALIDATION_BUDGET_MS,
   VALIDATION_PHASES,

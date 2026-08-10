@@ -57,8 +57,14 @@ describe('the server barrel', () => {
     }
   })
 
-  it('exposes the five procedure types and no sixth', () => {
-    const procedureExports = Object.keys(serverBarrel).filter((name) => name.endsWith('Procedure'))
+  it('exposes the six procedure types and no seventh', () => {
+    // `validationProcedure` is the sixth (T200, FR-147): a sibling of `machineProcedure` rather than
+    // a chain on top of it, because a bundle validation run has no workflow for one to be scoped to.
+    // `reportValidationProcedure` is not a *type* — it is the one mounted procedure built on it, and
+    // it is filtered out by name below rather than admitted to the list.
+    const procedureExports = Object.keys(serverBarrel).filter(
+      (name) => name.endsWith('Procedure') && !name.startsWith('report'),
+    )
 
     expect(procedureExports.sort()).toStrictEqual([
       'adminProcedure',
@@ -66,6 +72,7 @@ describe('the server barrel', () => {
       'machineProcedure',
       'publicProcedure',
       'scopedProcedure',
+      'validationProcedure',
     ])
   })
 })

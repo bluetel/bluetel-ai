@@ -29,9 +29,10 @@
  * implemented here, and neither needs to be for this to be testable.
  */
 
+import type { SecretSource } from '@bluetel-ai/sisyphus-redaction'
+
 import type { SanitisedText } from './sanitise'
 import { createSanitiser, sanitisedByteLength } from './sanitise'
-import type { SecretSource } from './secret-values'
 import { createTokenBucket } from './token-bucket'
 
 /** What `appendLogSegment` is given once the body is durable (FR-046). */

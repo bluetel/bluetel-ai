@@ -36,6 +36,8 @@ const hostileContext = (): SisyphusContext => {
     },
     machineCredential: () =>
       Promise.reject(new Error('the health check must not verify a credential')),
+    validationCredential: () =>
+      Promise.reject(new Error('the health check must not verify a credential')),
   }
 }
 

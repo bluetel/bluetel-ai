@@ -194,6 +194,7 @@ describe.skipIf(connectionString === undefined)(
         session,
         scope: memoiseScope(() => Promise.resolve(adminScope)),
         machineCredential: () => Promise.resolve(null),
+        validationCredential: () => Promise.resolve(null),
       }
     }
 

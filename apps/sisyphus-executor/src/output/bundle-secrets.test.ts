@@ -1,4 +1,5 @@
 /* cspell:words netrc */
+import { buildSecretIndex } from '@bluetel-ai/sisyphus-redaction'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -7,7 +8,6 @@ import {
   bundleSecretName,
   MAX_BUNDLE_VALUES_PER_FILE,
 } from './bundle-secrets'
-import { buildSecretIndex } from './secret-values'
 
 /**
  * T239. Two things are under test and they pull in opposite directions:

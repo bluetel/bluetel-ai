@@ -44,6 +44,7 @@ const signedOutCaller = () => {
       resolve: () => Promise.reject(new Error('the scope must not be resolved without a session')),
     },
     machineCredential: () => Promise.resolve(null),
+    validationCredential: () => Promise.resolve(null),
   }
 
   return createCallerFactory(workflowRouter)(context)

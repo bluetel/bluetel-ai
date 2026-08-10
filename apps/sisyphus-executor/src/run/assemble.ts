@@ -31,12 +31,15 @@
 import type { AgentAdapter, FrameTap } from '../agent'
 import {
   createAgentDeveloperPort,
+  createAgentIntegrationPorts,
+  createAgentReviewerPort,
   createCliStreamAdapter,
   createFrameTap,
   observeAgentFrames,
+  resolveReviewTargets,
 } from '../agent'
-import type { Forge } from '../delivery'
-import { createHttpForge } from '../delivery'
+import type { Forge, ReviewForge } from '../delivery'
+import { createHttpForge, createHttpReviewForge } from '../delivery'
 import type { WorkflowJobEnvelope } from '../job-envelope'
 import { primaryEntry } from '../job-envelope'
 import type { MachineSurfaceClient } from '../report'
@@ -50,12 +53,16 @@ import {
   createS3SegmentStore,
   createS3SnapshotStore,
 } from '../storage'
+import type { ReviewTarget } from '../workflows'
+import { createReviewGuard } from '../workflows'
 
 import { workspaceEntries } from './bootstrap'
 import { prepareDeliveryEntries } from './delivery-entries'
-import type { RunExecutorOptions, WorkflowPortsFactory } from './execute'
+import type { AutonomousPorts, DelegatedPorts, ReviewPorts } from './dispatch'
+import type { RunExecutorOptions, WorkflowPortsContext, WorkflowPortsFactory } from './execute'
 import type { CredentialFiller, ForgeCredential } from './forge-credential'
 import { createForgeCredential } from './forge-credential'
+import { createRefusingTicketPort } from './ticket-port'
 
 /** The instance-level environment, already validated by `env.ts`. */
 export interface ExecutorEnvironment {
@@ -78,20 +85,21 @@ export interface ExecutorEnvironment {
 }
 
 /**
- * **The ports this executor does not yet have, stated rather than stubbed.**
+ * **A factory that supplies nothing, for asserting the halt.**
  *
- * The delegated type is no longer on this list — see {@link agentWorkflowPorts}. What remains
- * missing is the rest of the agent boundary:
+ * Every port this module once listed as missing now exists — see {@link agentWorkflowPorts}, which
+ * supplies all three workflow types. What is left genuinely absent is the **ticket connector**, and
+ * that absence is deliberate and argued at `./ticket-port.ts` rather than expressed by returning
+ * nothing here: the envelope carries no ticket reference to move and no tracker endpoint or
+ * credential reaches this instance, so a connector would have nothing to address even if one were
+ * written.
  *
- * - **`ReviewerPort`, `IntegrationPlanner` and `IntegrationPort`**, which ask the running agent to
- *   follow a skill and read a structured answer back for the review and autonomous types.
- * - **A findings publisher and a ticket connector**, for the same two.
- *
- * Returning nothing is the honest expression of that. `dispatchWorkflow` halts naming the workflow
- * type, `runExecutor` reports terminal `failed` with that reason (FR-056), and the run is
- * diagnosable from the panel. The alternative — a stub that returns a plausible proposal — would
- * produce a run that reported success having done nothing, which is strictly worse than a run that
- * says what it is missing.
+ * This is therefore no longer the production default and never was. It is kept because
+ * `dispatchWorkflow`'s halt is a behaviour worth having a test for: it names the workflow type,
+ * `runExecutor` reports terminal `failed` with that reason (FR-056), and the run is diagnosable
+ * from the panel. The alternative — a stub that returns a plausible proposal — would produce a run
+ * that reported success having done nothing, which is strictly worse than a run that says what it
+ * is missing.
  */
 export const noWorkflowPorts: WorkflowPortsFactory = () => ({})
 
@@ -100,21 +108,37 @@ export interface AgentWorkflowPortsOptions {
   readonly frames: FrameTap
   /** The code host, already built with its lazy credential accessor. */
   readonly forge: Forge
+  /**
+   * The review-side half of the same code host, likewise already built (T196).
+   *
+   * A second client rather than three more methods on `forge`, because `Forge` deliberately has no
+   * method that could post a comment — that is how FR-060 keeps a delegated run from writing
+   * anything the initiating engineer did not ask for. See `delivery/review-forge.ts`.
+   */
+  readonly reviewForge: ReviewForge
+}
+
+/** The delegated and autonomous types both develop, so both build these two together. */
+interface DevelopmentHalf {
+  readonly developer: DelegatedPorts['developer']
+  readonly entries: DelegatedPorts['entries']
 }
 
 /**
- * **The delegated type's ports, over the running agent and the code host (T194, T195, T230).**
+ * **Every workflow type's ports, over the running agent and the code host (T194, T195, T196,
+ * T230).**
  *
- * This is the factory that makes quickstart Scenario 2 executable. It is a factory rather than a
- * value because both of its halves are built *from* the checked-out workspace, which does not
- * exist until bootstrap phase 6.
+ * This is the factory that makes quickstart Scenarios 2, 8 and 9 executable. It is a factory rather
+ * than a value because its halves are built *from* the checked-out workspace, which does not exist
+ * until bootstrap phase 6.
  *
- * Three things about it are load-bearing.
+ * Four things about it are load-bearing.
  *
- * **The developer port reads the frames the run is already consuming.** `runExecutor` is the single
- * consumer of the agent's output — it turns every frame into a log segment — so the port watches
- * through a tap rather than taking a second iterator. Two iterators over one stream would not split
- * it, they would corrupt it.
+ * **Every agent-facing port reads the frames the run is already consuming.** `runExecutor` is the
+ * single consumer of the agent's output — it turns every frame into a log segment — so the ports
+ * watch through a tap rather than taking a second iterator. Two iterators over one stream would not
+ * split it, they would corrupt it. All five ports share the one tap for that reason, and their
+ * blocks are told apart by tag and nonce rather than by having a stream each.
  *
  * **The developer port is wrapped, and the wrap is not optional.** `delivery.observing` is the only
  * seam between "the agent stopped changing things" and "`openPullRequestSet` reads `wasChanged`".
@@ -124,29 +148,162 @@ export interface AgentWorkflowPortsOptions {
  * **`readyForReview` is not passed, and that is FR-060.** Draft is the default and the envelope
  * carries no override today, so a delegated run opens a draft and delivery ownership stays with the
  * engineer who launched it.
+ *
+ * **Only the running type's bundle is built, and that is not an optimisation.** Establishing what a
+ * review run is reviewing costs a turn of the agent's conversation (`resolveReviewTargets`), and
+ * spending it on a delegated run would put a question about pull requests into a conversation that
+ * is about to be asked to write code. `dispatchWorkflow` needs exactly one bundle and this supplies
+ * exactly that one; a type whose bundle is absent still halts by the route it always did.
  */
 export const agentWorkflowPorts =
-  ({ frames, forge }: AgentWorkflowPortsOptions): WorkflowPortsFactory =>
+  ({ frames, forge, reviewForge }: AgentWorkflowPortsOptions): WorkflowPortsFactory =>
   async (context) => {
-    const delivery = await prepareDeliveryEntries({
-      checkouts: context.bootstrapped.workspace.entries,
-      repositories: workspaceEntries(context.envelope),
-      forge,
-    })
-
-    return {
-      delegated: {
-        developer: delivery.observing(
-          createAgentDeveloperPort({ agent: context.bootstrapped.agent.adapter, frames }),
-        ),
-        entries: delivery.entries,
-        // The durable ledger, never a fresh Map: the difference is invisible here and the cost of
-        // getting it wrong is a second pull request on a customer's repository (FR-077).
-        pullRequestLedger: context.ledgers.pullRequest,
-        secrets: context.secrets,
-      },
+    if (context.envelope.job.workflowType === 'review') {
+      return { review: await reviewPorts({ context, frames, reviewForge }) }
     }
+
+    const development = await developmentPorts({ context, frames, forge })
+
+    return context.envelope.job.workflowType === 'autonomous'
+      ? { autonomous: autonomousPorts({ context, frames, development }) }
+      : {
+          delegated: {
+            ...development,
+            // The durable ledger, never a fresh Map: the difference is invisible here and the cost
+            // of getting it wrong is a second pull request on a customer's repository (FR-077).
+            pullRequestLedger: context.ledgers.pullRequest,
+            secrets: context.secrets,
+          },
+        }
   }
+
+/**
+ * The developer port and the entry list, prepared in the one order that is correct.
+ *
+ * `prepareDeliveryEntries` is the before-step and `observing` is the after-step; see
+ * `./delivery-entries.ts` for why no single function can honestly do both.
+ */
+const developmentPorts = async (input: {
+  readonly context: WorkflowPortsContext
+  readonly frames: FrameTap
+  readonly forge: Forge
+}): Promise<DevelopmentHalf> => {
+  const { context } = input
+  const delivery = await prepareDeliveryEntries({
+    checkouts: context.bootstrapped.workspace.entries,
+    repositories: workspaceEntries(context.envelope),
+    forge: input.forge,
+  })
+
+  return {
+    developer: delivery.observing(
+      createAgentDeveloperPort({ agent: context.bootstrapped.agent.adapter, frames: input.frames }),
+    ),
+    entries: delivery.entries,
+  }
+}
+
+/**
+ * The autonomous loop's own ports (T196, FR-061, FR-062, FR-117).
+ *
+ * Three things worth naming.
+ *
+ * **`recordIteration` goes straight to the machine surface, and it is direct.** The bound on
+ * FR-061's three passes is the `iterations_ordinal_bounds` check constraint rather than a counter
+ * this process holds, so the *refusal* is the value; `report/client.ts` says why that call is not
+ * buffered.
+ *
+ * **The planner and the integrator are built together.** The step's turn names the reading of
+ * `sisyphus-integration` the plan came from, and the planner is the only thing that ever sees it.
+ *
+ * **The ticket port refuses.** There is no ticket reference on the envelope and no connector on
+ * this instance, so nothing here can move a ticket; supplying the refusing port is what makes that
+ * loud rather than silent the moment a reference exists. See `./ticket-port.ts` — it is the one
+ * port of T196 left deliberately unimplemented, and the reasoning is all there.
+ */
+const autonomousPorts = (input: {
+  readonly context: WorkflowPortsContext
+  readonly frames: FrameTap
+  readonly development: DevelopmentHalf
+}): AutonomousPorts => {
+  const { context, frames } = input
+  const agent = context.bootstrapped.agent.adapter
+  const integration = createAgentIntegrationPorts({ agent, frames })
+
+  return {
+    developer: input.development.developer,
+    entries: input.development.entries,
+    reviewer: createAgentReviewerPort({ agent, frames }),
+    planner: integration.planner,
+    integrator: integration.integrator,
+    recordIteration: async (record) => {
+      await context.client.reportIteration({
+        ordinal: record.ordinal,
+        verdict: record.verdict,
+        findings: [...record.findings],
+      })
+    },
+    ticket: createRefusingTicketPort(),
+    pullRequestLedger: context.ledgers.pullRequest,
+    ticketLedger: context.ledgers.ticket,
+    integrationLedger: context.ledgers.integration,
+  }
+}
+
+/**
+ * The standalone review's own ports (T196, FR-063, FR-080, FR-119).
+ *
+ * The targets are established first and everything else is built around them, because both of the
+ * other two ports are about *those* pull requests: the guard probes them at every checkpoint and
+ * the publisher posts to them. `resolveReviewTargets` halts rather than guessing when the run's
+ * prompt named none — see `agent/review-targets.ts`, which argues why the envelope cannot answer
+ * this and why an empty list must never become "review whatever is open".
+ *
+ * The guard's probe is a **read**, and that is the whole of its authority (FR-080). It propagates
+ * rather than flattening a failure into a state: "the host could not be asked" is not "there is
+ * nothing there", and a review that posted findings on a merged diff because a probe was briefly
+ * unreachable is exactly what FR-080 exists to prevent.
+ */
+const reviewPorts = async (input: {
+  readonly context: WorkflowPortsContext
+  readonly frames: FrameTap
+  readonly reviewForge: ReviewForge
+}): Promise<ReviewPorts> => {
+  const { context, reviewForge } = input
+  const agent = context.bootstrapped.agent.adapter
+
+  const targets: readonly ReviewTarget[] = await resolveReviewTargets({
+    agent,
+    frames: input.frames,
+    // The envelope's repositories, so a target can only ever name a repository this run was
+    // launched against (FR-109).
+    entries: workspaceEntries(context.envelope).map((entry) => ({
+      entryId: entry.entryId,
+      repository: entry.repositoryUrl,
+    })),
+    readPullRequest: async (query) => reviewForge.readPullRequest(query),
+  })
+
+  return {
+    targets,
+    reviewer: createAgentReviewerPort({ agent, frames: input.frames }),
+    guard: createReviewGuard({
+      targets,
+      probe: async (target) =>
+        (
+          await reviewForge.readPullRequest({
+            repository: target.repository,
+            pullRequestNumber: target.pullRequestNumber,
+          })
+        ).state,
+    }),
+    publisher: reviewForge.publishFindings,
+    // Durable, so a re-provisioned instance cannot post the same findings twice (FR-076, FR-077).
+    commentLedger: context.ledgers.reviewComment,
+    ticket: createRefusingTicketPort(),
+    ticketLedger: context.ledgers.ticket,
+  }
+}
 
 export interface AssembleRunOptions {
   readonly envelope: WorkflowJobEnvelope
@@ -228,6 +385,15 @@ export const assembleRun = (options: AssembleRunOptions): AssembledRun => {
     credential: forgeCredential.read,
   })
 
+  // The same host, the same lazily-resolved credential, and a **separate** client (T196). It is
+  // separate rather than three more methods on `forge` because a delegated run is handed `forge`
+  // and must not be able to post a comment or move anything on a pull request — FR-060 is a shape
+  // rather than a rule, and it stays one only while the delivery path's port has no such method.
+  const reviewForge = createHttpReviewForge({
+    apiBaseUrl: environment.forgeApiUrl,
+    credential: forgeCredential.read,
+  })
+
   // One tap, wrapping the adapter before anything else sees it. `runExecutor` stays the single
   // consumer of the frame stream — it writes every frame to a log segment — and the developer port
   // watches what that consumer pulls. A second iterator over one stream corrupts it rather than
@@ -270,7 +436,7 @@ export const assembleRun = (options: AssembleRunOptions): AssembledRun => {
       // `runExecutor` already threads into bootstrap for phase 5a: see `registerBundleCredentials`
       // in `./bootstrap.ts` (FR-072, FR-089, 003/FR-014). Adding a static array here would put the
       // registration in the one place in the run that cannot observe what it is registering.
-      ports: options.ports ?? agentWorkflowPorts({ frames, forge }),
+      ports: options.ports ?? agentWorkflowPorts({ frames, forge, reviewForge }),
       bundlesBucket: environment.bundlesBucket,
       workspaceRoot: environment.workspaceRoot,
       shutdown: options.shutdown,
@@ -280,20 +446,3 @@ export const assembleRun = (options: AssembleRunOptions): AssembledRun => {
     },
   }
 }
-
-/**
- * A validation run this executor cannot yet serve (FR-147).
- *
- * The mode is parsed, because refusing an envelope shape the control plane can legitimately send
- * is better done at the boundary with a sentence than three phases in with a type error. What is
- * missing is the reporting half: a validation run reports to `validationRuns` rather than to a
- * workflow row, and no procedure for that is mounted on the machine surface this executor talks
- * to. Until one is, a validation envelope halts here rather than being run as a workflow.
- */
-export const validationModeUnsupportedError = (): Error =>
-  new Error(
-    'this instance was launched with a validation-mode job envelope (FR-147). Bootstrap phases ' +
-      '2–5 are implemented, but a validation run reports against the bundle version rather than ' +
-      'a workflow row and the machine surface exposes no procedure for that, so there is nowhere ' +
-      'for the result to go. Nothing was attempted.',
-  )

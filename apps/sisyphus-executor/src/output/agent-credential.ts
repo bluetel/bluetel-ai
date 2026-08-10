@@ -29,7 +29,7 @@
  * log lines be correlated to the same seat.
  */
 
-import type { KnownSecret } from './secret-values'
+import type { KnownSecret } from '@bluetel-ai/sisyphus-redaction'
 
 /**
  * The label that appears in the placeholder: `[redacted:agent-credential]`.

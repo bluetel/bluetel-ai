@@ -166,6 +166,7 @@ describe('the mounted procedures, before any database is reached', () => {
       session: null,
       scope: { resolve: () => Promise.reject(new Error('the machine surface has no scope')) },
       machineCredential: () => Promise.resolve(credential),
+      validationCredential: () => Promise.resolve(null),
     }
 
     return createCallerFactory(machineSurfaceRouter)(context)

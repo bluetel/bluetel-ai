@@ -48,6 +48,7 @@ export {
   getConnectionUrlParameterName,
   getEnvSecret,
   getExecutorInstanceProfileParameterName,
+  getExecutorParameterPathPrefix,
   getExecutorSecurityGroupIdsParameterName,
   getExecutorSubnetIdsParameterName,
   getResourceIdentifier,

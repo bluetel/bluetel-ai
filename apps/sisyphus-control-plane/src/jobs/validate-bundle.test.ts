@@ -12,6 +12,7 @@ import {
   abandonStaleValidationRuns,
   completeBundleValidation,
   startBundleValidation,
+  terminateFinishedValidationInstances,
   VALIDATION_BUDGET_MS,
 } from './validate-bundle'
 import { createWorkflowFixtures, readTestDatabaseUrl } from './workflow-fixtures'
@@ -288,6 +289,58 @@ describeWithDatabase('validating a setup bundle', () => {
 
       expect(abandoned).toStrictEqual([])
       expect(compute.terminations).toStrictEqual([])
+    })
+  })
+
+  describe('instances of runs that have already reported (T200)', () => {
+    it('destroys the instance of a run the machine surface ended', async () => {
+      // The gap `machine.reportValidation` opens and this closes. An instance now ends its own run
+      // by reporting, from a surface that holds no compute provisioner and must not be given one —
+      // so the row is finished and the machine is still up.
+      const { compute, result } = await start('reported')
+      const validationRunId = result.outcome === 'provisioned' ? result.validationRunId : ''
+
+      // As `reportValidation` leaves it: an outcome, an end time, and nothing else touched.
+      await fixtures
+        .db()
+        .update(validationRuns)
+        .set({ outcome: 'passed', endedAt: NOW })
+        .where(eq(validationRuns.id, validationRunId))
+
+      const terminated = await terminateFinishedValidationInstances({ db: fixtures.db(), compute })
+
+      expect(terminated).toStrictEqual([
+        { validationRunId, terminatedInstanceId: firstRow(compute.terminations) },
+      ])
+      expect(compute.terminations).toHaveLength(1)
+    })
+
+    it('leaves an unfinished run’s instance alone, which is the stale sweep’s business', async () => {
+      const { compute } = await start('still-running')
+
+      await expect(
+        terminateFinishedValidationInstances({ db: fixtures.db(), compute }),
+      ).resolves.toStrictEqual([])
+      expect(compute.terminations).toStrictEqual([])
+    })
+
+    it('says nothing about a finished run whose instance has already gone', async () => {
+      // The ordinary case rather than an error: a validation that reports and exits leaves a machine
+      // its own launch unit may shut down before this next runs.
+      const { compute, result } = await start('already-gone')
+      const validationRunId = result.outcome === 'provisioned' ? result.validationRunId : ''
+
+      await fixtures
+        .db()
+        .update(validationRuns)
+        .set({ outcome: 'failed', endedAt: NOW })
+        .where(eq(validationRuns.id, validationRunId))
+      await terminateFinishedValidationInstances({ db: fixtures.db(), compute })
+
+      // A second pass finds nothing to do and reports nothing.
+      await expect(
+        terminateFinishedValidationInstances({ db: fixtures.db(), compute }),
+      ).resolves.toStrictEqual([])
     })
   })
 

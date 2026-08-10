@@ -7,7 +7,7 @@
  * launching an instance is an assembly nobody checks.
  */
 
-export { assembleRun, noWorkflowPorts, validationModeUnsupportedError } from './assemble'
+export { assembleRun, noWorkflowPorts } from './assemble'
 export type { AssembledRun, AssembleRunOptions, ExecutorEnvironment } from './assemble'
 
 export {
@@ -89,5 +89,20 @@ export type { HeartbeatLoop, HeartbeatLoopOptions, HeartbeatState } from './hear
 export { createRunExternalActionLedgers } from './ledgers'
 export type { RunExternalActionLedgers } from './ledgers'
 
+export { createRefusingTicketPort, noTicketConnectorError } from './ticket-port'
+
 export { createParkReporter, parkLogLine } from './park-report'
 export type { ParkReporterOptions } from './park-report'
+
+export {
+  assembleValidation,
+  runValidation,
+  validationOutputKey,
+  validationPhaseReport,
+} from './validate'
+export type {
+  AssembleValidationOptions,
+  RunValidationOptions,
+  ValidationEnvironment,
+  ValidationRunOutcome,
+} from './validate'

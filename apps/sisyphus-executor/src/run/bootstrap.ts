@@ -183,7 +183,8 @@ export const DEFAULT_BUNDLE_SUBDIRECTORY = '.setup-bundle'
  * Bounds on the credential scan below.
  *
  * Not a judgement about content. Every registered value is expanded into every encoding
- * `output/secret-encodings.ts` can derive and then matched against every chunk of agent output, so
+ * `@bluetel-ai/sisyphus-redaction`'s `secret-encodings.ts` can derive and then matched against every
+ * chunk of agent output, so
  * the cost of the scan is paid on every byte of the run's log rather than once here. A directory
  * that exceeds any of these is not the `credentials/` directory `contracts/setup-bundle.md`
  * describes, and reading it as one would make redaction the most expensive thing in the pipeline.

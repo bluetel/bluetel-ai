@@ -46,7 +46,7 @@ beforeEach(() => {
 })
 
 describe('createMachineDependencies', () => {
-  it('supplies the four dependencies the context reads, plus the notifier and the material store', () => {
+  it('supplies the five dependencies the context reads, plus the notifier and the material store', () => {
     expect(Object.keys(createMachineDependencies()).sort()).toStrictEqual([
       'agentCredentialMaterial',
       'db',
@@ -54,7 +54,17 @@ describe('createMachineDependencies', () => {
       'recordDenial',
       'resolveMachineCredential',
       'resolveSession',
+      // T200, FR-147. Unwired, `validationProcedure` refuses every bundle validation report — which
+      // is safe but means no validation can ever finish, so this mount is where it has to be.
+      'resolveValidationCredential',
     ])
+  })
+
+  it('wires the validation resolver here and on no other mount (T200, FR-005)', () => {
+    // The same asymmetry as `resolveMachineCredential`: a validation credential presented at
+    // `/api/trpc` is never even inspected, because the interactive mount was not handed a way to.
+    expect(typeof createMachineDependencies().resolveValidationCredential).toBe('function')
+    expect(createSisyphusDependencies().resolveValidationCredential).toBeUndefined()
   })
 
   /**

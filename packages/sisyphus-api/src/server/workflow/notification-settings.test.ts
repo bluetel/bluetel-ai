@@ -73,6 +73,7 @@ describe.skipIf(connectionString === undefined)('notification settings', () => {
       session,
       scope: { resolve: () => Promise.resolve({ userId, isAdmin: false, visibleProfileIds: [] }) },
       machineCredential: () => Promise.resolve(null),
+      validationCredential: () => Promise.resolve(null),
     }
 
     return createCallerFactory(workflowRouter)(context)

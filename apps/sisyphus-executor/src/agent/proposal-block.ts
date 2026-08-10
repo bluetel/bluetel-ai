@@ -34,16 +34,28 @@ export interface ProposalMarkers {
 }
 
 /**
- * The pair delimiting one request's answer.
+ * The pair delimiting one request's answer, for **any** structured question (T194, T196).
+ *
+ * The tag is a parameter rather than the one constant this module started with, because a review
+ * verdict, an integration plan and an integration step's reference are the same problem as a
+ * development proposal and must not become a second implementation of it. The tag is also what
+ * keeps two *different* questions apart inside one conversation: an autonomous run asks for a
+ * development proposal, then a review verdict, then an integration plan, and a reader that matched
+ * only on the nonce would still be safe by accident today and unsafe the moment two questions were
+ * ever in flight together.
  *
  * Asymmetric on purpose — the closing marker is not a copy of the opening one — so that neither
  * can be produced by truncating the other, and a half-written block is always recognisable as
  * half-written rather than as a complete block of a different shape.
  */
-export const proposalMarkers = (nonce: string): ProposalMarkers => ({
-  open: `<<<${PROPOSAL_TAG}:${nonce}`,
-  close: `${PROPOSAL_TAG}:${nonce}>>>`,
+export const answerMarkers = (tag: string, nonce: string): ProposalMarkers => ({
+  open: `<<<${tag}:${nonce}`,
+  close: `${tag}:${nonce}>>>`,
 })
+
+/** {@link answerMarkers} for the development pass's own tag. */
+export const proposalMarkers = (nonce: string): ProposalMarkers =>
+  answerMarkers(PROPOSAL_TAG, nonce)
 
 /** What the transcript so far contains. Exactly one of these is true at any moment. */
 export type ProposalExtraction =
@@ -110,11 +122,16 @@ const readBody = (body: string): Record<string, unknown> | string => {
  * talking is still read correctly, because what is being searched for is the block, not the end.
  *
  * @param transcript - Accumulated **assistant** text, in arrival order. Never the user echo.
+ * @param tag - Which question this is; see {@link answerMarkers}.
  * @param nonce - The identifier this request's markers carry.
  * @returns Where the answer is, or which way it is not there.
  */
-export const extractProposal = (transcript: string, nonce: string): ProposalExtraction => {
-  const { open, close } = proposalMarkers(nonce)
+export const extractBlock = (
+  transcript: string,
+  tag: string,
+  nonce: string,
+): ProposalExtraction => {
+  const { open, close } = answerMarkers(tag, nonce)
   const lastClose = transcript.lastIndexOf(close)
 
   if (lastClose === -1) {
@@ -154,3 +171,7 @@ export const extractProposal = (transcript: string, nonce: string): ProposalExtr
       { kind: 'truncated' }
     : { kind: 'malformed', detail }
 }
+
+/** {@link extractBlock} for the development pass's own tag. */
+export const extractProposal = (transcript: string, nonce: string): ProposalExtraction =>
+  extractBlock(transcript, PROPOSAL_TAG, nonce)

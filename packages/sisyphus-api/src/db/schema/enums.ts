@@ -21,6 +21,7 @@ import {
   SUPERVISION_DELIVERY_OUTCOMES,
   TERMINAL_OUTCOMES,
   USER_ROLES,
+  VALIDATION_OUTCOMES,
   WORKFLOW_STATES,
   WORKFLOW_TYPES,
 } from '../../enums'
@@ -83,6 +84,18 @@ export const credentialReleaseReasonEnum = pgEnum(
   CREDENTIAL_RELEASE_REASONS,
 )
 
+/**
+ * The result of proving a bundle without starting an agent (FR-147, FR-148).
+ *
+ * Generated from `src/enums/validation-outcome.ts` like everything else above it, and moved up here
+ * from the literal-array section below as part of T200. It was the one `pgEnum` in this file with no
+ * mirroring tuple, which was a live counterexample to the rule stated in the header rather than a
+ * harmless exception: `machine.reportValidation` derives this value server-side from the phases the
+ * executor reports, and the panel renders it, so the vocabulary now has consumers on the far side of
+ * the browser bundle boundary and cannot be a literal that only Postgres knows about.
+ */
+export const validationOutcomeEnum = pgEnum('validation_outcome', VALIDATION_OUTCOMES)
+
 // --- Identity ------------------------------------------------------------------------------
 
 /** What a `role_changes` row records. Never edited or deleted (FR-177). */
@@ -92,11 +105,6 @@ export const roleChangeEnum = pgEnum('role_change', [
   'activate',
   'deactivate',
 ])
-
-// --- Bundles -------------------------------------------------------------------------------
-
-/** The result of proving a bundle without starting an agent (FR-147, FR-148). */
-export const validationOutcomeEnum = pgEnum('validation_outcome', ['passed', 'failed'])
 
 // --- Integrations --------------------------------------------------------------------------
 

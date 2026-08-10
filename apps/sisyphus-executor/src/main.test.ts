@@ -117,8 +117,13 @@ const runExecutor = vi.fn<(options: unknown) => Promise<RunResult>>(() =>
   Promise.resolve({ outcome: 'succeeded', reason: 'the delegated workflow finished' }),
 )
 
-const validationRefusal = new Error('a validation-mode job envelope (FR-147)')
-const validationModeUnsupportedError = vi.fn(() => validationRefusal)
+const validationSeams = { marker: 'the-validation-seams' }
+
+const assembleValidation = vi.fn(() => validationSeams)
+
+const runValidation = vi.fn<(options: unknown) => Promise<{ report: { outcome: string } }>>(() =>
+  Promise.resolve({ report: { outcome: 'passed' } }),
+)
 
 /** Errors the next signalled shutdown will report. Emptied between tests. */
 const shutdownErrors: Error[] = []
@@ -136,7 +141,7 @@ const createShutdownRegistry = vi.fn(() => registry)
 vi.mock('node:process', () => ({ default: fakeProcess }))
 vi.mock('./env', () => ({ env }))
 vi.mock('./job-envelope', () => ({ parseJobEnvelope }))
-vi.mock('./run', () => ({ assembleRun, runExecutor, validationModeUnsupportedError }))
+vi.mock('./run', () => ({ assembleRun, assembleValidation, runExecutor, runValidation }))
 vi.mock('./runtime', () => ({ createShutdownRegistry }))
 
 /**
@@ -180,8 +185,9 @@ beforeEach(() => {
   for (const mock of [
     parseJobEnvelope,
     assembleRun,
+    assembleValidation,
     runExecutor,
-    validationModeUnsupportedError,
+    runValidation,
     createShutdownRegistry,
     registry.onShutdown,
     registry.shutdown,
@@ -369,16 +375,44 @@ describe('the entry point', () => {
     expect(stderr.join('')).toContain('user-data was empty')
   })
 
-  it('refuses a validation envelope before it assembles anything (FR-147)', async () => {
+  it('runs a validation envelope as a validation, never as a workflow (T200, FR-147)', async () => {
+    // This used to assert the opposite: that `main` refused the envelope and exited 1 having
+    // attempted nothing, because the machine surface had no procedure a run without a workflow
+    // could report to. `machine.reportValidation` is that procedure.
     parseJobEnvelope.mockReturnValueOnce({ mode: 'validation' })
 
     await importMain()
 
-    expect(validationModeUnsupportedError).toHaveBeenCalledOnce()
+    expect(assembleValidation).toHaveBeenCalledOnce()
+    expect(runValidation).toHaveBeenCalledOnce()
+    // The two paths do not meet: a validation must never be assembled as a workflow, which has an
+    // agent, a workspace and a terminal report it has no input for.
     expect(assembleRun).not.toHaveBeenCalled()
     expect(runExecutor).not.toHaveBeenCalled()
+  })
+
+  it('exits 0 for a validation that reported, whatever verdict it carried', async () => {
+    // A bundle that fails at its first phase is a validation that *worked*. A non-zero exit would
+    // tell the instance's supervisor to restart something that has already delivered its result.
+    parseJobEnvelope.mockReturnValueOnce({ mode: 'validation' })
+    runValidation.mockResolvedValueOnce({ report: { outcome: 'failed' } })
+
+    await importMain()
+
+    expect(fakeProcess.exitCode).toBe(0)
+    expect(stdout.join('')).toContain('validation failed')
+  })
+
+  it('exits 1 when a validation could not report at all', async () => {
+    // The one condition nobody upstream can see: the run happened and said nothing, so the
+    // instance's own console is the only record.
+    parseJobEnvelope.mockReturnValueOnce({ mode: 'validation' })
+    runValidation.mockRejectedValueOnce(new Error('the validation result could not be reported'))
+
+    await importMain()
+
     expect(fakeProcess.exitCode).toBe(1)
-    expect(stderr.join('')).toContain(validationRefusal.message)
+    expect(stderr.join('')).toContain('could not be reported')
   })
 
   it('arms both signals once each, through the single-shot listener', async () => {

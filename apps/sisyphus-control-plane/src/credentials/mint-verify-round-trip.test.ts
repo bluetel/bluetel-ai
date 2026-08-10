@@ -1,12 +1,14 @@
 import {
   createScopedCredentialResolver,
   inspectScopedCredential,
+  inspectValidationCredential,
   SCOPED_CREDENTIAL_ALGORITHM,
   SCOPED_CREDENTIAL_AUDIENCE,
   SCOPED_CREDENTIAL_ISSUER,
   SCOPED_CREDENTIAL_MAX_LIFETIME_MS,
   SCOPED_CREDENTIAL_WINDOW_MS,
   verifyScopedCredential,
+  verifyValidationCredential,
 } from '@bluetel-ai/sisyphus-api/server'
 import type { ScopedCredentialJwtVerifier } from '@bluetel-ai/sisyphus-api/server'
 import { decodeJwt, jwtVerify, SignJWT } from 'jose'
@@ -126,15 +128,74 @@ describeWithDatabase('a minted credential, verified by the shared verifier', () 
     })
   })
 
-  it('refuses a validation credential, which names no workflow and backs no row (FR-147)', async () => {
+  it('refuses a validation credential, which names no workflow (FR-147, T200)', async () => {
+    // The refusal that survives T200, and the reason it must: `validation_credentials` and
+    // `machine.reportValidation` now exist, so this token authorises something — one report against
+    // one `validation_runs` row. It must still resolve to no `MachineCredential` at all, because
+    // every `machineProcedure` reads `ctx.workflowId` and this names a run that does not exist.
+    const validationRunId = await fixtures.seedValidationRun()
     const validation = await mintValidationCredential({
-      validationRunId: 'a-validation-run',
+      db: fixtures.db(),
+      validationRunId,
       secret: SECRET,
     })
 
     await expect(inspectScopedCredential(options(), validation.token)).resolves.toStrictEqual({
       credential: null,
       refusal: 'subject_names_no_workflow',
+    })
+  })
+
+  it('resolves that same token through the validation verifier, and only that one (T200)', async () => {
+    const validationRunId = await fixtures.seedValidationRun()
+    const validation = await mintValidationCredential({
+      db: fixtures.db(),
+      validationRunId,
+      secret: SECRET,
+    })
+
+    await expect(inspectValidationCredential(options(), validation.token)).resolves.toStrictEqual({
+      credential: {
+        credentialId: validation.credentialId,
+        validationRunId,
+        jti: validation.jti,
+        expiresAt: validation.expiresAt,
+      },
+    })
+  })
+
+  it('refuses a workflow credential on the validation verifier, in the other direction', async () => {
+    // The mirror of the refusal above, and the reason the two resolvers are separate functions over
+    // separate tables rather than one that switches on a subject prefix.
+    const workflowId = await fixtures.seedWorkflow({ label: 'not-a-validation' })
+    const minted = await mintScopedCredential({ db: fixtures.db(), workflowId, secret: SECRET })
+
+    await expect(inspectValidationCredential(options(), minted.token)).resolves.toStrictEqual({
+      credential: null,
+      refusal: 'subject_names_no_validation_run',
+    })
+  })
+
+  it('refuses a validation credential whose row was superseded by a re-mint (T200)', async () => {
+    const validationRunId = await fixtures.seedValidationRun()
+    const first = await mintValidationCredential({
+      db: fixtures.db(),
+      validationRunId,
+      secret: SECRET,
+    })
+    const second = await mintValidationCredential({
+      db: fixtures.db(),
+      validationRunId,
+      secret: SECRET,
+    })
+
+    // Intact signature, inside its ceiling, and recognisably dead — which is what the row buys.
+    await expect(inspectValidationCredential(options(), first.token)).resolves.toStrictEqual({
+      credential: null,
+      refusal: 'credential_revoked',
+    })
+    await expect(verifyValidationCredential(options(), second.token)).resolves.toMatchObject({
+      validationRunId,
     })
   })
 

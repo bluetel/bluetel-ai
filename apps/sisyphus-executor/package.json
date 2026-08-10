@@ -21,6 +21,7 @@
     "@aws-sdk/client-s3": "^3.0.0",
     "@bluetel-ai/env-validation-errors": "workspace:*",
     "@bluetel-ai/sisyphus-api": "workspace:*",
+    "@bluetel-ai/sisyphus-redaction": "workspace:*",
     "@t3-oss/env-core": "^0.13.11",
     "@trpc/client": "^11.18.0",
     "superjson": "^2.2.6",

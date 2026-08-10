@@ -16,6 +16,16 @@
  * credential, only fail to accept one. The minting vocabulary is deliberately **not** forwarded
  * here even though the shared module exports it; `index.test.ts` asserts that.
  *
+ * ## The validation half, added on the same terms (T200, FR-147)
+ *
+ * `createValidationCredentialResolver` and its two inspection functions are forwarded alongside the
+ * workflow ones because this panel is the host that mounts the machine surface, and a validation
+ * instance reaches that mount. They are verifying-side in exactly the same way — there is still no
+ * `SignJWT` behind this barrel, and `validationSubject`, `VALIDATION_SUBJECT_PREFIX` and the two
+ * window constants stay out of it, so the panel cannot construct a validation subject any more than
+ * it can construct a workflow one. The two resolvers are separate functions over separate tables and
+ * neither can produce the other's credential.
+ *
  * Consumers import this barrel, never a module underneath it.
  */
 
@@ -24,12 +34,16 @@ export {
   CREDENTIAL_HEADER,
   CREDENTIAL_SCHEME,
   createScopedCredentialResolver,
+  createValidationCredentialResolver,
   credentialSigningKey,
   inspectScopedCredential,
+  inspectValidationCredential,
   SCOPED_CREDENTIAL_ALGORITHM,
   SCOPED_CREDENTIAL_AUDIENCE,
   SCOPED_CREDENTIAL_ISSUER,
+  validationRunIdFromSubject,
   verifyScopedCredential,
+  verifyValidationCredential,
   WORKFLOW_SUBJECT_PREFIX,
   workflowIdFromSubject,
 } from '@bluetel-ai/sisyphus-api/server'
@@ -38,6 +52,8 @@ export type {
   ScopedCredentialOutcome,
   ScopedCredentialRefusal,
   ScopedCredentialResolverOptions,
+  ValidationCredentialOutcome,
+  ValidationCredentialRefusal,
 } from '@bluetel-ai/sisyphus-api/server'
 
 export { joseCredentialVerifier } from './jose-binding'

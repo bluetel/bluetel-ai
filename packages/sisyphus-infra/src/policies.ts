@@ -17,7 +17,7 @@
  * which is what keeps the documents assertable without an SST install.
  */
 
-import { POLICY_VERSION, type PolicyDocument } from './lib'
+import { getExecutorParameterPathPrefix, POLICY_VERSION, type PolicyDocument } from './lib'
 import { getWorkflowObjectPrefix, type ObjectClass } from './retention'
 import { isDeployStage, type DeployStage } from './sst-app'
 
@@ -129,6 +129,22 @@ export interface RunnerPolicyConfig {
   /** Bucket name per object class. */
   readonly bucketNames: Readonly<Record<ObjectClass, string>>
   /**
+   * Region the stage's executor parameters live in — the region component of
+   * the one Parameter Store ARN granted below, and nothing else.
+   */
+  readonly region: string
+  /** Account those parameters live in. See {@link RunnerPolicyConfig.region}. */
+  readonly accountId: string
+  /**
+   * The **plain** stage whose executor parameter prefix the instance may read.
+   *
+   * This is the field that keeps a staging instance out of production's
+   * parameters, so it is required rather than defaulted: there is no sensible
+   * fallback, and the only plausible one — the account's parameters at large —
+   * is the exact grant this scoping exists to avoid.
+   */
+  readonly stage: string
+  /**
    * Workflow the instance is running. Every S3 grant is scoped to this
    * workflow's partition; a fleet-wide role would defeat FR-071's partitioning.
    *
@@ -170,9 +186,10 @@ export const buildRunnerTrustPolicy = (): PolicyDocument => ({
 })
 
 /**
- * The executor's permission policy. Read the setup bundle, write logs and
- * artifacts, read and write this workflow's snapshots, and hold a Session
- * Manager channel for operator access. Nothing else.
+ * The executor's permission policy. Read the setup bundle, read this stage's
+ * executor parameters, write logs and artifacts, read and write this workflow's
+ * snapshots, and hold a Session Manager channel for operator access. Nothing
+ * else.
  *
  * The instance runs a setup bundle supplied by configuration and an agent acting
  * on a prompt, so it must be assumed able to run arbitrary code — every
@@ -184,8 +201,13 @@ export const buildRunnerTrustPolicy = (): PolicyDocument => ({
  *   workflow-scoped machine surface credential and nothing else (FR-005,
  *   FR-037). No `rds:*`, no `rds-db:connect`, no read of the connection-URL
  *   parameter.
- * - **No Secrets Manager and no Parameter Store.** Every credential the job
- *   needs arrives in the user-data envelope, scoped to one workflow.
+ * - **No Secrets Manager, and no Parameter Store beyond one prefix.** Every
+ *   credential the job needs arrives in the user-data envelope, scoped to one
+ *   workflow, or from the machine surface, or from the setup bundle — never
+ *   from a parameter. The single `ssm:GetParameter` grant is not a crack in
+ *   that: see `ReadStageExecutorParameters` below for what it covers and why
+ *   nothing beneath the prefix it names is a credential (T247, FR-075,
+ *   FR-202).
  * - **No bucket-wide access — when a workflow id is known.** Each S3 grant is
  *   scoped to that workflow's partition, so one workflow cannot read another's
  *   logs or snapshots (FR-071), and no grant can list a bucket, so it cannot
@@ -388,6 +410,55 @@ export const buildControlPlanePolicy = (config: ControlPlanePolicyConfig): Polic
   }
 }
 
+/**
+ * The Parameter Store ARN the runner role may read, and the only one.
+ *
+ * `arn:aws:ssm:<region>:<account>:parameter/sisyphus/<stage>/executor/*` — the prefix
+ * from {@link getExecutorParameterPathPrefix}, never a second spelling of it, so a
+ * parameter path and the grant that makes it readable cannot drift apart. (Parameter
+ * names begin with `/`, and an SSM ARN's resource segment is `parameter` followed by
+ * the name, so the two concatenate to `parameter/sisyphus/...` with exactly one slash
+ * and no separator of our own.)
+ *
+ * Three parameters sit beneath it today, and the grant is written for the prefix rather
+ * than for three ARNs because the instance's problem is precisely that it does not yet
+ * know what a stage publishes: `release-key` (what to run),
+ * `instance-environment` (what to run it with) and `instance-profile-arn`.
+ *
+ * Every one is a name, a key or an ARN — nothing beneath this prefix is a credential,
+ * and nothing may become one. All three are `type: 'String'`, which is the reason no
+ * `kms:Decrypt` accompanies this statement: `GetParameter` on a plain `String` involves
+ * no key, whereas a `SecureString` could not be decrypted here and would fail at boot
+ * with an access-denied on KMS rather than on SSM. If a value ever needs encrypting, it
+ * does not belong on this path — see the note on
+ * `getExecutorInstanceEnvironmentParameterName`.
+ *
+ * `ssm:GetParameters` (plural) is granted alongside the singular because a reader
+ * fetching both the release key and the environment in one call uses it, and AWS
+ * evaluates it against each name's own ARN — so it widens nothing.
+ * `ssm:DescribeParameters` is **not** granted: it takes no resource-level permission at
+ * all, so it could only be granted on `*`, and it would let an instance enumerate every
+ * parameter in the account including another stage's.
+ */
+const executorParameterArn = (config: RunnerPolicyConfig): string => {
+  for (const [field, value] of [
+    ['region', config.region],
+    ['accountId', config.accountId],
+    ['stage', config.stage],
+  ] as const) {
+    if (value.trim() === '') {
+      throw new Error(
+        `Cannot scope the executor's Parameter Store grant with an empty ${field}. An empty ` +
+          `segment does not narrow the ARN, it widens it — AWS reads a blank region or account as ` +
+          `"any", and a blank stage as every stage's executor parameters — and the resulting ` +
+          `policy deploys perfectly well.`,
+      )
+    }
+  }
+
+  return `arn:aws:ssm:${config.region}:${config.accountId}:parameter${getExecutorParameterPathPrefix(config.stage)}/*`
+}
+
 export const buildRunnerPolicy = (config: RunnerPolicyConfig): PolicyDocument => ({
   Version: POLICY_VERSION,
   Statement: [
@@ -396,6 +467,12 @@ export const buildRunnerPolicy = (config: RunnerPolicyConfig): PolicyDocument =>
       Effect: 'Allow',
       Action: ['s3:GetObject'],
       Resource: [`${bucketArn(config.bucketNames.bundles)}/*`],
+    },
+    {
+      Sid: 'ReadStageExecutorParameters',
+      Effect: 'Allow',
+      Action: ['ssm:GetParameter', 'ssm:GetParameters'],
+      Resource: [executorParameterArn(config)],
     },
     {
       Sid: 'WriteOwnLogsAndArtifacts',

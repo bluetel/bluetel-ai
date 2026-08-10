@@ -30,7 +30,7 @@ import process from 'node:process'
 
 import { env } from './env'
 import { parseJobEnvelope } from './job-envelope'
-import { assembleRun, runExecutor, validationModeUnsupportedError } from './run'
+import { assembleRun, assembleValidation, runExecutor, runValidation } from './run'
 import { createShutdownRegistry } from './runtime'
 
 /**
@@ -76,7 +76,39 @@ const main = async (): Promise<void> => {
   const envelope = parseJobEnvelope(await readEnvelopeText(process.argv.slice(2), process.stdin))
 
   if (envelope.mode === 'validation') {
-    throw validationModeUnsupportedError()
+    // A validation is a different run, not a degenerate workflow: bootstrap phases 2–5 against the
+    // archive, one report, exit (T200, FR-147). It used to throw here, because the machine surface
+    // had no procedure a run without a workflow could report to; `machine.reportValidation` is that
+    // procedure and `src/run/validate.ts` is what reaches it.
+    const environment = {
+      region: env.AWS_REGION,
+      machineSurfaceUrl: env.SISYPHUS_MACHINE_SURFACE_URL,
+      bundlesBucket: env.SISYPHUS_BUNDLES_BUCKET,
+      logsBucket: env.SISYPHUS_LOGS_BUCKET,
+      workspaceRoot: env.SISYPHUS_WORKSPACE_ROOT,
+    }
+
+    const validation = await runValidation({
+      envelope,
+      environment,
+      ...assembleValidation({ envelope, environment }),
+      onOutputFailure: (error: unknown) => {
+        process.stderr.write(
+          `[executor] the captured setup output could not be stored: ${
+            error instanceof Error ? error.message : String(error)
+          }\n`,
+        )
+      },
+    })
+
+    // Exit 0 for a validation that reported, whatever it found. A bundle that fails at its first
+    // phase is a validation that worked; a non-zero exit would tell the instance's supervisor to
+    // restart something that has already delivered its result. The only path to 1 is the outer
+    // `catch`, which is reached when the report itself could not be delivered.
+    process.stdout.write(`[executor] validation ${validation.report.outcome}\n`)
+    process.exitCode = 0
+
+    return
   }
 
   const assembled = assembleRun({

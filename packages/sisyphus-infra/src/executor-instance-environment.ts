@@ -46,15 +46,16 @@
  * real run at boot with the same name several hours later.
  *
  * ---------------------------------------------------------------------------
- * What this does not do, stated so it is not mistaken for done
+ * Who is allowed to read it (T247)
  * ---------------------------------------------------------------------------
- * The runner role grants no `ssm:GetParameter` — see `buildRunnerPolicy` in `policies.ts`, whose
- * statements are S3, Session Manager and nothing else. That is a pre-existing gap rather than one
- * this module introduces: `/sisyphus/<stage>/executor/release-key` has been published for the same
- * reader since the executor's stack was written, and is unreadable by the same identity for the
- * same reason. The two are one fix, in one place, and it is a change to `RunnerPolicyConfig`'s
- * shape rather than to anything here. Recorded at the producer so the next reader of this file
- * finds it rather than discovering it on an instance.
+ * Publishing a parameter and being able to read it are two changes, and for a while this module
+ * only made the first. The runner role granted no `ssm:GetParameter` at all — `buildRunnerPolicy`
+ * in `policies.ts` was S3, Session Manager and nothing else — which made this parameter inert, and
+ * had made `/sisyphus/<stage>/executor/release-key` inert in the same way since the day the
+ * executor's stack was written: an instance could not learn what to run, let alone what to run it
+ * with. Both are now covered by one statement scoped to
+ * `arn:aws:ssm:<region>:<account>:parameter/sisyphus/<stage>/executor/*`, which is precisely why
+ * the leaf below is composed from `getExecutorParameterPathPrefix` rather than spelled out again.
  *
  * ---------------------------------------------------------------------------
  * Why the pure part is here and the resource is not
@@ -66,7 +67,7 @@
  * which is exactly the class of defect FR-200 keeps assertable.
  */
 
-import { getPlainStage } from './get-plain-stage'
+import { getExecutorParameterPathPrefix } from './lib'
 import type { ObjectClass } from './retention'
 
 /**
@@ -74,8 +75,11 @@ import type { ObjectClass } from './retention'
  *
  * A sibling of `/sisyphus/<stage>/executor/release-key`, and read by the same reader for the same
  * reason: the launch unit needs to know what to run and what to run it with, and neither can be
- * baked into a stage-agnostic AMI. Built from the plain stage so `<stage>-bootstrap` and
- * `<stage>-website` resolve the same entry, as every other path in this package does.
+ * baked into a stage-agnostic AMI. Built from {@link getExecutorParameterPathPrefix} — which
+ * applies the plain stage, so `<stage>-bootstrap` and `<stage>-website` resolve the same entry, as
+ * every other path in this package does — rather than from a second spelling of the prefix, because
+ * that prefix is what the runner role's `ssm:GetParameter` grant is scoped to (T247). A leaf
+ * composed independently could drift outside the grant while still deploying and still publishing.
  *
  * Not a `SecureString`, and that is a claim rather than an oversight: nothing in
  * {@link buildExecutorInstanceEnvironment} is a credential. Two URLs, a region, a stage name and
@@ -90,7 +94,7 @@ import type { ObjectClass } from './retention'
  * // → '/sisyphus/production/executor/instance-environment'
  */
 export const getExecutorInstanceEnvironmentParameterName = (stage: string): string =>
-  `/sisyphus/${getPlainStage(stage)}/executor/instance-environment`
+  `${getExecutorParameterPathPrefix(stage)}/instance-environment`
 
 /**
  * The variables the executor's stack cannot derive and must be given.

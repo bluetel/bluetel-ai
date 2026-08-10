@@ -20,8 +20,13 @@
 export { ARTIFACT_KINDS, isArtifactKind } from './artifact-kind'
 export type { ArtifactKind } from './artifact-kind'
 
-export { BOOTSTRAP_PHASES, isBootstrapPhase } from './bootstrap-phase'
-export type { BootstrapPhase } from './bootstrap-phase'
+export {
+  BOOTSTRAP_PHASES,
+  isBootstrapPhase,
+  isValidationBootstrapPhase,
+  VALIDATION_BOOTSTRAP_PHASES,
+} from './bootstrap-phase'
+export type { BootstrapPhase, ValidationBootstrapPhase } from './bootstrap-phase'
 
 export { BOOTSTRAP_PHASE_OUTCOMES, isBootstrapPhaseOutcome } from './bootstrap-phase-outcome'
 export type { BootstrapPhaseOutcome } from './bootstrap-phase-outcome'
@@ -94,6 +99,9 @@ export type { TerminalOutcome } from './terminal-outcome'
 
 export { DEFAULT_USER_ROLE, isUserRole, USER_ROLES } from './user-role'
 export type { UserRole } from './user-role'
+
+export { isValidationOutcome, VALIDATION_OUTCOMES } from './validation-outcome'
+export type { ValidationOutcome } from './validation-outcome'
 
 export {
   ACTIVE_WORKFLOW_STATES,

@@ -459,6 +459,7 @@ describe.skipIf(liveDatabaseUrl === undefined || liveDatabaseUrl === '')(
           session,
           scope: createScopeResolver({ db, identity: { userId, isAdmin: false } }),
           machineCredential: () => Promise.resolve(null),
+          validationCredential: () => Promise.resolve(null),
         }
         return createCallerFactory(router)(context)
       }

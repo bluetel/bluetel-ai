@@ -11,6 +11,7 @@ import {
   reportIterationInput,
   reportSnapshotParkInput,
   reportTerminalInput,
+  reportValidationInput,
 } from './machine'
 
 const ID = '01890a5d-ac96-774b-bcce-b302099a8057'
@@ -205,6 +206,82 @@ describe('reportTerminalInput', () => {
         turnsUsed: 1,
         spendUsed: '1',
       }).success,
+    ).toBe(false)
+  })
+})
+
+describe('reportValidationInput', () => {
+  const phase = { phase: 'setup_script', outcome: 'succeeded' } as const
+
+  it('names no validation run — the credential does (T200, FR-018)', () => {
+    const parsed = reportValidationInput.parse({ phaseResults: [phase] })
+
+    expect(Object.keys(parsed).sort()).toStrictEqual(['phaseResults'])
+    expect(JSON.stringify(parsed)).not.toContain('validationRunId')
+  })
+
+  it('carries no outcome, because the surface derives it from the phases (FR-148)', () => {
+    // A wire field would be a second copy of a fact already on the wire, free to contradict it —
+    // and the copy an operator reads.
+    expect(
+      Object.keys(reportValidationInput.parse({ phaseResults: [phase], outcome: 'passed' })),
+    ).not.toContain('outcome')
+  })
+
+  it('refuses an empty report, which would otherwise derive passed from silence', () => {
+    expect(reportValidationInput.safeParse({ phaseResults: [] }).success).toBe(false)
+  })
+
+  it('refuses a phase a validation cannot reach', () => {
+    // No workspace, no prompt, no leased seat. A report naming one of these would be describing
+    // something that did not happen, and accepting it would put that claim in the panel.
+    for (const unreachable of ['credential_install', 'entry_checkout', 'agent_start']) {
+      expect(
+        reportValidationInput.safeParse({
+          phaseResults: [{ phase: unreachable, outcome: 'succeeded' }],
+        }).success,
+      ).toBe(false)
+    }
+  })
+
+  it('refuses the same phase twice, which has no meaning', () => {
+    const result = reportValidationInput.safeParse({
+      phaseResults: [phase, { phase: 'setup_script', outcome: 'failed' }],
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.at(0)?.path).toStrictEqual(['phaseResults'])
+  })
+
+  it('accepts the per-phase outcome vocabulary, including timed_out (FR-146)', () => {
+    for (const outcome of ['succeeded', 'failed', 'timed_out']) {
+      expect(
+        reportValidationInput.safeParse({ phaseResults: [{ phase: 'bundle_verify', outcome }] })
+          .success,
+      ).toBe(true)
+    }
+    expect(
+      reportValidationInput.safeParse({
+        phaseResults: [{ phase: 'bundle_verify', outcome: 'passed' }],
+      }).success,
+    ).toBe(false)
+  })
+
+  it('takes an optional output key and an optional per-phase detail and duration', () => {
+    expect(
+      reportValidationInput.parse({
+        phaseResults: [
+          { phase: 'setup_script', outcome: 'failed', detail: 'exit 1', durationMs: 9 },
+        ],
+        outputS3Key: 'validations/abc/def.txt',
+      }),
+    ).toStrictEqual({
+      phaseResults: [{ phase: 'setup_script', outcome: 'failed', detail: 'exit 1', durationMs: 9 }],
+      outputS3Key: 'validations/abc/def.txt',
+    })
+
+    expect(
+      reportValidationInput.safeParse({ phaseResults: [phase], outputS3Key: '' }).success,
     ).toBe(false)
   })
 })

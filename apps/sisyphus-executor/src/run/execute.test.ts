@@ -14,6 +14,7 @@ import type { LogSegmentRecord, SanitisedText, SegmentStore } from '../output'
 import type {
   AcknowledgeCommandInput,
   HeartbeatInput,
+  IterationInput,
   MachineSurfaceClient,
   PendingCommands,
   RegisterSnapshotInput,
@@ -137,6 +138,7 @@ interface RecordingSurface {
   readonly segments: LogSegmentRecord[]
   /** Every skill the run reported reading. Empty here would mean the reporter is bound to nothing. */
   readonly skillReferences: SkillReferenceInput[]
+  readonly iterations: IterationInput[]
   /** Every park the run reported. Empty during a failing snapshot means `onParked` reaches nothing. */
   readonly parks: SnapshotParkReport[]
   /** Every rotation the run wrote through (003/FR-030). */
@@ -163,6 +165,7 @@ const recordingSurface = (): RecordingSurface => {
   const acknowledgements: AcknowledgeCommandInput[] = []
   const segments: LogSegmentRecord[] = []
   const skillReferences: SkillReferenceInput[] = []
+  const iterations: IterationInput[] = []
   const parks: SnapshotParkReport[] = []
   const rotations: { fence: number; material: string }[] = []
   const state = { flushes: 0, pending: [] as PendingCommands }
@@ -175,6 +178,7 @@ const recordingSurface = (): RecordingSurface => {
     acknowledgements,
     segments,
     skillReferences,
+    iterations,
     parks,
     rotations,
     get flushes() {
@@ -231,6 +235,11 @@ const recordingSurface = (): RecordingSurface => {
       },
       reportSkillReference: async (input) => {
         skillReferences.push(input)
+
+        return Promise.resolve()
+      },
+      reportIteration: async (input) => {
+        iterations.push(input)
 
         return Promise.resolve()
       },

@@ -12,6 +12,7 @@ import {
   setupBundles,
   setupBundleVersions,
   users,
+  validationRuns,
   workflows,
   workspaces,
   workspaceVersions,
@@ -104,6 +105,17 @@ export interface WorkflowFixtures {
   readonly close: () => Promise<void>
   /** A workflow with the user, bundle and workspace rows it cannot exist without. */
   readonly seedWorkflow: (options: SeedWorkflowOptions) => Promise<string>
+  /**
+   * A bundle validation run against the same seeded bundle version (T200, FR-147).
+   *
+   * Shares `seedDependencies` with {@link WorkflowFixtures.seedWorkflow} rather than seeding its
+   * own bundle, because a validation proves the archive a real run would unpack — a suite that
+   * validated a *different* bundle from the one its workflows use would be testing a coincidence.
+   *
+   * @param startedAt - Set explicitly where a test asserts on the abandonment budget, so staleness
+   *   is data rather than timing.
+   */
+  readonly seedValidationRun: (options?: { readonly startedAt?: Date }) => Promise<string>
   /** A live lease against a workflow, as provisioning would leave it. */
   readonly seedLease: (workflowId: string) => Promise<string>
   /** Release a lease, as teardown or the reconciler would. */
@@ -276,6 +288,22 @@ export const createWorkflowFixtures = (connectionString: string): WorkflowFixtur
           })
           .returning({ id: workflows.id }),
         'a fixture workflow',
+      )
+    },
+
+    seedValidationRun: async (options = {}) => {
+      const { ownerUserId, bundleVersionId } = await seedDependencies()
+
+      return requireId(
+        await requireClient()
+          .db.insert(validationRuns)
+          .values({
+            setupBundleVersionId: bundleVersionId,
+            triggeredByUserId: ownerUserId,
+            ...(options.startedAt === undefined ? {} : { startedAt: options.startedAt }),
+          })
+          .returning({ id: validationRuns.id }),
+        'a fixture validation run',
       )
     },
 

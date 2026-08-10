@@ -52,8 +52,8 @@
  * matching; a credential of that shape is rare and the alternative is a log that redacts English.
  */
 
-import { MIN_SECRET_LENGTH } from './secret-encodings'
-import type { KnownSecret } from './secret-values'
+import type { KnownSecret } from '@bluetel-ai/sisyphus-redaction'
+import { MIN_SECRET_LENGTH } from '@bluetel-ai/sisyphus-redaction'
 
 /** Prefixes every placeholder this path produces: `[redacted:bundle.forge-token]`. */
 export const BUNDLE_SECRET_NAME_PREFIX = 'bundle'

@@ -49,6 +49,7 @@ const contextFor = (
       Promise.resolve({ userId: user.id, isAdmin: user.role === 'admin', visibleProfileIds: [] }),
     ),
     machineCredential: () => Promise.resolve(null),
+    validationCredential: () => Promise.resolve(null),
   }
 }
 

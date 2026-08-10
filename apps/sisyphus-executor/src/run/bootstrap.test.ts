@@ -459,7 +459,8 @@ describe('bootstrapRun', () => {
  * checked the registry's contents would still have passed on the day `assembleRun` passed no
  * `secrets` at all, because the registry existed and was empty and nothing downstream noticed.
  *
- * The planted value is deliberately in no format `output/secret-patterns.ts` recognises — no
+ * The planted value is deliberately in no format `@bluetel-ai/sisyphus-redaction`'s
+ * `secret-patterns.ts` recognises — no
  * `ghp_`, no `sk-`, no JWT — and the line it is written on names no credential-ish key. Both are
  * required for the test to be evidence about this mechanism: with either one relaxed the pattern
  * stage would redact the line on its own and the test would pass with the seeding removed, which

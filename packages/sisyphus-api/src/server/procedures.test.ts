@@ -8,6 +8,7 @@ import type {
   MachineCredential,
   SisyphusContext,
   SisyphusSession,
+  ValidationRunCredential,
 } from './context'
 import {
   adminProcedure,
@@ -18,6 +19,7 @@ import {
   machineProcedure,
   publicProcedure,
   scopedProcedure,
+  validationProcedure,
 } from './procedures'
 import { memoiseScope } from './scope'
 
@@ -38,6 +40,8 @@ const probeRouter = createTRPCRouter({
   admin: adminProcedure.query(({ ctx }) => ctx.user.role),
   scoped: scopedProcedure.query(({ ctx }) => ctx.scope),
   machine: machineProcedure.query(({ ctx }) => ctx.workflowId),
+  validation: validationProcedure.query(({ ctx }) => ctx.validationRunId),
+  validationKeys: validationProcedure.query(({ ctx }) => Object.keys(ctx)),
 })
 
 const buildSession = (overrides: Partial<SisyphusSession['user']> = {}): SisyphusSession => ({
@@ -60,9 +64,22 @@ const buildCredential = (overrides: Partial<MachineCredential> = {}): MachineCre
   ...overrides,
 })
 
+const VALIDATION_RUN_ID = '55555555-5555-7555-8555-555555555555'
+
+const buildValidationCredential = (
+  overrides: Partial<ValidationRunCredential> = {},
+): ValidationRunCredential => ({
+  credentialId: '66666666-6666-7666-8666-666666666666',
+  validationRunId: VALIDATION_RUN_ID,
+  jti: 'validation-jti-1',
+  expiresAt: new Date(Date.now() + 60_000),
+  ...overrides,
+})
+
 const buildHarness = (options: {
   readonly session?: SisyphusSession | null
   readonly credential?: MachineCredential | null
+  readonly validationCredential?: ValidationRunCredential | null
   readonly visibleProfileIds?: readonly string[]
 }) => {
   const denials: AuthorisationDenial[] = []
@@ -91,6 +108,7 @@ const buildHarness = (options: {
       })
     }),
     machineCredential: () => Promise.resolve(options.credential ?? null),
+    validationCredential: () => Promise.resolve(options.validationCredential ?? null),
   }
 
   return {
@@ -234,6 +252,82 @@ describe('machineProcedure', () => {
 
     await expect(harness.caller.machine()).resolves.toBe(WORKFLOW_ID)
     expect(harness.denials).toStrictEqual([])
+  })
+})
+
+describe('validationProcedure', () => {
+  it('refuses a request with no credential and records it (T200, FR-147)', async () => {
+    // Also the shape a host that has not wired `resolveValidationCredential` produces: the
+    // dependency is optional and an unwired one resolves `null`, so a misconfigured deployment
+    // refuses reports rather than accepting unauthenticated ones.
+    const harness = buildHarness({})
+
+    await expect(harness.caller.validation()).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect(harness.denials).toStrictEqual([
+      { reason: 'machine_credential_missing', path: 'validation' },
+    ])
+  })
+
+  it('refuses an interactive session presented on the machine surface (FR-005)', async () => {
+    const harness = buildHarness({
+      session: buildSession(),
+      validationCredential: buildValidationCredential(),
+    })
+
+    await expect(harness.caller.validation()).rejects.toMatchObject({ code: 'FORBIDDEN' })
+    expect(harness.denials).toStrictEqual([
+      {
+        reason: 'surface_confusion',
+        userId: OWNER_ID,
+        validationRunId: VALIDATION_RUN_ID,
+        path: 'validation',
+        detail: 'human session presented on the machine surface',
+      },
+    ])
+  })
+
+  it('refuses an expired credential rather than trusting its run id', async () => {
+    const harness = buildHarness({
+      validationCredential: buildValidationCredential({ expiresAt: new Date(Date.now() - 1) }),
+    })
+
+    await expect(harness.caller.validation()).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    expect(harness.denials).toStrictEqual([
+      {
+        reason: 'machine_credential_invalid',
+        validationRunId: VALIDATION_RUN_ID,
+        path: 'validation',
+        detail: 'expired',
+      },
+    ])
+  })
+
+  it('pins the request to the credential’s validation run', async () => {
+    const harness = buildHarness({ validationCredential: buildValidationCredential() })
+
+    await expect(harness.caller.validation()).resolves.toBe(VALIDATION_RUN_ID)
+    expect(harness.denials).toStrictEqual([])
+  })
+
+  it('is not satisfied by a workflow credential, and does not satisfy a machine procedure', async () => {
+    // The two are siblings rather than a chain, and this is what that buys: neither resolver's
+    // credential is admissible to the other's procedure, so no resolver can be reached with the
+    // wrong one. Nothing in either middleware has to remember to check.
+    const workflowOnly = buildHarness({ credential: buildCredential() })
+    await expect(workflowOnly.caller.validation()).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+
+    const validationOnly = buildHarness({ validationCredential: buildValidationCredential() })
+    await expect(validationOnly.caller.machine()).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+  })
+
+  it('puts no workflow id on the context under any name', async () => {
+    // A validation run has no workflow. A `ctx.workflowId` here — even one holding the validation
+    // run's id — would let a validation credential satisfy `assertMachineWorkflowMatches` against a
+    // row that does not exist. `validationKeys` returns the resolver's whole context.
+    const harness = buildHarness({ validationCredential: buildValidationCredential() })
+
+    await expect(harness.caller.validationKeys()).resolves.not.toContain('workflowId')
+    await expect(harness.caller.validationKeys()).resolves.toContain('validationRunId')
   })
 })
 

@@ -61,6 +61,7 @@ const callerWith = (options: {
     session,
     scope: { resolve: () => Promise.reject(new Error('the machine surface has no scope')) },
     machineCredential: () => Promise.resolve(options.credential),
+    validationCredential: () => Promise.resolve(null),
   }
 
   return createCallerFactory(machineSurfaceRouter)(context)
@@ -102,6 +103,11 @@ describe('machineSurfaceRouter', () => {
       // `parked_resumable` outcome — see `./snapshot-park.ts` (T184, FR-082).
       'reportSnapshotPark',
       'reportTerminal',
+      // The one procedure here that is **not** a `machineProcedure` (T200, FR-147). A bundle
+      // validation run has no workflow, so it is scoped to `ctx.validationRunId` by
+      // `validationProcedure` instead — see `./validation.ts` and `./validation-credential.ts` for
+      // why the two credential kinds are disjoint types over disjoint tables.
+      'reportValidation',
     ])
   })
 

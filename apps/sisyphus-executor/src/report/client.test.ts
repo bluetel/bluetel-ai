@@ -81,6 +81,7 @@ const fakeTransport = (): FakeTransport => {
       reportSnapshotPark: async (input) => record('reportSnapshotPark', input),
       acknowledgeCommand: async (input) => record('acknowledgeCommand', input),
       reportSkillReference: async (input) => record('reportSkillReference', input),
+      reportIteration: async (input) => record('reportIteration', input),
       reportExternalAction: async (input) => {
         await record('reportExternalAction', input)
 

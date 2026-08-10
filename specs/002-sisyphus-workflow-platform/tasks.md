@@ -1113,9 +1113,33 @@ loose ends, the coverage gaps and the three gate verifications — can follow in
   > **unticked**; the residue is carried under **T239** in Phase 22, which is where the remaining work is
   > specified.
 
-- [ ] T196 [P] [US5] `FindingsPublisher` implementation, and [US4] `TicketPort` / `IntegrationPlanner` — the
+- [x] T196 [P] [US5] `FindingsPublisher` implementation, and [US4] `TicketPort` / `IntegrationPlanner` — the
       same absence for the review and autonomous paths. `runReviewWorkflow` and `runAutonomousWorkflow` are
       tested and dispatched and both halt at their port
+
+  > **Done.** `agentWorkflowPorts` now branches on `envelope.job.workflowType` and supplies the `review` and
+  > `autonomous` bundles alongside `delegated`, so `dispatch.ts:127` and `:142` no longer throw
+  > `missingWorkflowPortsError`. **The task named three ports; seven were required** — `ReviewerPort`,
+  > `IntegrationPort`, `ReviewGuard`, `ReviewTarget[]` and `IterationReporter` are also non-optional fields of
+  > `ReviewPorts`/`AutonomousPorts`. `agent/structured-turn.ts` extracts the ask-the-agent/read-a-delimited-block
+  > machinery out of `developer-port.ts`, which is refactored onto it with `AgentProposalError`'s wording
+  > byte-identical; `delivery/review-forge.ts` adds a **second** HTTP client rather than methods on `Forge`,
+  > because FR-060 keeps `Forge` unable to write what a delegated run must not write. Executor suite 103 files
+  > /1245 tests → **113/1325, all green**. Eight falsifications, each RED then GREEN — including one proving the
+  > shared block-tag isolation, where a different question's answer was accepted as this one's.
+  >
+  > **Two consequences worth reading before the stage exercise.** `reportIteration` was missing from the
+  > executor's machine-surface client and had to be added, or `AutonomousPorts.recordIteration` could not be
+  > built at all; it is a **direct** call, not buffered, because the refusal is the value — a buffered call
+  > would report success before the three-iteration check constraint was tested. And **review targets existed
+  > nowhere**: the envelope carries no pull request number or ticket reference and the machine surface exposes
+  > no procedure to read one, so `agent/review-targets.ts` asks the agent, on the same trust basis the delegated
+  > path already extends. Two things are checked rather than trusted — the agent names a workspace _entry id_,
+  > and the repository comes from the envelope, so no string it writes can address a repository outside the run.
+  > An empty answer halts rather than becoming "review whatever is open".
+  >
+  > **`TicketPort` ships refusing, deliberately — see T249.**
+
 - [x] T197 [P] `InstanceMetadataReader` against IMDS — the interruption watch is wired and tested end to end
       through a fake reader, but the real notice source is assumed, not read. Spike S2 recorded the notice
       format as unobserved. Until this lands, `watchForInterruption` runs against
@@ -1135,10 +1159,31 @@ loose ends, the coverage gaps and the three gate verifications — can follow in
 
 ### Surfaces a caller needs and no package publishes
 
-- [ ] T198 Package the FR-163 prompt redactor. It lives at `apps/sisyphus-executor/src/output/redact.ts` and
+- [x] T198 Package the FR-163 prompt redactor. It lives at `apps/sisyphus-executor/src/output/redact.ts` and
       no package exports it, so `apps/sisyphus-control-plane/src/context.ts` defaults to
       `createRefusingPromptRedactor()` and **every integration tick fails loudly in production**. Move the
       standard into a shared package and wire the one-line override (FR-163, FR-019)
+
+  > **Done.** Moved to a new package `@bluetel-ai/sisyphus-redaction`, following **T206**'s
+  > `packages/sisyphus-notify` precedent file-for-file. The full failure path was `dispatch.ts:228` →
+  > `jobs/integration-tick.ts:375` → `assembleIntegrationPrompt` → `redactPromptParts` → throw
+  > `PROMPT_REDACTOR_NOT_CONFIGURED`: **every integration tick that found a candidate ticket threw before it
+  > could claim it**, and no production caller ever supplied the override.
+  >
+  > **The refusal was never the safety choice its doc comments claimed.** `context.ts:59` and `:115` argued it
+  > as deliberate; it was a description of where the code lived — the standard sat inside the executor app, and
+  > an app must not depend on another app. Those comments are rewritten. The move is a move, not a copy: two
+  > implementations of one redaction standard would drift, which is worse than the bug. The split is at the
+  > right seam — the redaction primitives moved, while the three modules deciding _which values a run knows_
+  > (`agent-credential`, `bundle-secrets`, `secret-registry`) stayed with the run and cross the boundary as
+  > `KnownSecret`/`SecretSource`.
+  >
+  > **This suite asserted the defect.** `context.test.ts:126` tested _for_ the refusal, which is why the gap
+  > survived every green run. The replacement asserts against `checkRedactorConformance` — the control plane's
+  > existing executable statement of the standard — so a redactor that later stops meeting it fails here naming
+  > the credential class it let through. Falsified: restoring the refusing default fails the new test with four
+  > leaked classes listed.
+
 - [x] T199 Connect `/admin/integrations` to the router. **Corrected on investigation:** the router was already
       mounted at `appRouter.admin.integrations` and all nine resolvers existed — the "not mounted in this
       deployment" message the screen displayed was false, and the three source comments asserting it were
@@ -1152,7 +1197,7 @@ loose ends, the coverage gaps and the three gate verifications — can follow in
       depend on another app, so the shared half becomes a package. Until this lands, `SisyphusDependencies`
       leaves `notifier` absent and those five events are a silent no-op — the correct default, not a working
       system (FR-136, FR-141)
-- [ ] T200 [P] Give validation runs a way to authenticate (FR-147). The `validation_runs` table, the outcome
+- [x] T200 [P] Give validation runs a way to authenticate (FR-147). The `validation_runs` table, the outcome
       enum, the admin surface and the control-plane job all exist; what is missing is **authentication, not a
       procedure**. `scoped_credentials.workflow_id` is `not null`, `workflowIdFromSubject` deliberately returns
       `undefined` for `validation:<id>`, and `credential-verification.ts` documents refusing that subject on
@@ -1161,6 +1206,32 @@ loose ends, the coverage gaps and the three gate verifications — can follow in
       `scoped_credentials_live_key` partial index, or a separate store); a `validationProcedure` builder; a
       `VALIDATION_OUTCOMES` tuple in `src/enums/` — `validation_outcome` is the only pgEnum with no mirroring
       tuple, which breaks that module's own stated invariant; and a report input schema
+
+  > **Done, via a separate store rather than a nullable column.** `validation_credentials` is its own table
+  > (migration `0003_validation_credentials.sql`), so **`scoped_credentials_live_key` is byte-unchanged** —
+  > which is the strongest available proof this task did not weaken it. The reasoning follows the precedent
+  > `jobs/validate-bundle.ts` already set for `validation_runs` not being a workflow row: loosening a `not null`
+  > so a handful of rows may omit it puts every other row one `null` away from being unattributable, and
+  > `MachineCredential.workflowId` is a `string` that every workflow-scoped write in the platform is built on.
+  > `inspectCredentialToken` is extracted so the signature-and-claims half is shared verbatim while **the
+  > subject space is not** — each resolver returns the raw `sub` and neither can obtain the other's id.
+  > `validationProcedure` is a _sibling_ of `machineProcedure`, not a chain on it: there is no `ctx.workflowId`
+  > under any name. `validationModeUnsupportedError` is **deleted**, not narrowed.
+  >
+  > **Falsified four ways, all RED then GREEN** — and the first is the important one. Dropping the new
+  > `validation_credentials_live_key` index failed the Postgres-backed test while **23 others still passed,
+  > including the Drizzle-metadata assertion that the index exists**. That is PR #19's own defect reproduced
+  > deliberately: a metadata test proves nothing about a constraint. Dropping the _original_
+  > `scoped_credentials_live_key` also goes RED, so the untouched guarantee is now actually measured rather than
+  > merely unmodified.
+  >
+  > **A leak it would otherwise have introduced was caught and closed**: a reported validation run ended with
+  > nothing destroying its instance, because the FR-039 sweep skips validation tags and
+  > `abandonStaleValidationRuns` only selects `ended_at is null`. `terminateFinishedValidationInstances` closes
+  > it. **Ran against real Postgres**: `sisyphus-api` 1925 passed / **0 skipped** (1176 passed / 749 skipped
+  > without a database), `sisyphus-control-plane` 1009 passed / 0 skipped. See **T250** for the one stated
+  > limit.
+
 - [ ] T201 [P] Brand `skillReferences.unavailableReason` as `SanitisedText` — every other free-text field on
       the machine surface is branded, and this one can embed a raw `readFile` error message. Touches the
       `SkillReferenceReporter` signature across the executor's workflow files (FR-045, FR-089)
@@ -1598,7 +1669,7 @@ got here.
   > envelope is untouched, so `start-workflow.ts:106`'s boundary still holds. **Blocked from taking effect by
   > T247.**
 
-- [ ] T247 Grant the runner role `ssm:GetParameter` on its own stage's parameters. **Found while closing
+- [x] T247 Grant the runner role `ssm:GetParameter` on its own stage's parameters. **Found while closing
       T238**, which is inert without it: `buildRunnerPolicy`
       (`packages/sisyphus-infra/src/policies.ts:391`) grants S3 and Session Manager only, so an instance cannot
       read the instance-environment parameter T238 publishes — **nor the executor release-key parameter, which
@@ -1607,6 +1678,25 @@ got here.
       than the account's parameters at large. This means widening `RunnerPolicyConfig` with region, account and
       stage and rippling through `runner-role.ts` and `policies.test.ts` — a different shape of change from
       T238, which is why it is its own task rather than an amendment to it (FR-075, FR-202)
+
+  > **Done.** New statement `ReadStageExecutorParameters` grants `ssm:GetParameter` and `ssm:GetParameters` on
+  > `arn:aws:ssm:<region>:<account>:parameter/sisyphus/<stage>/executor/*`. `ssm:DescribeParameters` is
+  > excluded: it takes no resource-level permission, so it could only be granted on `*`. The prefix is not
+  > restated — `getExecutorParameterPathPrefix(stage)` now lives in `lib.ts` and both the path builder and the
+  > grant compose from it, so the ARN and the path it authorises cannot drift. Region and account are resolved
+  > inside `runner-role.ts` from `aws.getRegionOutput()` / `aws.getCallerIdentityOutput()` and stage from
+  > `config.scope.stack`, so no caller can mistype an account number. **One grant covers all three parameters**
+  > — instance-environment, release-key and instance-profile-arn — verified against the publishing config, not
+  > assumed. `kms:Decrypt` is **not** needed: all three are published `type: 'String'`, and the prohibition test
+  > is kept so a later `SecureString` fails loudly rather than at boot.
+  >
+  > **The gap survived because a test asserted it.** `policies.test.ts` carried
+  > `expect(action.startsWith('ssm:')).toBe(false)`, and `buildRunnerPolicy`'s own doc comment declared "No
+  > Secrets Manager and no Parameter Store" as deliberate. Falsified three ways, each RED then GREEN: deleting
+  > the statement fails 11 tests; **widening** it to `parameter/*` fails 5, including "does not reach another
+  > stage's executor parameters" and "does not reach the database connection URL"; narrowing it to a single leaf
+  > fails 5, including the release-key coverage. The middle case is the one that matters — a permissions suite
+  > that only detects absence is half a suite.
 
 **Checkpoint**: a fresh instance reaches bootstrap phase 2 rather than dying in env validation. **T213 cannot
 run before this.** **Not met by T238 alone** — the value is published but unreadable until **T247** lands.
@@ -1699,7 +1789,7 @@ merge, by a different engineer.
 outcome other than "assembled without the ports that workflow type needs"; let one integration tick assemble a
 prompt without throwing.
 
-- [ ] T241 [P] Confirm `003/FR-052` is satisfied once **T200** lands, and record the verdict against it —
+- [x] T241 [P] Confirm `003/FR-052` is satisfied once **T200** lands, and record the verdict against it —
       "bundle validation runs MUST remain possible without holding a credential, so proving a bundle does not
       consume pool capacity". **PR #19 shipped that requirement against an unsolved dependency**:
       `validationModeUnsupportedError` is present and unchanged in
@@ -1707,6 +1797,37 @@ prompt without throwing.
       `workflowIdFromSubject` still returns `undefined` for a `validation:<id>` subject, so a validation-mode
       executor still cannot reach the machine surface at all. This task is the cross-spec check that closes
       the loop; T200 is the work. **Blocked on** T200
+
+  > **Verdict: `003/FR-052` is satisfied, and structurally rather than by rule.** T200 landed the dependency
+  > this requirement was shipped against. A validation run authenticates without touching the pool because
+  > `validation_credentials` carries **no** `agent_credential_id`, `credential_group_id`, `lease_id` or `fence`
+  > — asserted by the test `reaches nothing in the agent credential pool (003/FR-052)`. Two further guards make
+  > it unreachable by accident: `VALIDATION_BOOTSTRAP_PHASES` excludes `credential_install` and the report input
+  > schema **refuses** a report naming it, and `machine.fetchAgentCredential` is a `machineProcedure` resolving
+  > its seat from `ctx.workflowId`, which a validation credential cannot satisfy — asserted in both directions.
+
+- [ ] T250 [US1] Renew, or extend, a validation credential's window. **Found while closing T200**, and stated
+      there rather than hidden: a validation credential's window is **15 minutes** and nothing renews it —
+      `renewCredential` is a `machineProcedure` and a validation credential cannot satisfy it — while the
+      validation **budget is 45 minutes**. A `setup.sh` slower than 15 minutes therefore runs to completion and
+      then fails to report, and is swept by `abandonStaleValidationRuns` as though it had died. Since the whole
+      point of a validation run is proving an unproven bundle, a slow `setup.sh` is a likely case rather than a
+      pathological one. Either add a `renewValidationCredential` procedure or mint the credential for the
+      budget; do not simply widen the window without deciding which (FR-147)
+- [ ] T249 [US4] Give `TicketPort` a real implementation, or move the tracker transition out of the executor.
+      **Found while closing T196**, which supplied every other port the review and autonomous paths need and
+      shipped this one as `createRefusingTicketPort()` in `apps/sisyphus-executor/src/run/ticket-port.ts` —
+      correctly, because two things are missing and neither is a client library. **(a)** The job envelope
+      carries **no ticket reference**. The workflow row has one; the control plane does not put it in user
+      data. **(b)** No tracker endpoint or credential is described anywhere the executor can read, and that is
+      by design: `packages/sisyphus-integrations` talks to Jira **from the control plane**, holding credentials
+      the executor is forbidden (FR-005, FR-006, FR-036). So the honest options are to carry a reference plus a
+      control-plane-mediated transition procedure on the machine surface, or to keep the transition in the
+      control plane entirely and have the executor report an intent. **Decide before the autonomous story is
+      exercised.** Note the asymmetry to fix either way: `applyReviewOutcome` throws when the port refuses, but
+      `runAutonomousWorkflow`'s `moveTicketIfPrescribed` returns `undefined` **silently** when the port is
+      absent (`workflows/autonomous.ts:150-168`), so an autonomous run whose skill prescribes a transition
+      currently reports success having moved nothing (FR-096, FR-108)
 
 **Carried forward**, in the order they should be done:
 

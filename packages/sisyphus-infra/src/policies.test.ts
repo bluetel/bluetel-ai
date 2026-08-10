@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { getAgentCredentialSecretPrefix, getStackScope } from './lib'
+import { getExecutorInstanceEnvironmentParameterName } from './executor-instance-environment'
+import {
+  getAgentCredentialSecretPrefix,
+  getExecutorInstanceProfileParameterName,
+  getStackScope,
+} from './lib'
 import {
   GITHUB_OIDC_AUDIENCE,
   GITHUB_OIDC_CLAIM_PREFIX,
@@ -30,8 +35,28 @@ const runnerConfig: RunnerPolicyConfig = {
     logs: 'sisyphus-staging-logs',
     snapshots: 'sisyphus-staging-snapshots',
   },
+  region: 'eu-west-2',
+  accountId: '429776178057',
+  stage: 'staging',
   workflowId: 'wf_01H8',
 }
+
+/**
+ * The release-key path, restated here as the literal `apps/sisyphus-executor/sst.config.ts` writes
+ * it (`getReleaseKeyParameterName`) rather than imported from it — that config is an SST entry
+ * point and not importable from a unit test.
+ *
+ * Restating it is the point. The parameter this instance most needs to read is the one whose name
+ * no helper in this package owns, so the assertion below is the only place the two spellings meet.
+ * If that config ever moves the release key out from under the executor prefix, this test fails and
+ * names the parameter, instead of the change deploying cleanly and leaving every instance on the
+ * stage unable to discover what to run.
+ */
+const RELEASE_KEY_PARAMETER_NAME = '/sisyphus/staging/executor/release-key'
+
+/** The `parameter/...` half of an SSM ARN for a parameter name beginning with `/`. */
+const ssmArnFor = (parameterName: string): string =>
+  `arn:aws:ssm:eu-west-2:429776178057:parameter${parameterName}`
 
 const runnerActions = (config: RunnerPolicyConfig = runnerConfig): string[] =>
   buildRunnerPolicy(config).Statement.flatMap((statement) => [...statement.Action])
@@ -227,10 +252,101 @@ describe('buildRunnerPolicy — what the executor may do', () => {
     expect(statement?.Action).toContain('ssmmessages:OpenDataChannel')
   })
 
-  it('grants nothing outside the four scoped statements', () => {
-    expect(policy.Statement).toHaveLength(4)
+  it('grants nothing outside the five scoped statements', () => {
+    expect(policy.Statement).toHaveLength(5)
     expect(policy.Statement.every((statement) => statement.Effect === 'Allow')).toBe(true)
   })
+})
+
+/**
+ * Whether an IAM resource pattern admits a concrete ARN. `*` matches any run of characters, which
+ * is the whole of IAM's resource globbing for these ARNs, and the anchors are what make the test
+ * falsifiable in both directions: a pattern narrowed by one character stops matching, and one
+ * widened to `parameter/*` starts matching things the negative assertions below forbid.
+ */
+const admitsArn = (pattern: string, arn: string): boolean =>
+  new RegExp(
+    `^${pattern
+      .split('*')
+      .map((literal) => literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('.*')}$`,
+  ).test(arn)
+
+describe('buildRunnerPolicy — reading this stage’s executor parameters (T247, FR-075, FR-202)', () => {
+  const policy = buildRunnerPolicy(runnerConfig)
+  const statement = policy.Statement.find((entry) => entry.Sid === 'ReadStageExecutorParameters')
+
+  it('grants read on the stage’s executor prefix and nothing wider', () => {
+    expect(statement?.Action).toEqual(['ssm:GetParameter', 'ssm:GetParameters'])
+    expect(statement?.Resource).toEqual([
+      'arn:aws:ssm:eu-west-2:429776178057:parameter/sisyphus/staging/executor/*',
+    ])
+  })
+
+  it('covers the instance-environment parameter the executor’s stack publishes', () => {
+    // Composed from the producer's own helper, not from a literal, so a change to the path that
+    // left the grant behind fails here rather than on an instance.
+    const arn = ssmArnFor(getExecutorInstanceEnvironmentParameterName('staging'))
+
+    expect(admitsArn(statement?.Resource?.[0] ?? '', arn)).toBe(true)
+  })
+
+  it('covers the release-key parameter, unreadable since the executor’s stack was written', () => {
+    expect(admitsArn(statement?.Resource?.[0] ?? '', ssmArnFor(RELEASE_KEY_PARAMETER_NAME))).toBe(
+      true,
+    )
+  })
+
+  it('covers the instance-profile ARN parameter, the third entry under the prefix', () => {
+    const arn = ssmArnFor(getExecutorInstanceProfileParameterName('staging'))
+
+    expect(admitsArn(statement?.Resource?.[0] ?? '', arn)).toBe(true)
+  })
+
+  it('does not reach another stage’s executor parameters', () => {
+    const pattern = statement?.Resource?.[0] ?? ''
+
+    expect(admitsArn(pattern, ssmArnFor('/sisyphus/production/executor/release-key'))).toBe(false)
+    expect(
+      admitsArn(pattern, ssmArnFor(getExecutorInstanceEnvironmentParameterName('production'))),
+    ).toBe(false)
+  })
+
+  it('does not reach the database connection URL, which is not executor configuration', () => {
+    expect(
+      admitsArn(
+        statement?.Resource?.[0] ?? '',
+        ssmArnFor('/sisyphus/staging/database/connection-url'),
+      ),
+    ).toBe(false)
+  })
+
+  it('scopes to this stage — a production role admits production and not staging', () => {
+    const production = buildRunnerPolicy({ ...runnerConfig, stage: 'production' })
+    const pattern =
+      production.Statement.find((entry) => entry.Sid === 'ReadStageExecutorParameters')
+        ?.Resource?.[0] ?? ''
+
+    expect(pattern).toBe(
+      'arn:aws:ssm:eu-west-2:429776178057:parameter/sisyphus/production/executor/*',
+    )
+    expect(admitsArn(pattern, ssmArnFor('/sisyphus/staging/executor/release-key'))).toBe(false)
+  })
+
+  it('is present on the fleet-wide profile too — it is stage configuration, not job configuration', () => {
+    const fleetWide = buildRunnerPolicy({ ...runnerConfig, workflowId: undefined })
+
+    expect(
+      fleetWide.Statement.find((entry) => entry.Sid === 'ReadStageExecutorParameters')?.Resource,
+    ).toEqual(['arn:aws:ssm:eu-west-2:429776178057:parameter/sisyphus/staging/executor/*'])
+  })
+
+  it.each(['region', 'accountId', 'stage'] as const)(
+    'refuses an empty %s rather than emitting an ARN segment that widens the grant',
+    (field) => {
+      expect(() => buildRunnerPolicy({ ...runnerConfig, [field]: '   ' })).toThrow(`empty ${field}`)
+    },
+  )
 })
 
 describe('buildRunnerPolicy — what the executor must never do', () => {
@@ -240,10 +356,27 @@ describe('buildRunnerPolicy — what the executor must never do', () => {
     }
   })
 
-  it('cannot read secrets or parameters, because the envelope carries its credential', () => {
+  it('cannot read secrets, because the envelope carries its credential', () => {
     for (const action of runnerActions()) {
       expect(action.startsWith('secretsmanager:')).toBe(false)
-      expect(action.startsWith('ssm:')).toBe(false)
+    }
+  })
+
+  it('reads parameters only, and only two actions of the many SSM has', () => {
+    // The instance must read this stage's executor parameters to know what to run (T247), and
+    // that is the entirety of its business with SSM. `PutParameter` would let it rewrite the
+    // release key for the whole fleet; `DescribeParameters` takes no resource-level permission,
+    // so granting it at all would mean granting it on `*`.
+    const ssmActions = runnerActions().filter((action) => action.startsWith('ssm:'))
+
+    expect(ssmActions).toEqual(['ssm:GetParameter', 'ssm:GetParameters'])
+  })
+
+  it('needs no KMS, because nothing under the executor prefix is a SecureString', () => {
+    // Asserted rather than assumed. All three parameters are published as `type: 'String'`, so
+    // `GetParameter` involves no key at all; a `kms:Decrypt` here would be a grant with no
+    // corresponding read, and a SecureString added later would fail on KMS rather than on SSM.
+    for (const action of runnerActions()) {
       expect(action.startsWith('kms:')).toBe(false)
     }
   })
@@ -289,7 +422,12 @@ describe('buildRunnerPolicy — what the executor must never do', () => {
 })
 
 describe('buildRunnerPolicy — the fleet-wide profile, when no workflow id is given', () => {
-  const fleetWideConfig: RunnerPolicyConfig = { bucketNames: runnerConfig.bucketNames }
+  const fleetWideConfig: RunnerPolicyConfig = {
+    bucketNames: runnerConfig.bucketNames,
+    region: runnerConfig.region,
+    accountId: runnerConfig.accountId,
+    stage: runnerConfig.stage,
+  }
   const policy = buildRunnerPolicy(fleetWideConfig)
 
   it('grants the whole bucket rather than a workflow partition', () => {

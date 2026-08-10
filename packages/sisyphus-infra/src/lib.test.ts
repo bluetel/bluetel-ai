@@ -12,6 +12,7 @@ import {
   getConnectionUrlParameterName,
   getEnvSecret,
   getExecutorInstanceProfileParameterName,
+  getExecutorParameterPathPrefix,
   getExecutorSecurityGroupIdsParameterName,
   getExecutorSubnetIdsParameterName,
   getResourceIdentifier,
@@ -137,6 +138,31 @@ describe('getConnectionUrlParameterName', () => {
     expect(getConnectionUrlParameterName(getPlainStage('staging-website'))).toBe(
       getConnectionUrlParameterName('staging'),
     )
+  })
+})
+
+describe('getExecutorParameterPathPrefix', () => {
+  it('is the stage’s executor prefix, with no trailing slash', () => {
+    expect(getExecutorParameterPathPrefix('staging')).toBe('/sisyphus/staging/executor')
+  })
+
+  it('resolves to the same prefix from every auxiliary stage', () => {
+    expect(getExecutorParameterPathPrefix('staging-bootstrap')).toBe(
+      getExecutorParameterPathPrefix('staging'),
+    )
+    expect(getExecutorParameterPathPrefix('staging-website')).toBe(
+      getExecutorParameterPathPrefix('staging'),
+    )
+  })
+
+  it('is the prefix the leaves are built from, which is what the runner grant relies on', () => {
+    // Not a tautology: the grant in `buildRunnerPolicy` is scoped to this prefix, so a leaf that
+    // stopped starting with it would publish fine and be unreadable by the instance (T247).
+    expect(
+      getExecutorInstanceProfileParameterName('staging').startsWith(
+        `${getExecutorParameterPathPrefix('staging')}/`,
+      ),
+    ).toBe(true)
   })
 })
 

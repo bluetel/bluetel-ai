@@ -1,6 +1,12 @@
+import type {
+  BootstrapPhaseOutcome,
+  ValidationBootstrapPhase,
+  ValidationOutcome,
+} from '@bluetel-ai/sisyphus-api/client'
+import { VALIDATION_BOOTSTRAP_PHASES } from '@bluetel-ai/sisyphus-api/client'
 import type { ComputeLease, SisyphusDatabase, ValidationRun } from '@bluetel-ai/sisyphus-api/db'
 import { setupBundleVersions, validationRuns } from '@bluetel-ai/sisyphus-api/db'
-import { and, eq, isNull, lt } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull, lt } from 'drizzle-orm'
 
 import type { ComputeProvisioner, ObjectStore } from '../aws'
 import { mintValidationCredential } from '../credentials'
@@ -26,19 +32,28 @@ import { runJob } from './run-job'
  * every real run would then be one `null` away from being unattributable. FR-147 chooses the other
  * way round: `validation_runs` is its own table, and the workflow columns stay `not null`.
  *
- * The cost of that choice is real and worth stating plainly, because it is not finished:
+ * The cost of that choice was real, was stated here plainly while it stood, and is now paid (T200):
  *
- * - **`scoped_credentials.workflow_id` is `not null`**, so a validation run cannot hold a
- *   credential row. Its token is bounded by its own `exp` and by teardown destroying the instance,
- *   and {@link import('../credentials').verifyScopedCredential} **refuses** it outright.
- * - **The machine surface has no validation-run procedure.** Every one of them is scoped to
- *   `ctx.workflowId`. So the executor cannot report its per-phase results back, and
- *   {@link completeBundleValidation} is written to be called by whatever eventually can — it takes
- *   the results rather than collecting them.
+ * - **`scoped_credentials.workflow_id` is `not null`**, so a validation run could not hold a
+ *   credential row, its token was bounded by its own `exp` alone, and
+ *   {@link import('../credentials').verifyScopedCredential} refused it outright. It still refuses
+ *   it — a validation credential must never resolve to a workflow — but a validation run now has a
+ *   row of its own in `validation_credentials`, minted by {@link mintValidationCredential} and
+ *   accepted by `createValidationCredentialResolver`. The workflow columns are still `not null` and
+ *   `scoped_credentials_live_key` is untouched.
+ * - **The machine surface has no validation-run procedure.** It has one now:
+ *   `machine.reportValidation`, built on `validationProcedure` rather than `machineProcedure`
+ *   precisely because there is no `ctx.workflowId` for it to be scoped to. The executor reports its
+ *   per-phase results there and the outcome is derived from them server-side.
  *
- * Until both are closed, a validation run provisions, bootstraps and tears down correctly, and its
- * per-phase results have to be supplied by the caller. Minting a token that authorised *something*
- * in the meantime would have hidden that; refusing it keeps it visible.
+ * {@link completeBundleValidation} therefore has two callers' worth of work split between two
+ * places, and the split is deliberate rather than residual: the **result** is recorded by the
+ * machine surface, in the transaction that also retires the credential, because that is where the
+ * authenticated instance is; the **instance** is destroyed here, by
+ * {@link terminateFinishedValidationInstances}, because the machine surface holds no compute
+ * provisioner and must not. `completeBundleValidation` remains the one-call path for a caller that
+ * has the results in hand already — the admin surface driving a validation synchronously, and the
+ * suites — and it stays idempotent against the machine surface having got there first.
  *
  * ## Why validation instances are tagged differently
  *
@@ -68,19 +83,19 @@ export const VALIDATION_BUDGET_MS = 45 * 60 * 1000
  * Deliberately not the whole `bootstrap_phase` enum: phases 6 and 7 are entry checkout and agent
  * start, and a validation stops before both by definition. A results object mentioning them would
  * be describing something that did not happen.
+ *
+ * The tuple itself moved to `@bluetel-ai/sisyphus-api`'s `src/enums/` in T200 and this is an alias
+ * of it. It acquired two more consumers on the far side of the package boundary — the input schema
+ * `machine.reportValidation` validates against, and the executor that fills that input in — and a
+ * literal restated per consumer is how one of them comes to accept `agent_start`. The alias stays so
+ * that this module and its callers keep reading in the vocabulary of the job.
  */
-export const VALIDATION_PHASES = [
-  'provisioning',
-  'bundle_download',
-  'bundle_verify',
-  'bundle_unpack',
-  'setup_script',
-] as const
+export const VALIDATION_PHASES = VALIDATION_BOOTSTRAP_PHASES
 
-export type ValidationPhase = (typeof VALIDATION_PHASES)[number]
+export type ValidationPhase = ValidationBootstrapPhase
 
 export interface ValidationPhaseResult {
-  readonly outcome: 'failed' | 'succeeded' | 'timed_out'
+  readonly outcome: BootstrapPhaseOutcome
   readonly detail?: string
   readonly durationMs?: number
 }
@@ -129,7 +144,7 @@ const firstRow = <TRow>(rows: readonly TRow[]): TRow | undefined => rows[0]
 const finishRun = async (options: {
   readonly db: SisyphusDatabase
   readonly validationRunId: string
-  readonly outcome: 'failed' | 'passed'
+  readonly outcome: ValidationOutcome
   readonly phaseResults: ValidationPhaseResults
   readonly outputS3Key?: string
   readonly now: Date
@@ -210,6 +225,7 @@ export const startBundleValidation = async (
   // The row exists before the launch, so an instance can always be tagged with an id that is
   // already recorded — the reverse order would leave a running instance tagged with nothing.
   const credential = await mintValidationCredential({
+    db,
     validationRunId: run.id,
     secret: options.credentialSecret,
     now,
@@ -267,7 +283,7 @@ export interface CompleteBundleValidationOptions {
 }
 
 export interface CompletedValidation {
-  readonly outcome: 'failed' | 'passed'
+  readonly outcome: ValidationOutcome
   readonly validationRunId: string
   readonly terminatedInstanceId: string | undefined
   /** True when the run had already ended and this call changed nothing. */
@@ -394,6 +410,50 @@ export const abandonStaleValidationRuns = async (options: {
   }
 
   return abandoned
+}
+
+/**
+ * **Destroy the instances of validation runs that have already reported (T200, FR-147).**
+ *
+ * Before `machine.reportValidation` existed, a validation run only ever ended by way of
+ * {@link completeBundleValidation} or {@link abandonStaleValidationRuns} — and both of those destroy
+ * the instance in the same call that ends the run, so nothing was left holding compute. That is no
+ * longer true, and this closes the gap it opened rather than leaving it: an instance now ends its
+ * own run by reporting, from a surface that holds no compute provisioner and must not be given one
+ * (FR-005). So the row is finished and the machine is still up.
+ *
+ * {@link abandonStaleValidationRuns} is **not** the backstop for that, and cannot be made one
+ * without lying: it selects on `ended_at is null`, which a reported run no longer satisfies, and
+ * widening it would have it write a `timed_out` phase over a result somebody has already read. This
+ * selects the complement — runs that *have* ended — and writes nothing at all. It only terminates.
+ *
+ * A reported run whose instance has already gone is the ordinary case, not an error: a validation
+ * that reports and then exits leaves a machine that its own launch unit may shut down before this
+ * sweep next runs. So an absent instance is silence, and only a termination is reported back.
+ *
+ * @param options - The seams. No budget: a run that has ended has no time left to be given.
+ * @returns One entry per instance actually destroyed.
+ */
+export const terminateFinishedValidationInstances = async (options: {
+  readonly db: SisyphusDatabase
+  readonly compute: ComputeProvisioner
+}): Promise<readonly AbandonedValidation[]> => {
+  const finished = await options.db
+    .select({ id: validationRuns.id })
+    .from(validationRuns)
+    .where(isNotNull(validationRuns.endedAt))
+
+  const terminated: AbandonedValidation[] = []
+
+  for (const run of finished) {
+    const instanceId = await instanceFor(options.compute, run.id)
+    if (instanceId !== undefined) {
+      await options.compute.terminate({ instanceId })
+      terminated.push({ validationRunId: run.id, terminatedInstanceId: instanceId })
+    }
+  }
+
+  return terminated
 }
 
 /** Starting a validation, wrapped in the uniform job envelope. */

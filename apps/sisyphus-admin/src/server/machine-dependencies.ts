@@ -9,7 +9,11 @@ import { getAuthDatabase } from '@sisyphus-admin/lib/auth'
 import { WebClient } from '@slack/web-api'
 
 import { createAgentCredentialMaterialStore } from './credential-material'
-import { createScopedCredentialResolver, joseCredentialVerifier } from './machine-credential'
+import {
+  createScopedCredentialResolver,
+  createValidationCredentialResolver,
+  joseCredentialVerifier,
+} from './machine-credential'
 import { recordDenial } from './record-denial'
 
 /**
@@ -101,6 +105,17 @@ export const createMachineDependencies = (): SisyphusDependencies => ({
   resolveSession: resolveNoSession,
   // See below the object for why the material store is here and on no other mount.
   resolveMachineCredential: createScopedCredentialResolver({
+    db: getAuthDatabase(),
+    secret: env.SISYPHUS_MACHINE_CREDENTIAL_SECRET,
+    jwtVerify: joseCredentialVerifier,
+    recordDenial,
+  }),
+  // The same header, the same secret, the same JOSE binding, a different subject space and a
+  // different table (T200, FR-147). Wired here and nowhere else for the reason the workflow resolver
+  // is: this is the mount a validation instance reaches, and `./dependencies.ts` — the interactive
+  // mount — deliberately gets neither, so a validation credential presented at `/api/trpc` is not
+  // even inspected. Unwired, `validationProcedure` refuses every report; see the dependency's note.
+  resolveValidationCredential: createValidationCredentialResolver({
     db: getAuthDatabase(),
     secret: env.SISYPHUS_MACHINE_CREDENTIAL_SECRET,
     jwtVerify: joseCredentialVerifier,

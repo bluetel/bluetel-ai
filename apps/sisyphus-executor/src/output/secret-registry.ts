@@ -28,7 +28,7 @@
  * later. So the array is rebuilt on `add` and only on `add`.
  */
 
-import type { KnownSecret } from './secret-values'
+import type { KnownSecret } from '@bluetel-ai/sisyphus-redaction'
 
 export interface SecretRegistry {
   /**

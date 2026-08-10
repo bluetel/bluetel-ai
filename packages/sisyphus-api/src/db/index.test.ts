@@ -75,6 +75,7 @@ describe('the db barrel', () => {
       'supervisionCommands',
       'ticketClaims',
       'users',
+      'validationCredentials',
       'validationRuns',
       'workflowEntries',
       'workflowEvents',

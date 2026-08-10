@@ -28,7 +28,7 @@ vi.mock('./jobs', async (importOriginal) => ({
 }))
 
 const { createControlPlaneContext } = await import('./context')
-const { PROMPT_REDACTOR_NOT_CONFIGURED } = await import('./jobs')
+const { checkRedactorConformance } = await import('./jobs')
 
 const env = {
   DATABASE_URL: 'postgres://sisyphus@localhost:5432/sisyphus',
@@ -123,10 +123,20 @@ describe('createControlPlaneContext', () => {
     expect(createControlPlaneContext({ env }).connectors.types()).toStrictEqual(['jira'])
   })
 
-  it('defaults to a redactor that refuses, rather than storing an unredacted ticket (FR-163)', () => {
+  /**
+   * T198. This assertion is the whole task: until the redaction standard became a package, the
+   * default here was `createRefusingPromptRedactor()` and every integration tick that found a
+   * candidate ticket threw `PROMPT_REDACTOR_NOT_CONFIGURED` — US8 was dead in production while the
+   * suite stayed green, because the suite asserted the refusal.
+   *
+   * `checkRedactorConformance` is used rather than a hand-written expectation because it *is* the
+   * standard, stated as outcomes: a wired redactor that stops meeting it fails here naming the
+   * credential class it let through, and one that refuses fails naming the throw.
+   */
+  it('defaults to the run-output redaction standard, so a tick can store a prompt (FR-163)', () => {
     const { redactor } = createControlPlaneContext({ env })
 
-    expect(() => redactor.redact('anything at all')).toThrow(PROMPT_REDACTOR_NOT_CONFIGURED)
+    expect(checkRedactorConformance(redactor)).toStrictEqual([])
   })
 
   it('drains through the same ceiling and starter the drain event would use', async () => {

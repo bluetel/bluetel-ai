@@ -1,5 +1,5 @@
 /**
- * The `DeveloperPort`, implemented against a live agent (T194, FR-057, FR-058, US1).
+ * The `DeveloperPort`, implemented against a live agent (T194, T196, FR-057, FR-058, US1).
  *
  * `runDevelopStep` resolves `sisyphus-dev` and then asks a function for a proposal. This is that
  * function: it writes one turn into the conversation the run is already having, watches the frames
@@ -16,34 +16,31 @@
  * nothing" — and a real implementation that quietly defaulted a field would be that stub with more
  * steps.
  *
- * ## Knowing when the answer is not coming
+ * ## The waiting is not here any more, and that is T196
  *
- * Deciding that an agent has finished is the hard part, and spike S1 left it deliberately open:
- * whether the CLI hands a mid-request stdin turn to the in-flight request or queues it behind the
- * current one was never observed. So a `result` frame cannot be attributed to a particular turn,
- * and a port that treated the first one it saw as "my turn is over" would report a perfectly
- * healthy pass as unanswered whenever the opening prompt's own response happened to land first.
+ * Deciding that an agent has finished is the subtle part, and four more ports now need exactly the
+ * same decision — the reviewer, the review's targets, the integration planner and the integration
+ * step. It therefore lives in `./structured-turn.ts`, which this module asks and then interprets.
+ * Nothing about the rule changed; see that file for why a boundary alone never ends the wait.
  *
- * The rule used here is correct under either scheduling. A boundary is only *evidence* of an
- * ending; what ends the wait is a boundary **followed by silence**. Any assistant or user frame
- * after a `result` disarms it again, because an agent still producing output is an agent still
- * working, whichever request the output belongs to. The same reasoning that made `quiesce` wait
- * for the next boundary rather than send an interrupt: prefer the rule that holds under both
- * answers to the question S1 could not settle.
- *
- * Three other endings need no inference at all — the output stream closing, a `result` frame that
- * says `is_error`, and the overall deadline expiring — and each is reported as itself.
+ * What stays here is the *vocabulary*: {@link AgentProposalFailure} keeps `no-proposal` rather than
+ * the generic `no-answer`, and every message still says "development pass 3". An operator reading a
+ * terminal report needs the run's words for what failed, not the platform's word for a block.
  */
 
 import { randomUUID } from 'node:crypto'
 
 import type { DeveloperPort, DevelopmentProposal, DevelopmentRequest } from '../workflows'
 
-import type { AgentAdapter, AgentResultFrame } from './adapter'
+import type { AgentAdapter } from './adapter'
 import { developTurnBody } from './develop-turn'
 import { readDevelopmentProposal } from './development-proposal'
 import type { FrameTap } from './frame-tap'
-import { extractProposal } from './proposal-block'
+import { PROPOSAL_TAG } from './proposal-block'
+import type { AgentAnswerFailure } from './structured-turn'
+import { askAgentForBlock, DEFAULT_SETTLE_MS, DEFAULT_TURN_TIMEOUT_MS } from './structured-turn'
+
+export { DEFAULT_SETTLE_MS, DEFAULT_TURN_TIMEOUT_MS }
 
 /**
  * A backstop, not a schedule. A development pass writes code, so the honest bound on it is the
@@ -52,17 +49,8 @@ import { extractProposal } from './proposal-block'
  */
 export const DEFAULT_PROPOSAL_DEADLINE_MS = 45 * 60_000
 
-/**
- * How long a turn boundary has to be followed by silence before the pass is called unanswered.
- *
- * Generous on purpose. It is only ever spent on a pass that is already going to fail, and it is
- * the margin that keeps a queued turn — the scheduling S1 could not rule out — from being read as
- * a turn nobody answered.
- */
-export const DEFAULT_SETTLE_MS = 15_000
-
-/** Long enough for the echo `--replay-user-messages` produces; see `cli-stream.ts`. */
-export const DEFAULT_TURN_TIMEOUT_MS = 10_000
+/** How a pass with no proposal is described to whoever reads the terminal report. */
+const ANSWER_NOUN = 'proposal block'
 
 /**
  * Why a pass produced no proposal. Named rather than free text, because each one sends whoever
@@ -87,6 +75,16 @@ export type AgentProposalFailure =
   | 'empty'
   /** A block that parsed and left out something a proposal cannot be assembled without. */
   | 'incomplete'
+
+/**
+ * The generic failure in this port's own vocabulary.
+ *
+ * Only one name differs, and the difference is worth keeping: "no proposal" is what a person
+ * looking at a development pass is trying to find out, and "no answer" is what the transport
+ * noticed.
+ */
+const proposalFailureFor = (failure: AgentAnswerFailure): AgentProposalFailure =>
+  failure === 'no-answer' ? 'no-proposal' : failure
 
 export class AgentProposalError extends Error {
   readonly kind: AgentProposalFailure
@@ -121,203 +119,6 @@ export interface AgentDeveloperPortOptions {
   readonly nonce?: () => string
 }
 
-/** How the watch ended. The transcript travels with it so the failure can be specific. */
-type WatchOutcome =
-  | { readonly kind: 'answered'; readonly transcript: string }
-  | { readonly kind: 'closed'; readonly transcript: string }
-  | { readonly kind: 'errored'; readonly transcript: string; readonly result: AgentResultFrame }
-  | { readonly kind: 'settled'; readonly transcript: string }
-  | { readonly kind: 'expired'; readonly transcript: string }
-
-interface Watch {
-  readonly outcome: Promise<WatchOutcome>
-  /**
-   * The turn is on the wire. Only now can a boundary be evidence about *this* pass — a `result`
-   * arriving before the write belongs to something the run was already doing.
-   */
-  readonly delivered: () => void
-  readonly cancel: () => void
-}
-
-const unrefTimer = (timer: NodeJS.Timeout): NodeJS.Timeout => {
-  timer.unref()
-
-  return timer
-}
-
-/**
- * Watch the frame stream until the answer arrives or one of the endings does.
- *
- * Assistant text is accumulated across frames because a block is written in pieces and its markers
- * land wherever the chunk boundaries fall. User frames are deliberately *not* accumulated: they
- * are the echo of the turn this port just wrote, and that turn contains the markers.
- */
-const watchForProposal = (options: {
-  readonly frames: Pick<FrameTap, 'subscribe'>
-  readonly nonce: string
-  readonly settleMs: number
-  readonly deadlineMs: number
-}): Watch => {
-  let transcript = ''
-  let settleTimer: NodeJS.Timeout | undefined
-  let delivered = false
-  let unsubscribe: (() => void) | undefined
-  let finish: (outcome: WatchOutcome) => void = () => undefined
-
-  const outcome = new Promise<WatchOutcome>((resolveOutcome) => {
-    const deadline = unrefTimer(
-      setTimeout(() => {
-        finish({ kind: 'expired', transcript })
-      }, options.deadlineMs),
-    )
-
-    finish = (settledOutcome: WatchOutcome): void => {
-      clearTimeout(deadline)
-      clearTimeout(settleTimer)
-      unsubscribe?.()
-      resolveOutcome(settledOutcome)
-    }
-
-    const disarmSettle = (): void => {
-      clearTimeout(settleTimer)
-      settleTimer = undefined
-    }
-
-    unsubscribe = options.frames.subscribe({
-      onFrame: (frame) => {
-        if (frame.type === 'result') {
-          if (frame.isError) {
-            finish({ kind: 'errored', transcript, result: frame })
-
-            return
-          }
-
-          if (delivered) {
-            disarmSettle()
-            settleTimer = unrefTimer(
-              setTimeout(() => {
-                finish({ kind: 'settled', transcript })
-              }, options.settleMs),
-            )
-          }
-
-          return
-        }
-
-        if (frame.type === 'user') {
-          // Output, so the agent is not silent — but never part of the transcript.
-          disarmSettle()
-
-          return
-        }
-
-        if (frame.type !== 'assistant') {
-          return
-        }
-
-        disarmSettle()
-        transcript += frame.text
-
-        // Only a readable answer ends the watch. Neither a half-written block nor an unreadable
-        // one does: an agent that mangled a block and then wrote a good one has answered, and
-        // ending here on the first bad block would throw away the pass over a stray backtick.
-        if (extractProposal(transcript, options.nonce).kind === 'found') {
-          finish({ kind: 'answered', transcript })
-        }
-      },
-      onClose: () => {
-        finish({ kind: 'closed', transcript })
-      },
-    })
-  })
-
-  return {
-    outcome,
-    delivered: () => {
-      delivered = true
-    },
-    cancel: () => {
-      finish({ kind: 'expired', transcript })
-    },
-  }
-}
-
-/**
- * Which failure a watch that did not produce an answer is.
- *
- * The ending comes first and the transcript refines it, in that order, because the ending is the
- * fact an operator has to act on: an agent that died halfway is a different problem from an agent
- * that finished and wrote something unreadable, even when both leave the same wreckage behind.
- * The one exception is a block cut off in mid-write, which says *where* the ending landed and is
- * therefore more use than the ending alone.
- */
-const classify = (
-  outcome: WatchOutcome,
-  nonce: string,
-): { readonly kind: AgentProposalFailure; readonly detail: string } => {
-  const extraction = extractProposal(outcome.transcript, nonce)
-  const cutOff = extraction.kind === 'truncated'
-
-  if (cutOff) {
-    return {
-      kind: 'truncated',
-      detail:
-        'the agent began a proposal block and never closed it, so what it was reporting is ' +
-        'not readable',
-    }
-  }
-
-  switch (outcome.kind) {
-    case 'closed':
-      return {
-        kind: 'stream-ended',
-        detail: 'the agent’s output ended before it emitted a readable proposal block',
-      }
-    case 'errored':
-      return {
-        kind: 'agent-error',
-        detail: `the agent ended the turn with an error (${outcome.result.subtype}) and no proposal block`,
-      }
-    case 'settled':
-      return extraction.kind === 'malformed'
-        ? { kind: 'malformed', detail: extraction.detail }
-        : {
-            kind: 'no-proposal',
-            detail: 'the agent reached a turn boundary and went quiet without a proposal block',
-          }
-    default:
-      return extraction.kind === 'malformed'
-        ? { kind: 'malformed', detail: extraction.detail }
-        : {
-            kind: 'timed-out',
-            detail: 'no turn boundary and no proposal block arrived within the time allowed',
-          }
-  }
-}
-
-const deliver = async (
-  options: AgentDeveloperPortOptions,
-  request: DevelopmentRequest,
-  body: string,
-): Promise<void> => {
-  try {
-    // The evidence is recorded and not acted on. A write that succeeded without an echo is an
-    // unknown, not a failure (FR-049), and calling it either would be a claim: "unacknowledged"
-    // would abandon a pass that is very likely running, "delivered" would be a lie.
-    await options.agent.sendTurn(body, {
-      timeoutMs: options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
-    })
-  } catch (cause) {
-    throw new AgentProposalError({
-      kind: 'not-delivered',
-      ordinal: request.ordinal,
-      detail: `the turn could not be written to the agent (${
-        cause instanceof Error ? cause.message : String(cause)
-      })`,
-    })
-  }
-}
-
 /**
  * Build the developer port for a running agent.
  *
@@ -329,36 +130,28 @@ export const createAgentDeveloperPort = (options: AgentDeveloperPortOptions): De
 
   return async (request: DevelopmentRequest): Promise<DevelopmentProposal> => {
     const nonce = newNonce()
-    const body = developTurnBody({ request, nonce })
 
-    // Subscribed before the write, so an answer that arrives faster than this promise chain
-    // resumes is still seen. The same ordering `sendTurn` uses for its own acknowledgement.
-    const watch = watchForProposal({
+    const answer = await askAgentForBlock({
+      agent: options.agent,
       frames: options.frames,
+      tag: PROPOSAL_TAG,
       nonce,
-      settleMs: options.settleMs ?? DEFAULT_SETTLE_MS,
+      body: developTurnBody({ request, nonce }),
+      answerNoun: ANSWER_NOUN,
       deadlineMs: options.deadlineMs ?? DEFAULT_PROPOSAL_DEADLINE_MS,
+      ...(options.settleMs === undefined ? {} : { settleMs: options.settleMs }),
+      ...(options.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: options.turnTimeoutMs }),
     })
 
-    try {
-      await deliver(options, request, body)
-    } catch (error) {
-      watch.cancel()
-
-      throw error
+    if (answer.kind === 'failed') {
+      throw new AgentProposalError({
+        kind: proposalFailureFor(answer.failure),
+        ordinal: request.ordinal,
+        detail: answer.detail,
+      })
     }
 
-    watch.delivered()
-
-    const outcome = await watch.outcome
-
-    const extraction = extractProposal(outcome.transcript, nonce)
-
-    if (outcome.kind !== 'answered' || extraction.kind !== 'found') {
-      throw new AgentProposalError({ ...classify(outcome, nonce), ordinal: request.ordinal })
-    }
-
-    const reading = readDevelopmentProposal(extraction.value)
+    const reading = readDevelopmentProposal(answer.value)
 
     if (reading.kind === 'empty') {
       throw new AgentProposalError({

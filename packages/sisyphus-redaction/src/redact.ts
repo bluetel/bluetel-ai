@@ -1,8 +1,13 @@
 /**
- * Two-stage redaction (T059, FR-045, FR-072).
+ * Two-stage redaction (T059, T198, FR-045, FR-072, FR-163).
  *
- * Stage two of the output pipeline, between control stripping and
- * segmentation. Two stages because neither alone is enough:
+ * The standard itself. In the executor it is stage two of the output pipeline,
+ * between control stripping and segmentation; in the control plane it is the
+ * whole of what FR-163 means by "the same standard as run output", applied to
+ * an integration-assembled prompt before it is stored. One implementation, two
+ * callers — see the barrel for why that is a package boundary.
+ *
+ * Two stages because neither alone is enough:
  *
  * 1. **Known values.** Every credential the setup bundle installed, removed
  *    verbatim and in every encoding derivable from the value alone. This is

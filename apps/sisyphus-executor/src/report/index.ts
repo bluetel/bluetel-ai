@@ -39,6 +39,7 @@ export type {
   FetchedAgentCredentialResult,
   HeartbeatInput,
   HttpMachineTransportOptions,
+  IterationInput,
   MachineSurfaceClient,
   MachineSurfaceClientOptions,
   MachineSurfaceTransport,
@@ -52,6 +53,22 @@ export type {
   TerminalInput,
   TerminalReport,
 } from './client'
+
+export {
+  createHttpValidationTransport,
+  createValidationSurfaceClient,
+  VALIDATION_REPORT_ATTEMPTS,
+} from './validation-client'
+export type {
+  HttpValidationTransportOptions,
+  ValidationPhaseReport,
+  ValidationReportInput,
+  ValidationReportResult,
+  ValidationRunReport,
+  ValidationSurfaceClient,
+  ValidationSurfaceClientOptions,
+  ValidationSurfaceTransport,
+} from './validation-client'
 
 export { createOutbox, DEFAULT_MAX_ENTRIES, OutboxFullError } from './outbox'
 export type { Outbox, OutboxCall, OutboxOptions, OutboxSaturation } from './outbox'

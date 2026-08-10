@@ -19,11 +19,15 @@ describe('the machine-credential barrel', () => {
       'WORKFLOW_SUBJECT_PREFIX',
       'bearerTokenFrom',
       'createScopedCredentialResolver',
+      'createValidationCredentialResolver',
       'credentialSigningKey',
       'inspectScopedCredential',
+      'inspectValidationCredential',
       'joseCredentialVerifier',
       'resolveNoMachineCredential',
+      'validationRunIdFromSubject',
       'verifyScopedCredential',
+      'verifyValidationCredential',
       'workflowIdFromSubject',
     ])
   })
@@ -42,6 +46,12 @@ describe('the machine-credential barrel', () => {
     )
     expect(machineCredential.workflowIdFromSubject).toBe(shared.workflowIdFromSubject)
     expect(machineCredential.bearerTokenFrom).toBe(shared.bearerTokenFrom)
+    // The validation half, on the same terms (T200): forwarded, never re-declared.
+    expect(machineCredential.createValidationCredentialResolver).toBe(
+      shared.createValidationCredentialResolver,
+    )
+    expect(machineCredential.verifyValidationCredential).toBe(shared.verifyValidationCredential)
+    expect(machineCredential.validationRunIdFromSubject).toBe(shared.validationRunIdFromSubject)
   })
 
   it('exposes nothing that could issue a credential', () => {

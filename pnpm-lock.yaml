@@ -266,6 +266,9 @@ importers:
       '@bluetel-ai/sisyphus-notify':
         specifier: workspace:*
         version: link:../../packages/sisyphus-notify
+      '@bluetel-ai/sisyphus-redaction':
+        specifier: workspace:*
+        version: link:../../packages/sisyphus-redaction
       '@slack/web-api':
         specifier: ^8.0.0
         version: 8.0.0
@@ -327,6 +330,9 @@ importers:
       '@bluetel-ai/sisyphus-api':
         specifier: workspace:*
         version: link:../../packages/sisyphus-api
+      '@bluetel-ai/sisyphus-redaction':
+        specifier: workspace:*
+        version: link:../../packages/sisyphus-redaction
       '@t3-oss/env-core':
         specifier: ^0.13.11
         version: 0.13.11(typescript@5.9.2)(zod@3.25.76)
@@ -497,6 +503,21 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(postgres@3.4.9)
+    devDependencies:
+      '@bluetel-ai/eslint-config-base':
+        specifier: workspace:*
+        version: link:../../tooling/eslint-config-base
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      typescript:
+        specifier: ~5.9.2
+        version: 5.9.2
+      vitest:
+        specifier: '>=4.1.0'
+        version: 4.1.7(@types/node@22.19.17)(vite@8.0.14(@types/node@22.19.17)(esbuild@0.27.2)(jiti@2.6.1)(less@4.5.1)(sass-embedded@1.98.0)(sass@1.98.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+
+  packages/sisyphus-redaction:
     devDependencies:
       '@bluetel-ai/eslint-config-base':
         specifier: workspace:*

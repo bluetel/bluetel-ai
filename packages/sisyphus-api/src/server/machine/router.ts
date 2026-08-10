@@ -40,6 +40,7 @@ import { reportSkillReferenceProcedure } from './skill-references'
 import type { RegisteredSnapshot } from './snapshot'
 import { registerSnapshot } from './snapshot'
 import { reportSnapshotParkProcedure } from './snapshot-park'
+import { reportValidationProcedure } from './validation'
 
 /**
  * The machine surface — everything an executor instance reports back (FR-018, FR-037, FR-046,
@@ -251,6 +252,29 @@ export const machineSurfaceRouter = createTRPCRouter({
    * map that dies with the instance. See `./external-actions.ts`.
    */
   reportExternalAction: reportExternalActionProcedure,
+
+  /**
+   * The result of proving a setup bundle (T200, FR-147, FR-148).
+   *
+   * **The one procedure on this router that is not a `machineProcedure`**, and the exception is the
+   * point rather than an inconsistency in property 1 above. A validation run has no workflow — it is
+   * `validation_runs`, not `workflows`, precisely so the workflow table's columns can stay
+   * `not null` — so there is no `ctx.workflowId` for it to be scoped to. It is scoped to
+   * `ctx.validationRunId` instead, established by `validationProcedure` from a credential resolved
+   * against `validation_credentials`, and the two credential kinds are disjoint types resolved from
+   * disjoint subject spaces against disjoint tables. A workflow credential presented here fails at
+   * the subject; a validation credential presented at any other procedure on this router fails the
+   * same way in reverse.
+   *
+   * It is mounted here rather than on a router of its own because a validation instance is an
+   * executor instance: it boots from the same user-data, is handed the same `machineSurfaceUrl` and
+   * speaks the same protocol. A second mount would be a second URL to configure and a second place
+   * for FR-005's separation to be got wrong.
+   *
+   * Property 2 holds as it does everywhere else: the first report wins on `ended_at is null`, and a
+   * retry is answered with `alreadyRecorded` rather than refused (FR-047, FR-148).
+   */
+  reportValidation: reportValidationProcedure,
 
   /** What the reviewer of the resulting change needs to know (FR-153). */
   reportReviewerSummary: machineProcedure

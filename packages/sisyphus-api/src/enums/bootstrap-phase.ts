@@ -31,3 +31,36 @@ export const BOOTSTRAP_PHASES = [
 export type BootstrapPhase = (typeof BOOTSTRAP_PHASES)[number]
 
 export const isBootstrapPhase = createEnumGuard(BOOTSTRAP_PHASES)
+
+/**
+ * The phases a **bundle validation** run reaches, and no others (T200, FR-147).
+ *
+ * A validation provisions an instance, fetches and verifies the archive, unpacks it and runs
+ * `setup.sh` — and then stops. It has no workspace to check out, no agent to start, and no leased
+ * seat to install, so `credential_install`, `entry_checkout` and `agent_start` are not phases it
+ * omitted: they are phases that do not exist for it. A result mentioning one would be describing
+ * something that did not happen.
+ *
+ * **It is a prefix of {@link BOOTSTRAP_PHASES} rather than an arbitrary subset**, which is what
+ * `bootstrap-phase.test.ts` asserts. That is not decoration: the phases are ordered because each
+ * carries its own timeout and a hang is reported by name (FR-145, FR-146), and a validation runs the
+ * same phases in the same order that a workflow does — it just stops earlier. A subset that had
+ * holes in it would mean a validation was running something other than the beginning of a real boot,
+ * which would make it prove less than it appears to.
+ *
+ * This tuple lives here rather than in the control-plane job that first needed it because it now has
+ * three consumers on two sides of a package boundary: the job that starts a validation, the input
+ * schema `machine.reportValidation` validates against, and the executor that fills that input in.
+ * A literal restated per consumer is how one of them comes to accept `agent_start`.
+ */
+export const VALIDATION_BOOTSTRAP_PHASES = [
+  'provisioning',
+  'bundle_download',
+  'bundle_verify',
+  'bundle_unpack',
+  'setup_script',
+] as const
+
+export type ValidationBootstrapPhase = (typeof VALIDATION_BOOTSTRAP_PHASES)[number]
+
+export const isValidationBootstrapPhase = createEnumGuard(VALIDATION_BOOTSTRAP_PHASES)

@@ -21,6 +21,7 @@ import {
   SUPERVISION_DELIVERY_OUTCOMES,
   TERMINAL_OUTCOMES,
   USER_ROLES,
+  VALIDATION_OUTCOMES,
   WORKFLOW_STATES,
   WORKFLOW_TYPES,
 } from '../../enums'
@@ -63,6 +64,10 @@ describe('Postgres enum types', () => {
       [pgEnums.notificationEventEnum, NOTIFICATION_EVENTS],
       [pgEnums.credentialStateEnum, CREDENTIAL_STATES],
       [pgEnums.credentialReleaseReasonEnum, CREDENTIAL_RELEASE_REASONS],
+      // T200: this pair did not exist, because `validation_outcome` was the one pgEnum declared
+      // from a literal array. Its absence is what let the header's rule be true of every type here
+      // except one.
+      [pgEnums.validationOutcomeEnum, VALIDATION_OUTCOMES],
     ] as const
 
     for (const [pgEnum, tuple] of pairs) {

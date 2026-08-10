@@ -36,6 +36,7 @@ export {
   SCOPED_CREDENTIAL_MAX_LIFETIME_MS,
   SCOPED_CREDENTIAL_WINDOW_MS,
   VALIDATION_SUBJECT_PREFIX,
+  validationRunIdFromSubject,
   validationSubject,
   WORKFLOW_SUBJECT_PREFIX,
   workflowIdFromSubject,
@@ -47,10 +48,13 @@ export {
   CREDENTIAL_HEADER,
   CREDENTIAL_SCHEME,
   createScopedCredentialResolver,
+  inspectCredentialToken,
   inspectScopedCredential,
   verifyScopedCredential,
 } from './credential-verification'
 export type {
+  CredentialTokenClaims,
+  CredentialTokenRefusal,
   ScopedCredentialJwtOptions,
   ScopedCredentialJwtResult,
   ScopedCredentialJwtVerifier,
@@ -58,6 +62,24 @@ export type {
   ScopedCredentialRefusal,
   ScopedCredentialResolverOptions,
 } from './credential-verification'
+
+export {
+  createValidationCredentialResolver,
+  inspectValidationCredential,
+  verifyValidationCredential,
+} from './validation-credential'
+export type {
+  ValidationCredentialOutcome,
+  ValidationCredentialRefusal,
+} from './validation-credential'
+
+export {
+  reportValidation,
+  reportValidationProcedure,
+  validationOutcomeFor,
+  validationPhaseResults,
+} from './validation'
+export type { ValidationContext, ValidationPhaseResults, ValidationReport } from './validation'
 
 export {
   CREDENTIAL_RENEWAL_WINDOW_MS,

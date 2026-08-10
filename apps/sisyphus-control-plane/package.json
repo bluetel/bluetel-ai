@@ -26,6 +26,7 @@
     "@bluetel-ai/sisyphus-api": "workspace:*",
     "@bluetel-ai/sisyphus-integration-jira": "workspace:*",
     "@bluetel-ai/sisyphus-notify": "workspace:*",
+    "@bluetel-ai/sisyphus-redaction": "workspace:*",
     "@slack/web-api": "^8.0.0",
     "@t3-oss/env-core": "^0.13.11",
     "@trpc/server": "^11.18.0",

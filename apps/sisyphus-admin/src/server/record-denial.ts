@@ -43,6 +43,7 @@ export const formatDenial = (denial: AuthorisationDenial): string => {
     ['path', denial.path],
     ['userId', denial.userId],
     ['workflowId', denial.workflowId],
+    ['validationRunId', denial.validationRunId],
     ['detail', denial.detail],
   ]
 

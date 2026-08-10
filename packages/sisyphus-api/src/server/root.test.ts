@@ -20,6 +20,7 @@ const anonymousContext = (): SisyphusContext => ({
   session: null,
   scope: createUnauthenticatedScopeResolver(),
   machineCredential: () => Promise.resolve(null),
+  validationCredential: () => Promise.resolve(null),
 })
 
 const procedurePaths = (router: { _def: { procedures: Record<string, unknown> } }): string[] =>

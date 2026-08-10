@@ -52,6 +52,7 @@ const contextFor = (
       }),
     ),
     machineCredential: () => Promise.resolve(null),
+    validationCredential: () => Promise.resolve(null),
   }
 }
 

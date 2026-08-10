@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import type { ScopedCredential, SisyphusDatabase } from '@bluetel-ai/sisyphus-api/db'
-import { scopedCredentials } from '@bluetel-ai/sisyphus-api/db'
+import { scopedCredentials, validationCredentials } from '@bluetel-ai/sisyphus-api/db'
 import {
   credentialSigningKey,
   SCOPED_CREDENTIAL_ALGORITHM,
@@ -181,39 +181,111 @@ export const mintScopedCredential = async (
   }
 }
 
+/** What a validation mint hands back: the token for the envelope, and the row behind it. */
+export interface MintedValidationCredential {
+  /** The signed compact JWT. This is the only copy — nothing stores it. */
+  readonly token: string
+  readonly credentialId: string
+  readonly jti: string
+  readonly validationRunId: string
+  readonly issuedAt: Date
+  /** The short window `validationProcedure` enforces, not the token's ceiling. */
+  readonly expiresAt: Date
+  /** Set when this mint revoked an incumbent credential for the same validation run. */
+  readonly supersededCredentialId: string | undefined
+}
+
 /**
- * Mint the token a **bundle validation run** carries (T047, FR-147).
+ * Mint the credential a **bundle validation run** reports with (T047, T200, FR-147, 003/FR-052).
  *
- * There is no database row, because there cannot be one: `scoped_credentials.workflow_id` is `not
- * null` and a validation run deliberately has no workflow (FR-147 keeps `workflows.owner_user_id`,
- * `assembled_prompt` and `workspace_version_id` non-null for real runs rather than loosening them
- * to accommodate a validation).
+ * ## What this used to be, and what changed
  *
- * So this token is bounded by its `exp` alone, and
- * {@link import('./verify').createScopedCredentialResolver} **refuses it** — a subject that is not
- * `workflow:<id>` resolves to no credential at all. That is deliberate. The envelope
- * `executor-protocol.md` specifies carries a `scopedCredential` in validation mode, so one is
- * minted and the envelope is the shape the contract says; but until the machine surface grows a
- * validation-run reporting procedure there is nothing for it to authorise, and a token that
- * authorised *something* in the meantime would be the wrong kind of guess.
+ * It used to return a signed token and **no row**, because there could not be one:
+ * `scoped_credentials.workflow_id` is `not null` and a validation run deliberately has no workflow
+ * — FR-147 keeps `workflows.owner_user_id`, `assembled_prompt` and `workspace_version_id` non-null
+ * for real runs rather than loosening them to accommodate a validation. The consequence was stated
+ * plainly here and honoured: `createScopedCredentialResolver` refused the subject outright, so the
+ * envelope had the shape `executor-protocol.md` specifies and the token authorised nothing.
+ *
+ * T200 supplies the row. `validation_credentials` is a table of its own — see
+ * `packages/sisyphus-api/src/db/schema/bundle.ts` for why that rather than a nullable
+ * `workflow_id` — and this mint writes into it exactly as {@link mintScopedCredential} writes into
+ * `scoped_credentials`, with the same supersede-rather-than-fail behaviour and the same fresh `jti`
+ * per issue. `createScopedCredentialResolver` **still** refuses a `validation:<id>` subject;
+ * `createValidationCredentialResolver` is what accepts it, and it can produce nothing but a
+ * `ValidationRunCredential`.
+ *
+ * ## Why it supersedes
+ *
+ * `validation_credentials_live_key` is a partial unique index on `(validation_run_id) WHERE
+ * revoked_at is null`. A second mint for one validation run is not a mistake — a launch that failed
+ * after the row was written and is retried arrives here again — so the incumbent is revoked inside
+ * the same transaction rather than the insert losing on an index whose message is about an index.
+ * Superseding is also what makes the previous token dead the moment the new one exists.
+ *
+ * ## No pool capacity is touched (003/FR-052)
+ *
+ * Nothing here acquires a lease or reads `agent_credentials`. Proving a bundle costs an instance and
+ * a row, and no seat.
+ *
+ * @param options - The handle, the run, the signing secret and optionally the clock.
+ * @throws If the insert produces no row, which would leave a signed token with nothing backing it.
  */
 export const mintValidationCredential = async (options: {
+  readonly db: SisyphusDatabase
   readonly validationRunId: string
   readonly secret: string
   readonly now?: Date
-}): Promise<{ readonly token: string; readonly jti: string; readonly issuedAt: Date }> => {
+}): Promise<MintedValidationCredential> => {
+  const { db, secret, validationRunId } = options
   const issuedAt = options.now ?? new Date()
+  const expiresAt = new Date(issuedAt.getTime() + SCOPED_CREDENTIAL_WINDOW_MS)
   const jti = randomUUID()
+
+  const credential = await db.transaction(async (tx) => {
+    const superseded = firstRow(
+      await tx
+        .update(validationCredentials)
+        .set({ revokedAt: issuedAt })
+        .where(
+          and(
+            eq(validationCredentials.validationRunId, validationRunId),
+            isNull(validationCredentials.revokedAt),
+          ),
+        )
+        .returning({ id: validationCredentials.id }),
+    )
+
+    const inserted = firstRow(
+      await tx
+        .insert(validationCredentials)
+        .values({ validationRunId, jti, expiresAt, issuedAt })
+        .returning(),
+    )
+
+    if (inserted === undefined) {
+      throw new Error(
+        `No validation credential row was written for validation run ${validationRunId}. Handing an instance a token with nothing backing it would produce a validation that boots and is then refused by the one report it makes.`,
+      )
+    }
+
+    return { inserted, supersededCredentialId: superseded?.id }
+  })
 
   return {
     token: await signCredential({
-      subject: validationSubject(options.validationRunId),
+      subject: validationSubject(validationRunId),
       jti,
-      secret: options.secret,
+      secret,
       issuedAt,
+      credentialId: credential.inserted.id,
     }),
+    credentialId: credential.inserted.id,
     jti,
+    validationRunId,
     issuedAt,
+    expiresAt: credential.inserted.expiresAt,
+    supersededCredentialId: credential.supersededCredentialId,
   }
 }
 

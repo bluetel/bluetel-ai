@@ -8,15 +8,16 @@ import type { PromptParts } from '@bluetel-ai/sisyphus-api/contracts'
  * ## There is deliberately no redaction algorithm in this file
  *
  * FR-163 says the assembled prompt is redacted "to the same standard as run output". Run output
- * already has that standard, implemented once, in `apps/sisyphus-executor/src/output/`: private-key
+ * already has that standard, implemented once, in `@bluetel-ai/sisyphus-redaction`: private-key
  * block suppression, then every credential the bundle installed removed in every encoding derivable
  * from its value, then the pattern stage for formats nobody handed us. A second implementation here
  * would not be "the same standard" for long — the two would drift on the first pattern anyone added
  * to one of them, and the half that drifted would be the half nobody was looking at.
  *
  * So this module **takes a redactor** ({@link PromptRedactor}, one method, structurally identical
- * to the executor's `Redactor`) and never builds one. The composition root supplies the executor's
- * `createRedactor(...)`, and the repository keeps exactly one redaction implementation.
+ * to that package's `Redactor`) and never builds one. The composition root supplies
+ * `createRedactor(...)` from it (T198), and the repository keeps exactly one redaction
+ * implementation.
  *
  * ## What stops a *worse* redactor being injected
  *
@@ -29,15 +30,18 @@ import type { PromptParts } from '@bluetel-ai/sisyphus-api/contracts'
  * The corpus is not a reimplementation: it asserts on *outcomes* ("this string must not survive"),
  * which is the thing that must not drift, rather than on how they are reached.
  *
- * ## The default refuses
+ * ## What refuses, and what no longer does
  *
- * {@link createRefusingPromptRedactor} throws on every call. Refusing by default is the right shape
- * here because the refusal is *survivable*: a tick that throws is recorded and retried (FR-105,
- * FR-108), so one job stalls and nothing else is affected. A deployment that has wired no redactor
- * genuinely cannot meet FR-163, and a pass-through default would store unredacted customer ticket
- * content while looking configured. Contrast a gate sitting on the only path that lets an operator
- * enable anything at all — refuse by default there and the safe-looking default is the one that
- * takes the whole product down with it.
+ * {@link createRefusingPromptRedactor} throws on every call. It **was** the composition root's
+ * default, which meant every integration tick that found a candidate ticket threw; since T198 made
+ * the standard a package both apps can depend on, `context.ts` wires the real redactor and this one
+ * is kept for the suites that assert a refusal propagates rather than being swallowed.
+ *
+ * Refusing remains the right shape for a redactor that is genuinely absent, and the reason is worth
+ * keeping: the refusal is *survivable*. A tick that throws is recorded and retried (FR-105,
+ * FR-108), so one job stalls and nothing else is affected, whereas a pass-through would store
+ * unredacted customer ticket content while looking configured. What it is not is a substitute for
+ * wiring — a default that refuses is still a feature that does not work, which is what T198 found.
  *
  * ## Why the bound is applied *after* redaction
  *

@@ -14,6 +14,7 @@ import {
   SKILL_NAMES,
   SNAPSHOT_BOUNDARIES,
   TERMINAL_OUTCOMES,
+  VALIDATION_BOOTSTRAP_PHASES,
   WORKFLOW_STATES,
 } from '../enums'
 
@@ -232,6 +233,66 @@ export const reportTerminalInput = z.object({
   spendUsed: moneyAmount,
 })
 
+/** One phase of a bundle validation, as the instance that ran it reports it (FR-147, FR-148). */
+export const validationPhaseResultInput = z.object({
+  phase: z.enum(VALIDATION_BOOTSTRAP_PHASES),
+  outcome: z.enum(BOOTSTRAP_PHASE_OUTCOMES),
+  /** Sanitised by the executor before it reaches the wire — `setup.sh` output ends up here. */
+  detail: z.string().optional(),
+  durationMs: z.number().int().nonnegative().optional(),
+})
+
+/**
+ * **The result of proving a setup bundle, reported once at the end (T200, FR-147, FR-148).**
+ *
+ * The only input on this surface validated against a `validationProcedure` rather than a
+ * `machineProcedure`, and — like every other input here — it carries no id. The run is
+ * `ctx.validationRunId`, taken from the credential, for exactly the reason the header gives: a
+ * payload that named its own subject would invite the cross-subject write FR-018 makes a recorded
+ * security event, and here it would let one instance overwrite another validation's verdict.
+ *
+ * ## Three things it deliberately does not carry
+ *
+ * **No `outcome`.** `passed` and `failed` are *derived* from the phases, in `reportValidation`,
+ * because the outcome is a function of the phase results and a wire field would be a second copy of
+ * a fact already on the wire — free to contradict it, and the copy an operator reads. The
+ * `VALIDATION_OUTCOMES` vocabulary is what the derivation lands in.
+ *
+ * **No `startedAt`.** The run was recorded by the control plane before the instance existed, and
+ * `validation_runs.started_at` is that moment. An instance's clock is not a source of truth about
+ * when the platform started something.
+ *
+ * **No phase this run could not have reached.** `phase` is
+ * {@link VALIDATION_BOOTSTRAP_PHASES}, not the full `bootstrap_phase` vocabulary: a validation has
+ * no workspace, no prompt and no leased seat, so a report naming `agent_start` would be describing
+ * something that did not happen, and accepting it would put that claim in the panel.
+ *
+ * ## Why phases are an array and not a record, and why they must be distinct
+ *
+ * An array preserves the order the instance ran them in, which is the order a reader needs to see
+ * "it got as far as `bundle_unpack`" — a JSON object's key order is not a guarantee anybody should
+ * rely on. Distinctness is checked rather than assumed because two results for one phase have no
+ * meaning: a phase runs once per validation, and a duplicate would make "did `setup_script` pass"
+ * depend on which entry the reader looked at.
+ *
+ * Non-empty, because a report with no phases at all says nothing and would end a run with a verdict
+ * of `passed` — the one thing an empty report must never be able to do.
+ */
+export const reportValidationInput = z
+  .object({
+    phaseResults: z.array(validationPhaseResultInput).min(1),
+    /** Where the captured, redacted `setup.sh` output was written (FR-089, FR-148). */
+    outputS3Key: nonEmptyText.optional(),
+  })
+  .refine(
+    (input) =>
+      new Set(input.phaseResults.map((result) => result.phase)).size === input.phaseResults.length,
+    {
+      message: 'each bootstrap phase may be reported at most once per validation run',
+      path: ['phaseResults'],
+    },
+  )
+
 export type HeartbeatInput = z.infer<typeof heartbeatInput>
 export type ReportBootstrapPhaseInput = z.infer<typeof reportBootstrapPhaseInput>
 export type AppendLogSegmentInput = z.infer<typeof appendLogSegmentInput>
@@ -248,3 +309,5 @@ export type ReviewFindingInput = z.infer<typeof reviewFindingInput>
 export type ReportIterationInput = z.infer<typeof reportIterationInput>
 export type ReportReviewerSummaryInput = z.infer<typeof reportReviewerSummaryInput>
 export type ReportTerminalInput = z.infer<typeof reportTerminalInput>
+export type ValidationPhaseResultInput = z.infer<typeof validationPhaseResultInput>
+export type ReportValidationInput = z.infer<typeof reportValidationInput>

@@ -121,6 +121,33 @@ export const getConnectionUrlParameterName = (stage: string): string =>
   `/sisyphus/${getPlainStage(stage)}/database/connection-url`
 
 /**
+ * The Parameter Store path every executor parameter for a stage hangs beneath.
+ *
+ * Three entries live here, written by two different stacks and read by two
+ * different readers: `instance-profile-arn` and `release-key` and
+ * `instance-environment` (the last two from `apps/sisyphus-executor/sst.config.ts`
+ * and `executor-instance-environment.ts` respectively). The prefix is factored
+ * out rather than restated at each leaf because it is not only a naming
+ * convention — it is the **resource ARN the runner role's `ssm:GetParameter`
+ * grant is scoped to** (`buildRunnerPolicy` in `policies.ts`, FR-075, FR-202).
+ *
+ * That makes a second spelling of this path an outright security defect rather
+ * than an inconsistency: a leaf that drifted outside the prefix would deploy
+ * cleanly, publish cleanly, and be unreadable by the one identity that exists to
+ * read it — which is exactly the failure that left the release key unreadable
+ * from the day the executor's stack was written. One string, one grant.
+ *
+ * Built from the plain stage, like every other path here, and **without** a
+ * trailing slash so a caller composes `${prefix}/leaf`.
+ *
+ * @example
+ * getExecutorParameterPathPrefix('production-bootstrap')
+ * // → '/sisyphus/production/executor'
+ */
+export const getExecutorParameterPathPrefix = (stage: string): string =>
+  `/sisyphus/${getPlainStage(stage)}/executor`
+
+/**
  * The Parameter Store path the executor's instance profile ARN is published to.
  *
  * The executor's own stack creates the profile (fleet-wide today — see the
@@ -133,7 +160,7 @@ export const getConnectionUrlParameterName = (stage: string): string =>
  * before the control plane's on a stage that has never seen either.
  */
 export const getExecutorInstanceProfileParameterName = (stage: string): string =>
-  `/sisyphus/${getPlainStage(stage)}/executor/instance-profile-arn`
+  `${getExecutorParameterPathPrefix(stage)}/instance-profile-arn`
 
 /**
  * The Parameter Store paths the executor's public subnet and security-group

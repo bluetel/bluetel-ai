@@ -40,6 +40,7 @@ export type {
   SisyphusContext,
   SisyphusDependencies,
   SisyphusSession,
+  ValidationRunCredential,
 } from './context'
 
 export {
@@ -68,6 +69,7 @@ export {
   publicProcedure,
   scopedProcedure,
   t,
+  validationProcedure,
 } from './procedures'
 export type { MachineWriteContext } from './procedures'
 
@@ -93,7 +95,9 @@ export {
   SCOPED_CREDENTIAL_ISSUER,
   SCOPED_CREDENTIAL_MAX_LIFETIME_MS,
   SCOPED_CREDENTIAL_WINDOW_MS,
+  inspectCredentialToken,
   VALIDATION_SUBJECT_PREFIX,
+  validationRunIdFromSubject,
   validationSubject,
   verifyScopedCredential,
   WORKFLOW_SUBJECT_PREFIX,
@@ -101,12 +105,40 @@ export {
   workflowSubject,
 } from './machine'
 export type {
+  CredentialTokenClaims,
+  CredentialTokenRefusal,
   ScopedCredentialJwtOptions,
   ScopedCredentialJwtResult,
   ScopedCredentialJwtVerifier,
   ScopedCredentialOutcome,
   ScopedCredentialRefusal,
   ScopedCredentialResolverOptions,
+} from './machine'
+
+/**
+ * The **validation** half of the same story (T200, FR-147, 003/FR-052).
+ *
+ * A sibling export rather than an addition to the block above, because it is a sibling mechanism: a
+ * different subject space, a different table and a different credential type, sharing only the
+ * signature-and-claims check. Both hosts wire both resolvers; neither resolver can produce the
+ * other's credential. Exported from `/server` for the same reason and with the same exclusion from
+ * `./client` — the executor presents credentials and must never bundle what accepts them.
+ */
+export {
+  createValidationCredentialResolver,
+  inspectValidationCredential,
+  reportValidation,
+  reportValidationProcedure,
+  validationOutcomeFor,
+  validationPhaseResults,
+  verifyValidationCredential,
+} from './machine'
+export type {
+  ValidationContext,
+  ValidationCredentialOutcome,
+  ValidationCredentialRefusal,
+  ValidationPhaseResults,
+  ValidationReport,
 } from './machine'
 
 /**

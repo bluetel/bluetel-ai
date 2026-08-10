@@ -42,7 +42,32 @@ import { buildRunnerPolicy, buildRunnerTrustPolicy, type RunnerPolicyConfig } fr
  */
 export const EXECUTOR_RUNNER_ROLE_NAME = 'executor-runner'
 
-export interface RunnerRoleConfig extends RunnerPolicyConfig {
+/**
+ * What a caller must supply, and what this construct supplies for it.
+ *
+ * `RunnerPolicyConfig` needs a region, an account and a stage in order to scope
+ * the instance's `ssm:GetParameter` grant to one stage's executor parameters
+ * (T247). None of the three is asked of the caller:
+ *
+ * - **stage** is already `scope.stack`, which is the plain stage by
+ *   construction (`getStackScope` in `lib.ts`). Asking for it again would create
+ *   a second stage on one call — and a call that named `staging` beside a
+ *   `production` scope would deploy cleanly, name every resource `production-*`,
+ *   and grant an instance read on the wrong stage's parameters.
+ * - **region and account** are the provider's own, read here with
+ *   `aws.getRegionOutput` / `aws.getCallerIdentityOutput`. They are not facts a
+ *   caller knows better than the provider does, and a mistyped account number is
+ *   another mistake that deploys and reports nothing.
+ *
+ * The policy document is therefore an `Output<string>` rather than a plain
+ * `JSON.stringify`. Nothing is lost by that: `buildRunnerPolicy` stays pure and
+ * is asserted directly in `policies.test.ts`, which is where the decision this
+ * file merely carries actually lives.
+ */
+export interface RunnerRoleConfig extends Omit<
+  RunnerPolicyConfig,
+  'accountId' | 'region' | 'stage'
+> {
   readonly scope: ResourceScope
 }
 
@@ -65,7 +90,13 @@ export const createRunnerRole = (config: RunnerRoleConfig): RunnerRole => {
   const rolePolicy = new aws.iam.RolePolicy(policyName, {
     name: policyName,
     role: role.name,
-    policy: JSON.stringify(buildRunnerPolicy(config)),
+    policy: $util
+      .all([aws.getRegionOutput().name, aws.getCallerIdentityOutput().accountId])
+      .apply(([region, accountId]) =>
+        JSON.stringify(
+          buildRunnerPolicy({ ...config, region, accountId, stage: config.scope.stack }),
+        ),
+      ),
   })
 
   const instanceProfile = new aws.iam.InstanceProfile(instanceProfileName, {
