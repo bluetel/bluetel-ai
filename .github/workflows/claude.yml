@@ -3,8 +3,14 @@ name: AI Dev
 # Mention @claude in an issue, a PR, or a review comment and Claude picks up the
 # thread — answering, or pushing commits to a claude/* branch when asked to.
 #
-# Mentions run on Sonnet. Add a /opus, /fable, /sonnet, or /haiku token anywhere
-# in the same text to pick a different one: "@claude /opus refactor the parser".
+# Mentions run on Sonnet. Add a model:opus, model:fable, model:sonnet, or
+# model:haiku token anywhere in the same text to pick a different one:
+# "@claude model:opus refactor the parser".
+#
+# The token is not slash-prefixed on purpose: the action hands the comment text
+# to Claude Code as the user request, where a leading "/" means a slash command.
+# That namespace belongs to the repo's skills — /review, /pr-creation, /merging
+# stay callable by mention.
 #
 # Auth is the CLAUDE_CODE_OAUTH_TOKEN repository secret. Pro/Max subscribers
 # generate one by running `claude setup-token` locally.
@@ -24,7 +30,7 @@ on:
         description: 'What should Claude do? (no comment thread to read from here)'
         required: true
       model:
-        description: 'Model (a /opus, /fable, /sonnet, or /haiku token in the prompt overrides this)'
+        description: 'Model (a model:opus, model:fable, model:sonnet, or model:haiku token in the prompt overrides this)'
         type: choice
         options:
           - claude-opus-5
@@ -69,9 +75,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Model comes from a slash token in the trigger text — "@claude /opus fix
-      # the flaky test". Precedence: token beats the dispatch input, which beats
-      # the Sonnet default, so a mention only costs Opus when it asks to.
+      # Model comes from a token in the trigger text — "@claude model:opus fix the
+      # flaky test". Precedence: token beats the dispatch input, which beats the
+      # Sonnet default, so a mention only costs Opus when it asks to.
       #
       # The trigger text is attacker-controlled, so it reaches the script through
       # env and is matched with grep. Interpolating ${{ }} into the run block
@@ -82,14 +88,14 @@ jobs:
           DISPATCH_MODEL: ${{ inputs.model }}
         run: |
           model="${DISPATCH_MODEL:-claude-sonnet-5}"
-          # Anchor on the leading slash so prose ("the opus branch") is not a vote.
-          if grep -qiE '(^|[[:space:]])/opus\b' <<<"$TRIGGER_TEXT"; then
+          # Anchor on the model: prefix so prose ("the opus branch") is not a vote.
+          if grep -qiE '(^|[[:space:]])model:opus\b' <<<"$TRIGGER_TEXT"; then
             model=claude-opus-5
-          elif grep -qiE '(^|[[:space:]])/sonnet\b' <<<"$TRIGGER_TEXT"; then
+          elif grep -qiE '(^|[[:space:]])model:sonnet\b' <<<"$TRIGGER_TEXT"; then
             model=claude-sonnet-5
-          elif grep -qiE '(^|[[:space:]])/fable\b' <<<"$TRIGGER_TEXT"; then
+          elif grep -qiE '(^|[[:space:]])model:fable\b' <<<"$TRIGGER_TEXT"; then
             model=claude-fable-5
-          elif grep -qiE '(^|[[:space:]])/haiku\b' <<<"$TRIGGER_TEXT"; then
+          elif grep -qiE '(^|[[:space:]])model:haiku\b' <<<"$TRIGGER_TEXT"; then
             model=claude-haiku-4-5-20251001
           fi
           echo "model=$model" >>"$GITHUB_OUTPUT"
@@ -100,25 +106,20 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Empty on the mention triggers, where the comment thread is the prompt.
           prompt: ${{ inputs.prompt }}
-          # DIAGNOSTIC — remove once the instant-exit cause is known. The action
-          # hides the CLI output by default, which is why a refusal to start reads
-          # as a silent success. This prints the whole session to the job log,
-          # including the contents of files Claude read, so anyone with repo read
-          # access can see it for the log retention window.
-          show_full_output: true
           # Auto mode: tools run without an approval prompt. There is no human at
           # the keyboard in CI, so an allowlist just turns anything it missed into
           # a silent denial mid-task. The runner is ephemeral and the trigger is
           # already gated on repo write access.
           #
-          # `auto` rather than `bypassPermissions`: an org managed policy can
-          # disable bypass mode outright, and when it does Claude Code refuses to
-          # start — run 31474385445 ended with num_turns 0 after 132ms and the
-          # action still reported success, because it hides the CLI output.
+          # `auto` rather than `bypassPermissions`: it runs tools without approval
+          # prompts just the same, and cannot be refused by an org policy that
+          # disables bypass mode. If a run ever exits without doing anything, add
+          # `show_full_output: true` — the action hides the CLI output by default,
+          # so a refusal to start otherwise reads as success.
           #
-          # Model is resolved above: a /opus, /sonnet, /fable, or /haiku token in
-          # the trigger text wins, then the dispatch input, then Sonnet. Mentions
-          # default to Sonnet so a stray @claude never costs Opus.
+          # Model is resolved above: a model:opus, model:sonnet, model:fable, or
+          # model:haiku token in the trigger text wins, then the dispatch input,
+          # then Sonnet, so a stray @claude never costs Opus.
           #
           # No --max-turns: a long task should finish rather than stop halfway
           # and leave a half-applied change behind. GitHub's default 6-hour job
