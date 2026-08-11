@@ -7,11 +7,10 @@ name: AI Dev
 # model:haiku token anywhere in the same text to pick a different one:
 # "@claude model:opus refactor the parser".
 #
-# The token is deliberately not slash-prefixed. The action strips "@claude" and
-# hands the rest to Claude Code as the user request, so a leading "/" is parsed
-# as a slash command — "@claude /opus" died with "Unknown command: /opus" after
-# 44ms and no turns. "/" also belongs to the repo's real skills (/review,
-# /pr-creation, /merging), which stay callable this way.
+# The token is not slash-prefixed on purpose: the action hands the comment text
+# to Claude Code as the user request, where a leading "/" means a slash command.
+# That namespace belongs to the repo's skills — /review, /pr-creation, /merging
+# stay callable by mention.
 #
 # Auth is the CLAUDE_CODE_OAUTH_TOKEN repository secret. Pro/Max subscribers
 # generate one by running `claude setup-token` locally.
@@ -107,23 +106,16 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Empty on the mention triggers, where the comment thread is the prompt.
           prompt: ${{ inputs.prompt }}
-          # DIAGNOSTIC — remove once a run has been seen to work end to end. The
-          # action hides CLI output by default, which is why the "Unknown command:
-          # /opus" abort surfaced as a silent success and cost two blind guesses to
-          # chase. Keeping it on for the verification run; it puts the whole session
-          # in the job log, including contents of files Claude read, readable by
-          # anyone with repo read access for the log retention window.
-          show_full_output: true
           # Auto mode: tools run without an approval prompt. There is no human at
           # the keyboard in CI, so an allowlist just turns anything it missed into
           # a silent denial mid-task. The runner is ephemeral and the trigger is
           # already gated on repo write access.
           #
-          # `auto` rather than `bypassPermissions`: an org managed policy can
-          # disable bypass mode outright, and a refusal to start is near-silent
-          # here. `auto` still runs tools without approval prompts and is confirmed
-          # to initialise in this repo (`"permissionMode": "auto"` in the run init),
-          # so it is the mode with one less way to fail.
+          # `auto` rather than `bypassPermissions`: it runs tools without approval
+          # prompts just the same, and cannot be refused by an org policy that
+          # disables bypass mode. If a run ever exits without doing anything, add
+          # `show_full_output: true` — the action hides the CLI output by default,
+          # so a refusal to start otherwise reads as success.
           #
           # Model is resolved above: a model:opus, model:sonnet, model:fable, or
           # model:haiku token in the trigger text wins, then the dispatch input,
