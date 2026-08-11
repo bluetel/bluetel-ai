@@ -55,39 +55,6 @@ jobs:
       deploy-needed: ${{ steps.check-deploy.outputs.deploy-needed }}
       affected-apps: ${{ steps.check-deploy.outputs.affected-apps }}
 
-    # A real Postgres, because roughly a third of this repository's assertions cannot be made
-    # without one and were previously reported as green by never running (FR-204, SC-064): the
-    # exactly-once unique index, the branch-lock advisory lock, the iteration CHECK constraint,
-    # profile-scoped spend and the skill-digest readback are all properties of the database, not of
-    # application code, and a fake proves nothing about any of them.
-    #
-    # 17 matches the engine version the deployed instance runs
-    # (`createDatabase` in packages/sisyphus-infra/src/database.ts pins `17.5`), so a
-    # constraint or a lock that behaves differently across majors is caught here rather than on a
-    # stage. The image's superuser is what lets the fixtures `create database` a private scratch
-    # database per suite and `drop … with (force)` it afterwards.
-    #
-    # cspell:ignore isready dbname
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: sisyphus
-          POSTGRES_PASSWORD: sisyphus
-          POSTGRES_DB: sisyphus
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready --username sisyphus --dbname sisyphus"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-
-    env:
-      # Set for the whole job rather than the test step alone: the migrate step below has to point
-      # at the same database, and two literals that must agree is how they stop agreeing.
-      SISYPHUS_TEST_DATABASE_URL: postgres://sisyphus:sisyphus@localhost:5432/sisyphus
-
     steps:
       - uses: actions/checkout@v6
         with:
@@ -105,19 +72,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
-
-      # Most suites create and migrate a private scratch database of their own, but not all of
-      # them: the panel's sign-in and log-stream suites connect straight to the configured database
-      # because what they assert is the SQL against the real tables. So the configured database has
-      # to carry the schema before any test runs.
-      #
-      # This runs the same `sisyphus-api:migrate` command a stage is migrated with (FR-010), which
-      # makes it a second assertion for free: a migration that does not apply cleanly to an empty
-      # database fails the build here rather than during a deploy.
-      - name: Apply migrations to the CI database
-        run: pnpm exec nx run sisyphus-api:migrate
-        env:
-          SISYPHUS_DATABASE_URL: ${{ env.SISYPHUS_TEST_DATABASE_URL }}
 
       # `design-lint` joins the affected run rather than living in a separate job or a second CI
       # provider: splitting the blocking gates across two systems leaves one of them not running it

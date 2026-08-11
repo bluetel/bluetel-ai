@@ -4,6 +4,8 @@ description: 'Task list for removing the repository-reachability half of the pro
 
 # Tasks: Remove the repository-reachability half of the profile enable gate
 
+> **DEPRECATED (2026-08-11):** The Sisyphus workflow platform — including the executor, control plane, admin app, and agent credential pool described in this document — has been deprecated in favour of the Claude Code GitHub Action. This was because the GitHub Action is easier to maintain and configure, and more customizable than the bespoke infrastructure it replaced. This document is retained as a historical design record only; the packages and apps it describes have been removed from the repository.
+
 **Input**: Design documents from `/specs/004-remove-reachability-gate/`
 
 **Prerequisites**: [plan.md](./plan.md), [spec.md](./spec.md), [research.md](./research.md),

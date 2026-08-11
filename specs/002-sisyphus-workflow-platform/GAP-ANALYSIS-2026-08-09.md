@@ -6,6 +6,8 @@ base: analysis/spec2-gap @ 467e088 (branched from feature/sisyphus-4)
 
 # Spec 002 — Gap Analysis
 
+> **DEPRECATED (2026-08-11):** The Sisyphus workflow platform — including the executor, control plane, admin app, and agent credential pool described in this document — has been deprecated in favour of the Claude Code GitHub Action. This was because the GitHub Action is easier to maintain and configure, and more customizable than the bespoke infrastructure it replaced. This document is retained as a historical design record only; the packages and apps it describes have been removed from the repository.
+
 **Subject**: `specs/002-sisyphus-workflow-platform` (Sisyphus — Supervised & Autonomous Agentic Delivery Platform)
 
 **Method**: every claim below was checked against the tree in this worktree, not read off the checkboxes.
@@ -27,7 +29,7 @@ the open set below is the whole of the tracked work.
 
 ## 1. The one-sentence answer
 
-The platform's *administration* half is complete and shippable; its *execution* half runs exactly one of three
+The platform's _administration_ half is complete and shippable; its _execution_ half runs exactly one of three
 workflow types, and only after a manual operator step that no task owns. Of the 34 open tasks, **six are real
 code gaps that block a working system**, **fourteen are the recorded end-to-end runs that are the only evidence
 any story works**, and the remaining **fourteen are hygiene**.
@@ -72,7 +74,7 @@ The fix is structural, not a one-liner: `secrets` is snapshotted at step 1, befo
 bundle-installed credentials arrive at phase 5. It must become `() => readonly KnownSecret[]` resolved at each
 redaction site.
 
-**Why it is first**: every other gap on this list makes something *not happen*. This one makes something
+**Why it is first**: every other gap on this list makes something _not happen_. This one makes something
 happen that must not — and it is invisible when it does. It is also the only open item that gets worse the
 more the system is used before it is fixed.
 
@@ -86,7 +88,7 @@ to carry it on the envelope ("instance configuration rather than job configurati
 deploy-time config comes from an SSM blob that is deliberately not committed (FR-202).
 
 Consequence: **the first real run fails at boot on env validation, naming the variable.** T229 records this as
-"the single manual step between here and T213", but a caveat inside a *checked* task is not a work item —
+"the single manual step between here and T213", but a caveat inside a _checked_ task is not a work item —
 nothing on the open list will surface it, and T213 will simply fail on its first attempt.
 
 **Recommendation**: this deserves an explicit task (or at minimum a line in the quickstart's deploy section)
@@ -149,7 +151,7 @@ Blocks T226 (Scenario 1).
 `session/interruption.ts`, and no IMDS implementation exists.**
 
 `watchForInterruption` is wired end to end and tested against a fake reader that never reports a notice. Spike
-S2 recorded the real notice format as *unobserved*.
+S2 recorded the real notice format as _unobserved_.
 
 Consequence: **on interruptible capacity, a reclaimed instance loses its work silently.** The entire
 snapshot-and-restore machinery (US3, FR-054) exists and is correct; the trigger that fires it in the one case
@@ -216,33 +218,33 @@ not executable.
 
 Dependency structure (from the phase table):
 
-| Run | Story | Scenario | Needs |
-| --- | --- | --- | --- |
-| T213 | US1 | 2 | A2 (forge URL) — then nothing else |
-| T223 | US9 | 3 | T213's path |
-| T225 | US11 | 4 | T213's path |
-| T218 | US2 | 5 | T213's path |
-| T219 | US3 | 6 | **T197** for step 2 |
-| T224 | US10 | 7 | T213's path |
-| T214 | US8 | 8 | **T196 + T198** |
-| T220 | US4 | 9a | **T196** |
-| T221 | US5 | 9b | **T196** |
-| T226 | US7/12/13 | 1 | **T200**, plus T213 + T223 for the leak test |
-| T222 | US6 | 10 | last — needs accumulated history from the others |
+| Run  | Story     | Scenario | Needs                                            |
+| ---- | --------- | -------- | ------------------------------------------------ |
+| T213 | US1       | 2        | A2 (forge URL) — then nothing else               |
+| T223 | US9       | 3        | T213's path                                      |
+| T225 | US11      | 4        | T213's path                                      |
+| T218 | US2       | 5        | T213's path                                      |
+| T219 | US3       | 6        | **T197** for step 2                              |
+| T224 | US10      | 7        | T213's path                                      |
+| T214 | US8       | 8        | **T196 + T198**                                  |
+| T220 | US4       | 9a       | **T196**                                         |
+| T221 | US5       | 9b       | **T196**                                         |
+| T226 | US7/12/13 | 1        | **T200**, plus T213 + T223 for the leak test     |
+| T222 | US6       | 10       | last — needs accumulated history from the others |
 
 **T213 is the keystone.** It is the only one of the eleven with no code blocker in front of it — the ports it
 needs are closed. The single thing between the repository and a first proven end-to-end delegated run is the
 operator step in A2.
 
 **Classification**: these are not nice-to-have. They are the only evidence this feature will ever have. But
-they are also *not buildable work* — each needs a deployed stage, and several need real external resources (a
+they are also _not buildable work_ — each needs a deployed stage, and several need real external resources (a
 Jira project, a Slack workspace, interruptible capacity, two scratch repositories).
 
 ### The three gate verifications (T215–T217) — highest value per minute in the entire open set
 
 Each takes minutes. Each plants a deliberate failure and confirms the gate goes red.
 
-- **T215** (assembly gate): guards a failure mode *already observed once* — `knip --production` honours only
+- **T215** (assembly gate): guards a failure mode _already observed once_ — `knip --production` honours only
   entry patterns carrying a trailing `!`, and without one it analyses zero files and exits clean. The knip
   config currently carries the suffix and `ci.yml:133-142` documents why; nobody has proved it by planting an
   orphan.
@@ -280,15 +282,15 @@ resource-creating primitives per FR-200) written as named files, never a glob.
 
 ## 6. Tier D — Hygiene and cleanup
 
-| Task | What | Note |
-| --- | --- | --- |
-| T140 | Run all 13 quickstart scenarios in one sitting | Superseded in substance by the eleven per-story runs; keep as the full sweep |
-| T141 | Design audit — no literal hex/px, WCAG AA both themes, state colours only for machine state | `design-lint` reports 0 errors / 31 pre-existing warnings; this is the human half the linter cannot check |
-| T142 | Full gate run `lint typecheck test design-lint --base=main` + `pnpm qlty:diff`, no `QLTY_*` override | Largely evidenced by T193 (5,695 passing across 14 projects), but T193 used `run-many`, not `--base=main`, and did not run `qlty:diff` |
-| T143 | Knip and cspell clean | **See the contradiction below** |
-| T203 | Wire `deploy.yml` to `getDeployRoleName` | Verified: `deploy.yml` contains no role assumption at all. The single-constant discipline T167 established pays off only once CI uses it |
-| T211 | Two stale source comments | `dispatch.ts:28` names `buildControlPlaneTickSpecification`, which no longer exists; `scheduler.ts:7` still lists admin bootstrap among the tick's responsibilities (T172 deliberately excluded it — running it every minute would reinstate a deactivated bootstrap admin within the minute). Both verified. Trivial, but the second one is actively misleading about a security-relevant decision |
-| T212 | cspell | Explicitly marked **out of scope for this feature** |
+| Task | What                                                                                                 | Note                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T140 | Run all 13 quickstart scenarios in one sitting                                                       | Superseded in substance by the eleven per-story runs; keep as the full sweep                                                                                                                                                                                                                                                                                                                        |
+| T141 | Design audit — no literal hex/px, WCAG AA both themes, state colours only for machine state          | `design-lint` reports 0 errors / 31 pre-existing warnings; this is the human half the linter cannot check                                                                                                                                                                                                                                                                                           |
+| T142 | Full gate run `lint typecheck test design-lint --base=main` + `pnpm qlty:diff`, no `QLTY_*` override | Largely evidenced by T193 (5,695 passing across 14 projects), but T193 used `run-many`, not `--base=main`, and did not run `qlty:diff`                                                                                                                                                                                                                                                              |
+| T143 | Knip and cspell clean                                                                                | **See the contradiction below**                                                                                                                                                                                                                                                                                                                                                                     |
+| T203 | Wire `deploy.yml` to `getDeployRoleName`                                                             | Verified: `deploy.yml` contains no role assumption at all. The single-constant discipline T167 established pays off only once CI uses it                                                                                                                                                                                                                                                            |
+| T211 | Two stale source comments                                                                            | `dispatch.ts:28` names `buildControlPlaneTickSpecification`, which no longer exists; `scheduler.ts:7` still lists admin bootstrap among the tick's responsibilities (T172 deliberately excluded it — running it every minute would reinstate a deactivated bootstrap admin within the minute). Both verified. Trivial, but the second one is actively misleading about a security-relevant decision |
+| T212 | cspell                                                                                               | Explicitly marked **out of scope for this feature**                                                                                                                                                                                                                                                                                                                                                 |
 
 ### The T143 / T212 contradiction — worth resolving explicitly
 
@@ -304,7 +306,7 @@ Two defects T212 found and deliberately left unfixed, which no open task owns:
 
 - `scripts/audit-cspell.mjs:19` calls `JSON.parse` on `cspell.json`, which is JSONC (it carries 3 comment
   lines). **Independently confirmed**: `JSON.parse` throws `Expected double-quoted property name in JSON at
-  position 124`. The script has therefore thrown on every invocation since the config gained its first
+position 124`. The script has therefore thrown on every invocation since the config gained its first
   comment — a **fourth** check in this repository that looks present and measures nothing.
 - The same script's file walk scans `*.tsbuildinfo`, counting words kept alive only by build output as live.
 
@@ -346,7 +348,7 @@ Two defects T212 found and deliberately left unfixed, which no open task owns:
 
 Worth recording, because it changes how much to trust the 198 checked boxes.
 
-`tasks.md` is unusually honest — Phases 18 and 19 exist *because* earlier phases were checked complete while
+`tasks.md` is unusually honest — Phases 18 and 19 exist _because_ earlier phases were checked complete while
 their subjects had no production caller, and the document says so in its own words rather than quietly
 re-scoping. The four rules at the head of Phase 19 (every port names its filling task; nothing is done while
 its subject has no production caller; each checkpoint is a task, not a sentence; every gate is verified
@@ -357,4 +359,4 @@ T215–T217, and all three are open. That is the single loose thread in the corr
 also the cheapest thing on this list.
 
 Spot-checking found no case where a checked task's subject was absent from the tree. The checked boxes appear
-to be accurate about *what was built*; the open ones are accurate about *what was never wired or never run*.
+to be accurate about _what was built_; the open ones are accurate about _what was never wired or never run_.

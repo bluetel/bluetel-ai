@@ -75,7 +75,8 @@ jobs:
             // them: an app must be a real deployable, a stage must be one we deploy to, and a
             // commit must be a full hex SHA. Anything else fails the run rather than being
             // sanitised, because there is no legitimate way for a malformed value to get here.
-            const DEPLOYABLE_APPS = ['sisyphus-admin', 'sisyphus-control-plane', 'sisyphus-executor'];
+            // No app currently has a `trigger-deploy` nx target — add its name here when one does.
+            const DEPLOYABLE_APPS = [];
             const DEPLOY_STAGES = ['production', 'staging'];
 
             const app = appMatch[1];

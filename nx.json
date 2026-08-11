@@ -25,8 +25,7 @@
     "sharedGlobals": [
       "{workspaceRoot}/tsconfig.base.json",
       "{workspaceRoot}/tsconfig.json",
-      "{workspaceRoot}/.env*",
-      { "env": "SISYPHUS_TEST_DATABASE_URL" }
+      "{workspaceRoot}/.env*"
     ],
     "production": ["default", "!{projectRoot}/**/*.spec.*", "!{projectRoot}/**/*.test.*"]
   },
