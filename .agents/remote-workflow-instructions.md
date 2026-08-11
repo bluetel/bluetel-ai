@@ -49,8 +49,7 @@ This repo's workflows live in skills. **Do not improvise a procedure that a skil
   they name: `.agents/skills/<name>/SKILL.md`. **Read the shared file.**
 - Conventions (ticket prefix, repo owner/name, branch and commit shape) come from
   [.agents/skills.config](skills.config) and the git-workflow section of [CLAUDE.md](../CLAUDE.md).
-  **Never invent them.** For this repo: ticket prefix `URM`, repo `harrytwigg/universal-react-monorepo`,
-  PRs target `main`.
+  **Never invent them — always read the current values from that file**, since they can change.
 - If the `Skill` tool is unavailable in this environment, `Read` the SKILL.md files directly and follow
   them literally. A missing tool is not permission to skip the procedure.
 
@@ -79,10 +78,12 @@ code** — it defines the branch and commit shape you need to be on from the fir
 **The required outcome is non-negotiable: a draft PR on GitHub, with every change committed and pushed,
 and a clean working tree.** Everything below serves that.
 
-1. **Branch.** If the action has already put you on a `claude/*` branch, work there. Otherwise create
-   `feature/URM-<n>` per the skill.
-2. **Commit subject.** Conventional format from CLAUDE.md: `URM-<n>: <description>`, where `<n>` is the
-   issue number when an issue triggered the run.
+1. **Branch.** If the action has already put you on a `claude/*` branch, work there. Otherwise create a
+   branch per `branch_pattern` in `.agents/skills.config`, substituting the ticket id (or a short
+   descriptive name, per `ticket_prefix`, if this repo has no ticket system) and the issue number when an
+   issue triggered the run.
+2. **Commit subject.** Format per `commit_format` in `.agents/skills.config`, using the same
+   ticket-id/description substitution as the branch name.
 3. **Verify before committing.** Run the checks — prefer `pnpm nx affected -t lint,typecheck,test`, or
    `pnpm lint` / `pnpm typecheck` / `pnpm test` for a broad change. Fix what your change broke.
 4. **Commit everything, always.** If a git hook (husky, commitlint, lint-staged) rejects the commit,
