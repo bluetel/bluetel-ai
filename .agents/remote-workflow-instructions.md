@@ -12,9 +12,9 @@ That has three consequences, and they override any instinct to be cautious:
 - **Never end silently.** If you truly cannot finish, still produce the artifact for your mode, then state
   plainly what is incomplete and why.
 
-A `/opus`, `/fable`, `/sonnet`, or `/haiku` token in the trigger text is a **workflow directive**, already
-consumed by the job to pick your model. Ignore it as task content — it is not part of the request, and you
-are already running on the model it named.
+A `model:opus`, `model:fable`, `model:sonnet`, or `model:haiku` token in the trigger text is a **workflow
+directive**, already consumed by the job to pick your model. Ignore it as task content — it is not part of
+the request, and you are already running on the model it named.
 
 ## Step 1 — Identify and declare your mode
 
