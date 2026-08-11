@@ -1,0 +1,126 @@
+name: AI Dev
+
+# Mention @claude in an issue, a PR, or a review comment and Claude picks up the
+# thread — answering, or pushing commits to a claude/* branch when asked to.
+#
+# Mentions run on Sonnet. Add a /opus, /fable, /sonnet, or /haiku token anywhere
+# in the same text to pick a different one: "@claude /opus refactor the parser".
+#
+# Auth is the CLAUDE_CODE_OAUTH_TOKEN repository secret. Pro/Max subscribers
+# generate one by running `claude setup-token` locally.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned]
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'What should Claude do? (no comment thread to read from here)'
+        required: true
+      model:
+        description: 'Model (a /opus, /fable, /sonnet, or /haiku token in the prompt overrides this)'
+        type: choice
+        options:
+          - claude-opus-5
+          - claude-sonnet-5
+          - claude-fable-5
+          - claude-haiku-4-5-20251001
+        default: claude-opus-5
+
+jobs:
+  claude:
+    # Cheap pre-filter so the runner only spins up on an actual mention. The
+    # action re-checks the trigger itself, but not before checkout + install.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      # Required: the action fetches a GitHub OIDC token.
+      id-token: write
+      actions: read
+    steps:
+      # artipacked flags the credential actions/checkout leaves in .git/config.
+      # The action needs it to push to claude/* branches, and no step here
+      # uploads an artifact that could carry .git along with it.
+      - uses: actions/checkout@v6 # zizmor: ignore[artipacked]
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        name: Install pnpm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Model comes from a slash token in the trigger text — "@claude /opus fix
+      # the flaky test". Precedence: token beats the dispatch input, which beats
+      # the Sonnet default, so a mention only costs Opus when it asks to.
+      #
+      # The trigger text is attacker-controlled, so it reaches the script through
+      # env and is matched with grep. Interpolating ${{ }} into the run block
+      # would let a comment body inject shell.
+      - id: model
+        env:
+          TRIGGER_TEXT: ${{ github.event_name == 'issue_comment' && github.event.comment.body || github.event_name == 'pull_request_review_comment' && github.event.comment.body || github.event_name == 'pull_request_review' && github.event.review.body || github.event_name == 'issues' && format('{0} {1}', github.event.issue.title, github.event.issue.body) || inputs.prompt }}
+          DISPATCH_MODEL: ${{ inputs.model }}
+        run: |
+          model="${DISPATCH_MODEL:-claude-sonnet-5}"
+          # Anchor on the leading slash so prose ("the opus branch") is not a vote.
+          if grep -qiE '(^|[[:space:]])/opus\b' <<<"$TRIGGER_TEXT"; then
+            model=claude-opus-5
+          elif grep -qiE '(^|[[:space:]])/sonnet\b' <<<"$TRIGGER_TEXT"; then
+            model=claude-sonnet-5
+          elif grep -qiE '(^|[[:space:]])/fable\b' <<<"$TRIGGER_TEXT"; then
+            model=claude-fable-5
+          elif grep -qiE '(^|[[:space:]])/haiku\b' <<<"$TRIGGER_TEXT"; then
+            model=claude-haiku-4-5-20251001
+          fi
+          echo "model=$model" >>"$GITHUB_OUTPUT"
+          echo "Model: $model" >>"$GITHUB_STEP_SUMMARY"
+
+      - uses: anthropics/claude-code-action@6b082c41935b4c8a3b8b0ef85ba4ba4d9eeb8975 # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Empty on the mention triggers, where the comment thread is the prompt.
+          prompt: ${{ inputs.prompt }}
+          # Auto mode: every tool runs without an approval prompt. There is no
+          # human at the keyboard in CI, so an allowlist just turns anything it
+          # missed into a silent denial mid-task. The runner is ephemeral and the
+          # trigger is already gated on repo write access.
+          #
+          # Model is resolved above: a /opus, /sonnet, /fable, or /haiku token in
+          # the trigger text wins, then the dispatch input, then Sonnet. Mentions
+          # default to Sonnet so a stray @claude never costs Opus.
+          #
+          # No --max-turns: a long task should finish rather than stop halfway
+          # and leave a half-applied change behind. GitHub's default 6-hour job
+          # timeout is the only backstop — add timeout-minutes above if that is
+          # too much runner time to risk.
+          #
+          # --append-system-prompt layers CI-only instructions on top of whatever
+          # prompt the action assembles (comment thread, issue body, or the
+          # dispatch input) — unlike `prompt`, which would replace it. The text
+          # stays a single line here on purpose: claude_args is tokenised with
+          # shell-quote, so newlines, `$`, and backticks in a long inline prompt
+          # get mangled. The real instructions live in the referenced file.
+          claude_args: |
+            --permission-mode bypassPermissions
+            --model ${{ steps.model.outputs.model }}
+            --append-system-prompt "Before doing anything else, read .agents/remote-workflow-instructions.md and follow it exactly. It defines the operating mode you must declare up front and the skill-based procedure required for reviews, code changes, and merges."
