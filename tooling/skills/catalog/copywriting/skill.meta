@@ -1,5 +1,5 @@
 name=copywriting
-version=1.0.0
+version=1.0.1
 description=Write, rewrite, or improve marketing copy for any page — homepage, landing pages, pricing pages, feature pages, about pages, or product pages. Use when: "write copy for," "improve this copy," "rewrite this page," "marketing copy," "headline help," or "CTA copy."
 argument_hint=The page type and any product/audience context
 requires=
