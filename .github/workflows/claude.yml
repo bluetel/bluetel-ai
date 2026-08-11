@@ -100,10 +100,21 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # Empty on the mention triggers, where the comment thread is the prompt.
           prompt: ${{ inputs.prompt }}
-          # Auto mode: every tool runs without an approval prompt. There is no
-          # human at the keyboard in CI, so an allowlist just turns anything it
-          # missed into a silent denial mid-task. The runner is ephemeral and the
-          # trigger is already gated on repo write access.
+          # DIAGNOSTIC — remove once the instant-exit cause is known. The action
+          # hides the CLI output by default, which is why a refusal to start reads
+          # as a silent success. This prints the whole session to the job log,
+          # including the contents of files Claude read, so anyone with repo read
+          # access can see it for the log retention window.
+          show_full_output: true
+          # Auto mode: tools run without an approval prompt. There is no human at
+          # the keyboard in CI, so an allowlist just turns anything it missed into
+          # a silent denial mid-task. The runner is ephemeral and the trigger is
+          # already gated on repo write access.
+          #
+          # `auto` rather than `bypassPermissions`: an org managed policy can
+          # disable bypass mode outright, and when it does Claude Code refuses to
+          # start — run 31474385445 ended with num_turns 0 after 132ms and the
+          # action still reported success, because it hides the CLI output.
           #
           # Model is resolved above: a /opus, /sonnet, /fable, or /haiku token in
           # the trigger text wins, then the dispatch input, then Sonnet. Mentions
@@ -121,6 +132,6 @@ jobs:
           # shell-quote, so newlines, `$`, and backticks in a long inline prompt
           # get mangled. The real instructions live in the referenced file.
           claude_args: |
-            --permission-mode bypassPermissions
+            --permission-mode auto
             --model ${{ steps.model.outputs.model }}
             --append-system-prompt "Before doing anything else, read .agents/remote-workflow-instructions.md and follow it exactly. It defines the operating mode you must declare up front and the skill-based procedure required for reviews, code changes, and merges."
