@@ -4,7 +4,8 @@
 
 **Created**: 2026-08-11
 
-**Status**: Draft
+**Status**: Draft — scope expanded 2026-08-11 to include the TypeScript upgrade
+([PR #27 review comment](https://github.com/bluetel/bluetel-ai/pull/27))
 
 **Input**: GitHub issue [#24](https://github.com/bluetel/bluetel-ai/issues/24) — "[Feature] Improve lint-staged and broader lint performance"
 
@@ -22,13 +23,14 @@ which is exactly the failure mode principle III prohibits.
 The friction is not evenly distributed. Measured on a GitHub Actions runner against this repo's
 42 linted files (method recorded in `research.md`):
 
-| Measurement                                                      | Observed                    |
-| ---------------------------------------------------------------- | --------------------------- |
-| ESLint on a **single** file, exactly as `lint-staged` invokes it | **5.68 s**, 780 MB peak RSS |
-| `pnpm lint:check --skip-nx-cache` — all 7 projects, cold         | 30.7 s                      |
-| `pnpm typecheck --skip-nx-cache` — all projects, cold            | 7.3 s                       |
+| Measurement                                                          | Observed                    |
+| -------------------------------------------------------------------- | --------------------------- |
+| ESLint on a **single** file, exactly as `lint-staged` invokes it     | **5.68 s**, 780 MB peak RSS |
+| `pnpm lint:check --skip-nx-cache` — all 7 projects, cold             | 30.7 s                      |
+| `pnpm typecheck --skip-nx-cache` — all projects, cold                | 7.3 s                       |
+| `tsc --noEmit` per project, summed across the 4 typechecked projects | 5.1 s, 287 MB peak          |
 
-Two things stand out:
+Three things stand out:
 
 1. **Per-file cost is almost entirely fixed overhead.** 5.68 s to lint one file is Node startup, flat
    config resolution, plugin loading, and TypeScript program construction — not analysis of the file.
@@ -38,6 +40,15 @@ Two things stand out:
    `packages/env-validation-errors` attributes **61.7 %** of rule time to `@cspell/spellchecker`
    (1555 ms) — a check that has to be blocking somewhere, but has no reason to run per-file at commit
    time.
+3. **The compiler is the third fixed cost, and it is on the same hook.** `pnpm typecheck` runs on every
+   commit and spends 5.1 s of `tsc` time. It is the same shape of problem as the lint one: a Node
+   process building a TypeScript program from scratch, for a one-line change. `tsc` 7.0.2 does the same
+   work in 0.87 s (`research.md` §7.4), which is the same order of saving as the lint change itself.
+
+These are not three separate features. The 41 lint rules that need type information, the compiler, and
+the linter that runs them are all bound to the same `typescript` package — so **which TypeScript version
+this workspace runs decides which tools can enforce those 41 rules at all** (`research.md` §7.2). That
+coupling is why the TypeScript upgrade belongs in this spec rather than in a follow-up.
 
 ## User Scenarios & Testing _(mandatory)_
 
@@ -162,6 +173,41 @@ effect in a project that only extends it.
 
 ---
 
+### User Story 6 - The compiler and the linter agree, and both are fast (Priority: P2)
+
+A contributor commits; `pnpm typecheck` costs 5.1 s of `tsc` time on top of the lint step. Separately, a
+type-aware lint rule reports something the contributor cannot reproduce with `tsc`, because the linter's
+typechecker and the compiler are different versions of TypeScript with different semantics.
+
+Upgrading the workspace to TypeScript 7.0.2 addresses both: `tsc` drops to 0.87 s across the four
+typechecked projects (measured, `research.md` §7.4), and the compiler's semantics line up with the
+TypeScript 7 semantics `oxlint --type-aware` already applies to this code.
+
+**Why this priority**: The typecheck saving is real and lands on the same hook as the lint saving, but
+the feature's P1 value does not depend on it. It is P2 rather than P3 because of a hard constraint that
+cuts the other way: **TypeScript 7 ships no JavaScript compiler API, so typescript-eslint cannot run
+under it at all** — upstream support is closed as not planned. Whichever tool owns the 41 type-aware
+rules therefore decides whether this workspace can ever move past TypeScript 6, which makes the ordering
+between the two workstreams part of this spec rather than a scheduling detail.
+
+**Independent Test**: Bump the TypeScript pins on a scratch branch and run `pnpm nx run-many -t typecheck
+test build` plus `pnpm knip`. Compare `tsc` wall-clock and peak RSS against the recorded baseline.
+
+**Acceptance Scenarios**:
+
+1. **Given** the workspace on TypeScript 7.0.2, **When** `pnpm typecheck` runs, **Then** it exits zero
+   for every project and is materially faster than the recorded baseline.
+2. **Given** the workspace on TypeScript 7.0.2, **When** the full lint gate runs, **Then** all 129
+   previously-enforced rules are still enforced — i.e. no rule has been dropped because its tool cannot
+   load under TypeScript 7.
+3. **Given** a type-aware lint diagnostic, **When** a contributor investigates it with `tsc`, **Then**
+   both tools are using the same TypeScript version's semantics.
+4. **Given** the upgrade turns out to break a workspace tool (Nx inference, `knip`, Vitest), **When** the
+   blocker is recorded, **Then** the workspace can stop at TypeScript 6.0.3 without any lint rule being
+   dropped.
+
+---
+
 ### Edge Cases
 
 - **A file type the fast linter cannot parse.** `.mjs`/`.cjs` config files, and any future `.vue`/
@@ -183,6 +229,15 @@ effect in a project that only extends it.
 - **CI vs local divergence.** CI runs `nx affected -t lint …`; the hook runs on staged files. Both
   must enforce the same rule set, or a contributor can be green locally and red in CI.
 - **A commit that stages only a deletion.** The lint step must not fail on an empty file list.
+- **Two TypeScript versions in one workspace.** `@nx/eslint` hard-depends on `typescript ~5.9.2`, and
+  `nodeLinker: hoisted` means an upgrade puts two copies in the tree. Which one `tsc` resolves must be
+  deterministic, not a hoisting accident.
+- **A tool that silently degrades under the new TypeScript.** A tool that cannot load the compiler API
+  may skip work rather than fail — the `@nx/enforce-module-boundaries` failure mode again. Any such tool
+  must fail loudly or be pinned to a version that works.
+- **The linter's typechecker and the compiler disagreeing.** A type-aware diagnostic a contributor cannot
+  reproduce with `tsc` is worse than no diagnostic: it is unactionable. Version alignment is the fix; a
+  recorded, deliberate mismatch is the fallback.
 
 ## Requirements _(mandatory)_
 
@@ -237,6 +292,25 @@ effect in a project that only extends it.
 - **FR-020**: Contributor-facing documentation (`AGENTS.md` / `.claude/rules/`) MUST describe the
   commands to run, and MUST NOT contradict the Constitution.
 
+**TypeScript version**
+
+- **FR-021**: The tool that enforces the type-aware rules MUST NOT require the TypeScript JavaScript
+  compiler API, which TypeScript 7 no longer ships. Any design in which those rules depend on that API
+  caps the workspace at TypeScript ≤ 6.0 indefinitely and is therefore prohibited.
+- **FR-022**: The type-aware rule owner MUST be migrated **before** the TypeScript major bump lands. A
+  bump that arrives while those rules still depend on the compiler API would take 41 rules out of
+  enforcement, violating FR-005.
+- **FR-023**: After the upgrade, every project MUST typecheck clean with no `tsconfig` option relaxed —
+  no `skipLibCheck` widening, no `strict` reduction, no new `@ts-expect-error`.
+- **FR-024**: The upgrade MUST leave exactly one TypeScript version resolving for `tsc`, deterministically
+  — not decided by hoisting order — and any second copy present transitively MUST be recorded with the
+  reason.
+- **FR-025**: The upgrade MUST be verified against every workspace tool that consumes TypeScript (Nx
+  project inference and target generation, `knip`, Vitest, `qlty`), not just `tsc`. A tool that degrades
+  silently rather than failing MUST be treated as a blocker.
+- **FR-026**: The upgrade MUST be revertible on its own, without unwinding the lint migration — i.e. it
+  lands as its own phase, and stopping at TypeScript 6.0.3 MUST leave all 129 rules enforced.
+
 ### Key Entities
 
 - **Rule inventory**: The audit artifact behind FR-006. One row per previously-enforced rule: rule
@@ -245,8 +319,11 @@ effect in a project that only extends it.
   every project extends.
 - **Fast lint pass**: The per-file, type-information-free check that runs in `lint-staged` and can be
   invoked ad hoc.
-- **Type-aware lint pass**: The check that needs a TypeScript program, running at a cadence that keeps
-  it off the per-file path.
+- **Type-aware lint pass**: The check that needs type information. Whether it needs a _TypeScript
+  program_ — i.e. the compiler API — is a property of the tool, not of the rules, and FR-021 makes it a
+  requirement that it does not.
+- **TypeScript toolchain version**: The `typescript` version the workspace compiles with, and the
+  semantics any type-aware linter must agree with.
 
 ## Success Criteria _(mandatory)_
 
@@ -268,6 +345,13 @@ effect in a project that only extends it.
 - **SC-008**: Zero duplicate diagnostics: no violation is reported by more than one tool in a single
   full lint run.
 - **SC-009**: The commit lands without `--no-verify`, i.e. every blocking gate passes on it.
+- **SC-010**: Cold `pnpm typecheck` across the workspace falls by at least 50 % against the recorded
+  baseline (per-project `tsc` measured 5.09 s → 0.87 s in `research.md` §7.4).
+- **SC-011**: Peak `tsc` RSS falls by at least 50 % (measured 287 MB → 95 MB on the largest project).
+- **SC-012**: After the upgrade, the rule inventory still accounts for 129 rules with zero dropped — the
+  upgrade costs no coverage.
+- **SC-013**: `pnpm nx run-many -t typecheck test build lint`, `pnpm knip` and `pnpm qlty:diff` all pass
+  on the upgraded workspace, with the resolved `typescript` version recorded in `measurements.md`.
 
 ## Assumptions
 
@@ -286,6 +370,14 @@ effect in a project that only extends it.
 - The type-aware rule layer stays exactly as strict as it is today. Where it runs — which tool, which
   cadence — is a design decision for `plan.md`.
 - Prettier remains the formatter; no formatting rules move into a linter.
+- TypeScript 7.0.2 is the current `latest` on npm (published 2026-07-08) and satisfies the workspace's
+  `minimumReleaseAge: 1 week`. TypeScript 6.0.3 is the fallback rung: still inside typescript-eslint's
+  peer range, so it is reachable without any lint change at all.
+- The type-aware linter's embedded checker implements TypeScript 7 semantics regardless of the installed
+  `typescript` version, so running it on a TypeScript 5.9 workspace is a _deliberate, recorded_ mismatch
+  rather than a blocker. Aligning the compiler is what removes the mismatch.
+- The upgrade's value is measured on `tsc` wall-clock and peak RSS. Editor/LSP behaviour under TypeScript
+  7 is real but unmeasurable in CI, so it is treated as a qualitative note, not a success criterion.
 - Tool selection is deliberately not fixed here. The issue proposes oxlint, and `plan.md` evaluates it
   against these requirements — including the parts of the current rule set it cannot yet cover.
 
@@ -295,7 +387,11 @@ effect in a project that only extends it.
 - Changing the `qlty` code-health thresholds in `tooling/qlty-diff/src/config.ts`.
 - Reworking the pre-commit Vitest or typecheck steps, except where a lint change measurably affects
   them.
-- Upgrading TypeScript. If a faster type-aware path depends on a TypeScript major upgrade, that is a
-  separate feature; this one must deliver its P1 value without it.
+- **Migrating any code to TypeScript 7's `unstable/*` compiler API.** The upgrade is a version bump plus
+  tsconfig work; nothing in this repo calls the compiler API today, and nothing should start.
+- **Upgrading Nx, ESLint or any other tool to chase TypeScript 7 support.** If a tool blocks the bump, the
+  workspace stops at TypeScript 6.0.3 and the blocker is recorded (FR-026).
+- Adopting TypeScript 7's new compiler flags or changing `tsconfig` semantics beyond what the upgrade
+  requires to keep compiling the current code.
 - Adding new lint rules for their own sake. New rules are in scope only where needed to preserve
   existing coverage.
