@@ -1,5 +1,7 @@
 # Quickstart: Validating the Agent Credential Pool
 
+> **DEPRECATED (2026-08-11):** The Sisyphus workflow platform — including the executor, control plane, admin app, and agent credential pool described in this document — has been deprecated in favour of the Claude Code GitHub Action. This was because the GitHub Action is easier to maintain and configure, and more customizable than the bespoke infrastructure it replaced. This document is retained as a historical design record only; the packages and apps it describes have been removed from the repository.
+
 **Feature**: `specs/003-agent-credential-pool` | **Date**: 2026-08-07
 
 Runnable scenarios that prove each slice works end to end. Design lives in [data-model.md](./data-model.md) and
