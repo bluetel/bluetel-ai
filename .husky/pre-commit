@@ -80,8 +80,16 @@ fi
 pnpm typecheck
 
 # Code-health gate for this branch's diff vs origin/main: lint, security,
-# duplication and complexity via qlty. Requires qlty to be installed.
-if command -v qlty >/dev/null 2>&1; then
+# duplication and complexity via qlty. Requires qlty to be installed locally.
+#
+# In CI, this is skipped: the `qlty` job in .github/workflows/ci.yml already
+# runs the same check on Actions runners, which install qlty explicitly via
+# qltysh/qlty-action. Runners that commit on behalf of automation (e.g. the
+# Claude Code Action) don't have qlty installed and shouldn't fail closed on
+# a gate CI enforces separately.
+if [ -n "$CI" ]; then
+  echo "ℹ CI environment detected — skipping local qlty gate (enforced separately by the qlty CI job)"
+elif command -v qlty >/dev/null 2>&1; then
   pnpm qlty:diff
 else
   echo "⚠ qlty not installed — please install to continue (install: https://qlty.sh)"
