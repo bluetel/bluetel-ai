@@ -6,7 +6,15 @@ Every decision below was reached by measuring this repository rather than by rea
 the abstract. Where a measurement is quoted, the command that produced it is given so it can be re-run.
 
 The Technical Context in [plan.md](./plan.md#technical-context) carries no `NEEDS CLARIFICATION` markers, because
-the eight open questions this feature had were each resolvable by inspection. Those eight are R1–R8.
+the ten open questions this feature had were each resolvable by inspection. Those ten are R1–R10.
+
+> **Revised 2026-08-11 after review feedback on [PR #28](https://github.com/bluetel/bluetel-ai/pull/28):**
+> _"we were hoping to use this tool as a dependency dont re-write it"._ `contextops` is now a **pinned
+> dependency**, not prior art. R5, R6 and R7 previously specified hand-written implementations of context
+> measurement — token approximation, shingle clustering, a re-weighted score — and all three are deleted in
+> favour of calling the tool. R8 gains the licence constraint that follows. R9 (how the dependency is acquired
+> and invoked) and R10 (how this repository's files become a payload it can read) are new, and R10 is now the
+> second decision, alongside [R2](#r2), that the feature's credibility rests on.
 
 ---
 
@@ -165,25 +173,37 @@ parsers silently last-one-wins.
 
 <a id="r5"></a>
 
-## R5. How is artifact size measured without a tokenizer?
+## R5. How are token counts obtained?
 
-**Decision**: A deterministic offline approximation in `artifact/size.ts` — count characters and whitespace-
-delimited words, and report `approxTokens = max(ceil(chars / 4), ceil(words * 1.3))`. Budgets in `config.ts` are
-set with at least 25% headroom above the largest artifact intended to pass.
+**Decision**: From `contextops`. Its report carries a `token_breakdown` computed with `tiktoken` under a named
+encoding (`--model`, default `gpt-4o`), and `prompt-lint` reads that number rather than producing one. There is
+no `artifact/size.ts`, no character-count approximation, and no tokenizer dependency in this workspace.
 
-**Rationale**: FR-046 forbids network and model calls; a real tokenizer means `tiktoken` (a native/WASM
-dependency carrying a model-specific vocabulary) for a number that only ever feeds a threshold comparison. The
-approximation's error on English prose is comfortably within ±20%, and the headroom rule means that error cannot
-flip a verdict — which is the only property the budget rule needs. The spec records this as an assumption so a
-reader does not mistake the number for a model-exact count; the report labels it `approxTokens` for the same
-reason.
+**Rationale**: the earlier revision of this decision hand-wrote `approxTokens = max(ceil(chars/4), ceil(words*1.3))`
+to avoid taking `tiktoken` as a dependency. That reasoning does not survive taking `contextops` as a dependency:
+`tiktoken` is already one of its two runtime requirements, so the exact count is now free and the approximation
+would be a deliberately worse number sitting next to a better one. Budgets stop needing a 25% headroom rule,
+because the error the headroom protected against no longer exists.
+
+**The one caveat, recorded because it is the only thing here that touches a network**: `tiktoken` fetches its BPE
+vocabulary on first use and caches it. On a machine that has never run it, the first invocation reaches
+`openaipublic.blob.core.windows.net`. This does not violate FR-046 — `prompt-lint` makes no network call, no
+inference call, and no call whose result varies — but it does mean a first run on a cold machine needs
+connectivity, and an air-gapped one needs the cache pre-seeded. Mitigations, both cheap:
+
+- Set `TIKTOKEN_CACHE_DIR` to a fixed path and cache it in CI, keyed on the pinned `contextops` version. The
+  vocabulary for one encoding is a few megabytes and never changes for a given encoding name.
+- The exit-6 path of [R9](#r9) covers the failure explicitly, so a cold offline machine gets "the tokenizer
+  vocabulary is not cached and cannot be fetched" rather than a Python traceback.
 
 **Alternatives considered**:
 
-- _`tiktoken`._ Rejected: a dependency and a model-specific vocabulary for a thresholded approximation. If a
-  future rule needs exact counts (cost attribution, context-window packing) this decision is worth revisiting.
-- _Bytes only._ Rejected: it makes the budget unintelligible to the person being asked to shrink a prompt, and
-  penalises artifacts with wide characters arbitrarily.
+- _Keep the hand-written approximation and use `contextops` only for the score._ Rejected: two token counts that
+  disagree, one of them in the report and the other in the budget rule, is a defect generator. One source.
+- _Pin the encoding to a Claude tokenizer._ Not available — `tiktoken` ships OpenAI encodings. The count is
+  therefore a consistent proxy rather than the exact cost of a Claude call, which the report states plainly by
+  naming the encoding it used. Budget thresholds are calibrated against that proxy, so the comparison is
+  self-consistent even though the absolute number is not Anthropic's.
 
 ---
 
@@ -191,68 +211,87 @@ reason.
 
 ## R6. How is cross-artifact redundancy detected deterministically?
 
-**Decision**: Shingle clustering. Normalise each line (collapse whitespace, lowercase, drop trailing
-punctuation), slide a window of 8 consecutive non-blank normalised lines, hash each window, group windows by
-hash, merge overlapping windows in the same pair of artifacts into maximal blocks, and report one finding per
-cluster naming every location (FR-022, and US4 scenario 4's "once, not once per file").
+**Decision**: By `contextops`. Its `redundancy` dimension measures lexical duplication across the items of a
+context payload and returns `redundancy_findings`; `prompt-lint` maps each into a `contextops/redundancy`
+finding and reports it like any other. No shingle implementation is written here.
 
-**Rationale**: It is deterministic, needs no dependency, is linear in total lines, and reports at block
-granularity rather than line granularity — which is the difference between "these two skills share a 40-line
-block" and 40 separate findings. Window size 8 was chosen so that shared _boilerplate paragraphs_ are caught
-while shared _single sentences_ (which convergent instruction-writing produces constantly) are not.
+**Rationale**: this is the clearest case of the review's instruction. The previous revision specified an
+8-line shingle window, hashing, overlap merging into maximal blocks, and a calibration exercise — perhaps 150
+lines of code and a suite, re-deriving what the dependency was chosen for. `contextops` states determinism as a
+guarantee (_"the same input always produces the same score… on any machine, at any time. No randomness"_) and
+ships a `stability` command that verifies it, which is a stronger assurance than our own tests could give about
+our own code. FR-022's "reported once, naming every location" is satisfied by the shape of
+`redundancy_findings`, which is per duplicated span rather than per file.
 
-**The calibration matters more than the algorithm.** Two shapes in this repo are duplicated **by design**:
+**What survives from the old decision is the calibration, and it is now more important, not less** — it just
+moves from a rule's parameters to the construction of the payload in [R10](#r10). Two shapes in this repo are
+duplicated **by design**:
 
 1. The 17 `.claude/skills/*/SKILL.md` pointers, each a frontmatter block plus one sentence naming the shared file.
-   That is the installer's intended shape, not a defect (spec edge case). Kind `agent-pointer` is therefore
-   excluded from cross-artifact redundancy entirely.
+   That is the installer's intended shape, not a defect (spec edge case). Pointers therefore enter a payload only
+   as the `tools` section — the skill-selection surface, where near-identical framing is correct — and never as
+   `chunks`, which is where redundancy is measured.
 2. `.agents/skills/<name>/**` is a **byte-identical copy** of `catalog/<name>/**` — that is what installation
-   _is_, and `install/catalog-drift` fires when it stops being true. Redundancy comparison therefore runs over
-   one representative per skill (the catalog copy), never across the catalog/installed boundary.
+   _is_, and `install/catalog-drift` fires when it stops being true. A payload therefore contains one
+   representative per skill (the catalog copy); the installed tree is never in the same payload as its source.
 
-Without both exclusions the rule would report the installer's design as its largest finding, which is how a rule
-gets disabled wholesale — the outcome SC-011 forbids.
+Without both exclusions `contextops` would correctly report that this repository's context is massively
+redundant, and it would be describing the installer's design rather than a defect — which is how a check gets
+disabled wholesale, the outcome SC-011 forbids. **A dependency does not remove the obligation to feed it the
+right input; it concentrates that obligation in one place** ([R10](#r10)).
 
 **Alternatives considered**:
 
+- _Write the shingle clustering anyway, because it is only 150 lines._ Rejected on the review's instruction, and
+  it was the right instruction: the 150 lines are the easy part, and the calibration, the determinism proof and
+  the maintenance are not.
 - _`qlty smells`' duplication detection._ Rejected: it is tuned for code structure and does not run over
   markdown; and the repo already learned from `qlty-diff` that a duplication percentage over prose needs a
   different denominator than lines-of-code.
-- _Token-level suffix automaton for exact longest common substrings._ Rejected as more machinery than the finding
-  needs; block granularity at line level is what a human acts on.
 
 ---
 
 <a id="r7"></a>
 
-## R7. What are the score's dimensions, and do we copy `contextops`?
+## R7. Where does the score come from, and do we re-weight it?
 
-**Decision**: A 0–100 score from four weighted dimensions — **Correctness 40, Redundancy 25, Density 20,
-Structure 15** — computed by deducting a per-finding weight within each dimension and flooring at 0.
+**Decision**: The 0–100 score is **`contextops`' score, reported verbatim**, with its four dimensions and their
+published maxima — Redundancy 30, Density 30, Structure 20, Concentration 20. `prompt-lint` does not re-weight
+it, does not drop a dimension, and does not fold its own findings into it. Correctness is reported **beside** the
+score as its own number and its own finding list, never blended in.
 
-**Rationale**: The four-dimension, bounded-score, dimension-decomposed shape is taken directly from `contextops`,
-which is the right shape: a single number for trend and triage, always shown with the breakdown that produced it
-so it is never a mystery. The weights are not taken from it. `contextops` scores redundancy 30, density 30,
-structure 20 and _source concentration_ 20 — appropriate for retrieved RAG context assembled from many documents,
-where over-reliance on one source is the failure mode. This repository's artifacts are hand-authored instruction
-documents; there is no retrieval and no source distribution, so _concentration_ has no referent here and is
-dropped. What dominates instead is **correctness**: a dangling reference silently removes half a procedure,
-whereas 20% bloat merely costs tokens. Hence correctness at 40, the largest single weight.
+**Rationale**: the previous revision reasoned that _concentration_ "has no referent" for hand-authored
+instruction documents, and re-cut the weights around a correctness dimension of our own. Both parts were wrong,
+and the second was worse than the first.
 
-The score is explicitly **not** what the gate decides on in Phase B — severity counts are (see
-[plan.md](./plan.md#phasing-delivery-order-by-user-story)). A score that gates would invite arguing about weights
-instead of fixing findings.
+- **Concentration has a referent — a better one than we had.** Once a payload is an agent's actual context bundle
+  ([R10](#r10)) rather than a flat list of files, concentration measures exactly the thing that goes wrong with a
+  skill: one 900-line `references/` file dominating the bundle, so the procedure the agent is meant to follow
+  is a rounding error in what it was handed. That failure is real here, and we would not have measured it.
+- **Re-weighting someone else's score destroys the only property it has that ours would not: an external
+  referent.** A `contextops` score of 74 is comparable with every other repository and every other run of that
+  tool. A score of 74 under weights we invented is comparable with nothing, while _looking_ like the first. If
+  the number is worth having, it is worth having unmodified.
+- **Blending correctness in would be a category error.** A dangling reference is not 6 points of anything; it is
+  a broken instruction. Findings gate, scores inform. Keeping them separate is what lets the score stay a metric
+  and the correctness rules stay a control.
+
+So the report shows two things: `context 74/100 (redundancy 22/30, density 19/30, structure 18/20,
+concentration 15/20)` from `contextops`, and `correctness: 1 error, 3 warnings` from our rules. The gate decides
+on severity counts, plus optionally `minScore` against the `contextops` number — the same decision `contextops
+check --min-score` would make, taken in our process so there is one exit-code contract ([R9](#r9)).
 
 **Alternatives considered**:
 
-- _Adopt `contextops`' weights unchanged for comparability._ Rejected: comparability with a tool measuring a
-  different thing is not a benefit, and keeping a `concentration` dimension that is structurally always full
-  marks would make the breakdown misleading.
-- _Depend on or vendor `contextops`._ Rejected on two independent grounds, recorded in the spec's Assumptions:
-  its licence (Sustainable Use) is not one this repo adopts for a build-blocking dependency, and it knows nothing
-  of `skill.meta`, `.agents/skills.config` or the catalog/installed model — which is where the defects actually
-  are. Its `inspect` / `check --min-score` / `diff` command shape is adopted; `diff` (report-vs-report comparison)
-  is deferred per the spec's Assumptions.
+- _Re-weight to put correctness first, as previously specified._ Rejected as above. It was the design's weakest
+  decision and the review's instruction removes it.
+- _Use `contextops check --min-score` directly as the gate._ Rejected: two tools each owning an exit code means
+  a red CI step whose cause has to be inferred from which line failed. `prompt-lint` runs the `inspect` command,
+  applies the threshold itself, and owns the single documented exit contract in
+  [contracts/cli.md](./contracts/cli.md#exit-codes).
+- _Derive a composite "prompt health" number over both halves._ Rejected: nobody could say what a 12-point drop
+  meant, and the first argument about the composite would be an argument about weights instead of about a
+  broken reference.
 
 ---
 
@@ -265,29 +304,167 @@ Assumptions); FR-045 is satisfied by _not foreclosing_ target adoption, not by s
 
 **Rationale**: `tooling/skills/README.md` states the installer's hard constraint plainly — a target needs only
 the Claude CLI, `git`, `curl` and POSIX utilities, with **no target-side Node, `jq`, or `tar`**, and _"nothing
-Node-based is shipped to or executed on a target"_. `prompt-lint` is Node. So there are exactly three ways to get
-it into a target, and two are bad:
+Node-based is shipped to or executed on a target"_. `prompt-lint` is Node, and now Python as well. So there are
+exactly three ways to get it into a target, and two are bad:
 
 1. **Ship it as an asset bundle** and require Node in targets. Rejected: it breaks the installer's central
-   promise, which is the reason the installer is adoptable at all.
+   promise, which is the reason the installer is adoptable at all. Taking `contextops` as a dependency makes this
+   worse, not better — the bundle would then have to carry a Python runtime too.
 2. **Reimplement the rules in POSIX shell** alongside `skills.sh`. Rejected for now: the cross-artifact rules
-   (shingle clustering, drift, path-index resolution) in POSIX `sh` would be both slow and the least testable
-   code in the repository — and `skills.sh` is already 1,140 lines carrying the installer's whole contract.
+   (drift, path-index resolution) in POSIX `sh` would be both slow and the least testable code in the repository
+   — and `skills.sh` is already 1,140 lines carrying the installer's whole contract. The context-economy half
+   cannot be reimplemented in shell at all.
 3. **A catalog skill whose procedure an agent executes directly** — an agent can check references resolve, check
    frontmatter completeness, and check config agreement by reading files, with no Node at all. This is the
    plausible route when someone wants it, and it composes with how every other skill in the catalog works.
 
-Recorded so that a future reader reaches (3) without re-deriving (1) and (2). Nothing in this feature's design
-blocks any of the three.
+**The licence adds a fourth reason to defer, and it is the one to read carefully.** `contextops` is under the
+Sustainable Use License, whose grant is _"use or modify the software only for your own internal business
+operations, personal use, or non-commercial purposes"_, whose limitation is _"you may not provide the software,
+or any derivative work of the software, to third parties as a hosted or managed service, or as part of a
+commercial product or service offering"_, and which permits redistribution _"only if you do so free of charge,
+and only for non-commercial purposes"_, with the terms attached.
+
+Read against how this repository is actually used:
+
+| Use                                                         | Reading                                                                                                                                   |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Bluetel runs `prompt-lint` in this repo's CI and pre-commit | Internal business operations. Within the grant.                                                                                           |
+| A skill installed into a **client** project invokes it      | Plausibly "part of a commercial product or service offering". **Do not do this without sign-off.**                                        |
+| The catalog ships `contextops` as an asset bundle           | Redistribution. Permitted only free of charge, non-commercially, with the licence attached — which a client deliverable is generally not. |
+| A target project installs `contextops` itself and runs it   | That project's own licence decision, taken by whoever owns it. This is the only route that keeps the question where it belongs.           |
+
+`prompt-lint` therefore never installs, vendors or ships `contextops` anywhere; it invokes a `contextops` that
+is already present, and says so when it is not ([R9](#r9)). Route (3) above stays the target-adoption path, and a
+target that wants the context-economy half installs the dependency under its own terms.
+
+**This is a legal judgement recorded by an agent from the licence text, and it is not legal advice.** It is
+flagged in the spec's Assumptions as needing a human decision before anything touching a client repository is
+built on it. The nothing-is-shipped stance is chosen so that the answer only ever has to be "yes" to unblock,
+never "we already did".
+
+---
+
+<a id="r9"></a>
+
+## R9. How is a Python dependency acquired, pinned and invoked from a pnpm/Nx workspace?
+
+**Decision**: `contextops==0.3.3`, pinned exactly; never installed by `prompt-lint`; located at startup in a
+documented order; asserted to be the pinned version before any artifact is read; and a missing or mismatched
+binary is its own exit code (`6`), distinct from a gate failure.
+
+Resolution order, first hit wins:
+
+1. `PROMPT_LINT_CONTEXTOPS_BIN` — an explicit path. The escape hatch for a venv, a Nix store path, or a CI cache.
+2. `contextops` on `PATH`.
+3. `uvx contextops@0.3.3` if `uv` is on `PATH`, then `pipx run contextops==0.3.3` if `pipx` is. Both run a
+   pinned version in an ephemeral, cached environment without touching the machine's Python.
+
+If none resolve, exit `6` with the install line for each route and the reason it is not optional. If one resolves
+but `contextops --version` disagrees with the pin, exit `6` naming both versions — a silently different scoring
+engine would break SC-005's byte-identical property between a developer machine and CI, which is precisely the
+class of failure that makes a gate untrustworthy.
+
+**Rationale**: the workspace already has this exact shape and it works. `qlty` is a non-Node binary that
+`qlty:diff` shells out to, that CI and `.husky/pre-commit` both require, and that the hook installs on demand
+before running the gate. A second external tool follows a path the repository has already walked, and reviewers
+already know how it behaves when absent.
+
+Two deliberate differences from the `qlty` precedent:
+
+- **`prompt-lint` does not install `contextops`.** The hook `curl | sh`s the qlty installer; this one only ever
+  reports. Installing a Sustainable-Use-licensed package onto a machine on the user's behalf is a decision for
+  the person who owns the machine, per [R8](#r8). The message tells them how; it does not act.
+- **The version is asserted, not merely present.** `qlty` is a linter aggregator whose findings we compare against
+  a threshold; `contextops` produces a number we report as a score, so drift in the engine is drift in the metric.
+  Pinning without asserting would be a pin that does nothing.
+
+Environment for the subprocess is fixed explicitly — `TIKTOKEN_CACHE_DIR` when configured, no inherited
+`PYTHON*` interference, `cwd` set to the repo root — because an inherited environment is an input, and an
+uncontrolled input breaks determinism (FR-029).
+
+**Alternatives considered**:
+
+- _Add it to a `requirements.txt` and have CI `pip install`._ Rejected as the only route, kept as one of several:
+  it works in CI, but a developer machine with a system Python and no venv is where `pip install` does damage.
+  `uvx` / `pipx run` are the routes that cost the user nothing.
+- _Wrap it in a Docker image._ Rejected: it turns a sub-second local gate into a container pull, and the repo has
+  no other containerised tooling to amortise that against.
+- _Port it to TypeScript._ That is the thing the review explicitly asked us not to do.
+
+---
+
+<a id="r10"></a>
+
+## R10. What is a "context payload" for this repository?
+
+`contextops` analyses _a context payload assembled for one inference call_ — `{system, messages, chunks, memory,
+tools}` — not a directory of files. Nothing in this repository is natively that shape. This mapping is therefore
+the decision that determines whether every number the dependency returns is meaningful or noise, and it is the
+place where the repository's knowledge lives now that the algorithms do not.
+
+**Decision**: `prompt-lint` assembles one payload per **context bundle** — a set of artifacts an agent actually
+loads together for one run — and runs `contextops inspect` once per bundle.
+
+| Bundle              | `system`                                         | `chunks`                                        | `tools`                            | Models                                             |
+| ------------------- | ------------------------------------------------ | ----------------------------------------------- | ---------------------------------- | -------------------------------------------------- |
+| `guidance` (one)    | `AGENTS.md`, `CLAUDE.md`                         | `.claude/rules/*.md`, `.agents/*.md`            | the 17 `.claude/skills/*/SKILL.md` | What every agent run loads before it does anything |
+| `skill:<name>` (17) | `AGENTS.md`, `CLAUDE.md` (the same fixed prefix) | `catalog/<name>/SKILL.md` + its `references/**` | that skill's pointer               | What an agent holds while executing one skill      |
+| `speckit` (one)     | the constitution                                 | `.specify/templates/*.md`                       | —                                  | What a Spec Kit command assembles                  |
+
+`memory` is left empty on every bundle, and the report says so rather than omitting the row. There is no
+per-project memory store in this repository; a payload section filled with something that is not what it means
+would produce a confidently wrong `memory-max-ratio`.
+
+**Why bundles rather than one payload for the repo, or one per file:**
+
+- **One payload for the whole repository** would tell you the repository is redundant — 17 skills that each
+  restate the house style — while an agent never loads two skills at once. The finding would be true of a thing
+  nobody experiences.
+- **One payload per file** discards every relationship. `contextops`' four dimensions are all _cross-item_
+  measures; a single-item payload makes concentration meaningless by construction and redundancy always zero.
+- **Per bundle**, every dimension lands on something real: redundancy = "this skill repeats what `AGENTS.md`
+  already told the agent"; concentration = "one reference file is 80% of what this skill costs"; structure =
+  "the fixed guidance prefix outweighs the procedure it is supposed to introduce"; density = formatting overhead
+  in what is actually sent. Each is a sentence a maintainer can act on.
+
+**The fixed guidance prefix in every skill bundle is the load-bearing detail.** It is what makes
+`skill:review`'s redundancy score mean "duplicates the house rules" rather than "duplicates nothing, since we
+only handed you one file". It is also what makes the guidance documents' size everybody's problem rather than
+nobody's, which is the honest model: `AGENTS.md` is paid for on every run of every skill.
+
+**Determinism**: bundles are built from a sorted artifact list; each payload is serialised with sorted keys and
+written to a temp file whose path never enters the report (FR-039); `contextops` guarantees the rest and ships
+`stability` to prove it, which the suite runs as a contract test against the pinned version.
+
+**Cost**: 19 bundles, one subprocess each, against a published budget of under 2s per ≤5,000 tokens. Diff-scoped
+runs build only the bundles containing a changed artifact — the usual case is one. This is why SC-002's
+whole-repository budget moves from 30s to 60s and its diff-scoped budget from 5s to 10s; the correctness half is
+still milliseconds, and `--rules-only` skips the subprocesses entirely for anyone who wants the old speed while
+investigating.
+
+**Alternatives considered**:
+
+- _Feed `contextops` the raw markdown as a plain string._ It accepts that, and it is what a first attempt would
+  do. Rejected: a string has no sections, so structure and concentration collapse to a single item and two of the
+  four dimensions stop measuring. The whole value of the dependency is in the payload shape.
+- _One bundle per installed skill as well as per catalog skill._ Rejected: identical content, doubled runtime,
+  and `install/catalog-drift` already owns the question of whether they differ.
+- _Include `messages`._ Rejected: there is no conversation to model, and inventing one would fabricate input.
 
 ---
 
 ## Open questions deliberately left open
 
-- **Density's exact formula** (`content/density`) is specified as "measured against a threshold" and implemented
-  in Phase D. Its calibration needs the first whole-repo measurement to be meaningful, so fixing a formula now
-  would be inventing a number. The rule ships with the threshold set from that first measurement, and the
-  measurement is recorded in the pull request that adds it.
+- **The `minScore` threshold's value.** The score is `contextops`' and its scale is not ours to predict; the
+  number is set from the first whole-repository measurement and recorded in the pull request that sets it. It
+  ships at 0 (inert) until then, per [plan.md](./plan.md#phasing-delivery-order-by-user-story).
+- **The token-budget thresholds per bundle**, for the same reason and on the same schedule — measured against
+  `token_breakdown` once, not guessed now.
+- **Whether `contextops diff` becomes the report-comparison surface.** The spec deferred report-vs-report
+  comparison as work not worth doing; as a dependency it is a command that already exists, so the question is
+  now only whether to wire it, not whether to build it. Left for after the first delivery has produced two
+  reports worth comparing. The same applies to `badge` and `telemetry`.
 - **`content/self-contradiction`'s coverage** stays bounded to mechanically decidable cases (FR-026). The spec's
   checklist records why enumerating them fully would smuggle in the semantic judgement this feature excludes.
 - **Whether the gate should eventually block on score** rather than severity counts. Left for after Phase D has

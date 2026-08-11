@@ -11,6 +11,12 @@ is the design record.
 **Identifiers are permanent.** A suppression comment and a `baseline.json` entry both name a rule by id, so
 renaming one silently disables it. Retire, never rename.
 
+**Two sources, one catalogue.** Nineteen rules are evaluated by `prompt-lint`; five, the `contextops/` family, are
+evaluated by the pinned `contextops==0.3.3` over a context bundle. Every entry below carries a **Source** line so
+that is never in doubt, but the distinction is deliberately invisible everywhere else: a delegated rule has an id,
+a severity you can configure, a suppression syntax, a baseline entry and a catalogue entry exactly like any
+other. Where a finding is computed is an implementation fact; what it means is not.
+
 **Ships as** is the severity at adoption, from the measured baseline in
 [../plan.md](../plan.md#adoption-how-this-lands-without-breaking-every-open-pr). It is not the severity forever —
 promotion is a reviewable edit to `src/config.ts`.
@@ -236,48 +242,94 @@ _Fix_: regenerate the pointer through the installer rather than editing it by ha
 
 ---
 
-## `content/` — cost and coherence
+## `contextops/` — context economy, measured by the dependency
 
-### `content/cross-artifact-duplication`
+All five are **Source** `contextops==0.3.3` and **Scope** `bundle`: they are measured over a context bundle — the
+set of artifacts an agent loads together — rather than over a file
+([../research.md](../research.md#r10)). All five ship at `warn`, because the first measurement against this
+repository has not been taken and starting a gate on someone else's unseen numbers is how thresholds get
+overridden in week one ([../plan.md](../plan.md#adoption-how-this-lands-without-breaking-every-open-pr)).
 
-**Ships as** `warn` (unmeasured until implemented) · **Applies to** CS, CR, G, C · **Dimension** redundancy · **Scope** set
+A finding from this family names the artifact that carries the cost and the bundle it was measured in. Its
+location is a relationship, not a line, so it reports `line: 0` and a `bundle` id.
 
-No substantial instruction block is duplicated across artifacts. Shingle clustering, window and calibration in
-[../research.md](../research.md#r6).
+### `contextops/redundancy`
 
-_Why_: a duplicated block gets fixed in one copy. It is also paid for twice in every context window that loads
-both.
+**Ships as** `warn` · **Dimension** redundancy (max penalty 30) · **Source** contextops
 
-_Fix_: extract to a reference file and point both artifacts at it — the mechanism `review`'s
-`references/` directory already uses.
+No substantial instruction is duplicated between the artifacts of one bundle.
 
-_Excluded by design_: `AP` pointers (17 near-identical files are the installer's intended shape) and the
-catalog↔installed boundary (identity there is what installation _means_).
+_Why_: a duplicated block gets fixed in one copy. It is also paid for twice in the context window that loads
+both — and because every skill bundle carries the guidance prefix, this is the rule that answers "does this skill
+restate what `AGENTS.md` already said".
 
-### `content/density`
+_Fix_: extract to a reference file and point both artifacts at it — the mechanism `review`'s `references/`
+directory already uses — or delete the restatement and rely on the guidance.
 
-**Ships as** `warn` · **Applies to** CS, CR, IS, G · **Dimension** density · **Scope** artifact
+_Excluded by design_: `AP` pointers enter a bundle only as `tools`, never as measured content (17 near-identical
+files are the installer's intended shape), and `.agents/skills/**` never enters a bundle at all (identity with
+the catalog is what installation _means_). Both exclusions are properties of how the payload is built, not
+parameters of the rule.
 
-The ratio of distinct directive-bearing lines to total non-blank lines stays above a threshold.
+### `contextops/density`
 
-_Why_: restated instructions and filler consume the context window that the actual procedure needs, and an
-instruction repeated in three slightly different forms is three things to keep consistent.
+**Ships as** `warn` · **Dimension** density (max penalty 30) · **Source** contextops
 
-_Fix_: delete the restatement. Threshold calibration waits on the first whole-repository measurement rather than
-being invented now — recorded as an open question in [../research.md](../research.md).
+Token waste from formatting and structural bloat stays below the threshold.
 
-### `content/size-budget`
+_Why_: filler consumes the context window the actual procedure needs. Measured in tokens rather than lines,
+because tokens are what is actually paid.
 
-**Ships as** `warn` · **Applies to** all · **Dimension** density · **Scope** artifact
+_Fix_: delete the restatement, and prefer one clear instruction to three approximate ones.
 
-An artifact stays within its kind's `approxTokens` budget, measured by the deterministic approximation of
-[../research.md](../research.md#r5).
+### `contextops/token-budget`
 
-_Why_: every guidance artifact is loaded on every run, so its size is a fixed tax on all work. A budget makes
-"this skill is too long" an argument about a number rather than about taste.
+**Ships as** `warn` · **Dimension** density · **Source** contextops (`token_breakdown`)
 
-_Fix_: split the procedure into a `references/` file the skill reads when it needs it — the same lever
-`content/cross-artifact-duplication` recommends.
+A bundle, and each artifact within it, stays within its configured token budget.
+
+_Why_: every guidance artifact is loaded on every run of every skill, so its size is a fixed tax on all work. A
+budget makes "this skill is too long" an argument about a number rather than about taste. The counts come from
+`tiktoken` under the encoding named in the report — exact for that encoding, a consistent proxy for a Claude one
+([../research.md](../research.md#r5)).
+
+_Fix_: split the procedure into a `references/` file the skill reads when it needs it.
+
+### `contextops/structure-imbalance`
+
+**Ships as** `warn` · **Dimension** structure (max penalty 20) · **Source** contextops
+
+A bundle's token cost is not badly distributed between its components — the fixed guidance prefix does not
+outweigh the procedure it introduces, and the tool surface does not outweigh both.
+
+_Why_: this is the rule that makes the guidance documents everyone's problem rather than nobody's. If
+`AGENTS.md` and `CLAUDE.md` cost more than the skill an agent was invoked to run, the skill is competing with its
+own preamble for attention on every single run.
+
+_Fix_: shrink the prefix, or move the part of it that is not universally needed into the skills that need it.
+
+_Not to be confused with_ `structure/degenerate` and `structure/heading-skip`, which are about one markdown
+document's headings. This is about how a bundle's cost is distributed. The shared word covers two different
+things, and merging them would have hidden both.
+
+### `contextops/concentration`
+
+**Ships as** `warn` · **Dimension** concentration (max penalty 20) · **Source** contextops
+
+No single artifact dominates the bundle it belongs to.
+
+_Why_: the previous revision of this design dropped this dimension, reasoning that "source concentration" is a
+RAG concept with no referent for hand-authored documents. That was wrong, and it is worth recording why: once a
+payload is an agent's actual bundle, concentration measures one `references/` file being 61% of what a skill
+costs — the procedure reduced to a footnote on its own attachment. It is a real failure mode here, and the
+design would have shipped without measuring it.
+
+_Fix_: split the dominant file, or move it behind a step that reads it only when the branch that needs it is
+taken.
+
+---
+
+## `content/` — coherence
 
 ### `content/self-contradiction`
 
@@ -298,9 +350,12 @@ feature excludes.
 
 ## `structure/` — is it shaped like a document
 
+Both are ours, both are about one document's headings, and neither overlaps
+[`contextops/structure-imbalance`](#contextopsstructure-imbalance), which is about a bundle's cost distribution.
+
 ### `structure/degenerate`
 
-**Ships as** `warn` · **Applies to** CS, CR, IS, G, C · **Dimension** structure · **Scope** artifact
+**Ships as** `warn` · **Applies to** CS, CR, IS, G, C · **Dimension** correctness · **Scope** artifact
 
 An artifact above a trivial size has headings, and is not one undifferentiated block.
 
@@ -311,7 +366,7 @@ _Fix_: add headings at the boundaries the content already has.
 
 ### `structure/heading-skip`
 
-**Ships as** `note` · **Applies to** CS, CR, IS, G, C · **Dimension** structure · **Scope** artifact
+**Ships as** `note` · **Applies to** CS, CR, IS, G, C · **Dimension** correctness · **Scope** artifact
 
 Heading levels do not skip (no `h2` directly followed by `h4`).
 
@@ -333,3 +388,8 @@ report that cannot say "I could not read this file" is worse than a red one.
 | `artifact/unreadable`    | `error`  | Not UTF-8, a symlink, or empty. Dependent rules are reported not-evaluated, never as passing           |
 | `suppression/unreasoned` | `error`  | A suppression comment without a reason (FR-009) — an exemption nobody has to justify is not one        |
 | `suppression/stale`      | `warn`   | A suppression, or a `baseline.json` entry, that no longer matches anything (FR-010)                    |
+
+The analyser being unavailable is deliberately **not** in this table. It is not a finding about the repository's
+content, so it is not a rule: it is exit `6` and a message
+([cli.md](./cli.md#exit-codes)). A run that could not measure something reports that it could not, in
+`notEvaluated`, and does not pretend the measurement was a rule that passed.

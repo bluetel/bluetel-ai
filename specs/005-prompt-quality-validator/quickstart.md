@@ -14,38 +14,58 @@ implementation phase.
 ```sh
 pnpm install --frozen-lockfile
 git fetch origin main          # the diff-scoped runs need a resolvable base ref
+
+# The external analyser. Any one of these; uv is the lightest.
+uvx contextops@0.3.3 --version           # nothing to install beyond uv itself
+# or: pipx install contextops==0.3.3
+# or: pip install contextops==0.3.3      (virtualenv, Python >= 3.10)
+# or: export PROMPT_LINT_CONTEXTOPS_BIN=/path/to/contextops
 ```
 
-No `qlty`, no network, no credentials, no model access. If any scenario below needs one of those, the
-implementation has diverged from FR-046.
+No `qlty`, no credentials, no model access. Network is needed **once**, on a machine that has never run
+`tiktoken`, to fetch and cache the tokenizer vocabulary; set `TIKTOKEN_CACHE_DIR` to keep it. Every run after
+that is offline. If any scenario below needs network for anything else, the implementation has diverged from
+FR-046.
 
 ## Scenario 1 — The tool runs and describes itself (FR-006, FR-047)
 
 ```sh
 pnpm prompt-lint --list-rules
 pnpm prompt-lint --explain refs/dangling-path
+pnpm prompt-lint --explain contextops/concentration
 ```
 
-**Expect**: 23 rules listed with id, ships-as severity and one-line statement; the `--explain` output gives the
-statement, rationale, applicable kinds and the fix. Exit `0` in both cases, no artifacts evaluated.
+**Expect**: 25 rules listed with id, ships-as severity, source and one-line statement; both `--explain` outputs
+give the statement, rationale, applicable kinds and the fix. Exit `0` in all three cases, no artifacts evaluated.
 
 **Fails if**: any rule prints an empty statement or rationale — `rules/registry.test.ts` should have caught that
-before you got here (SC-010).
+before you got here (SC-010). **Also fails if** the five `contextops/*` rules are missing or are described
+differently from the other twenty: a delegated rule that cannot describe itself is exactly the blind spot FR-047
+exists to close.
 
 ## Scenario 2 — Whole-repository run over the real surface (US4, SC-002, SC-003)
 
 ```sh
 time pnpm prompt-lint
+time pnpm prompt-lint --rules-only     # the correctness half alone
 ```
 
-**Expect**: ~140 artifacts evaluated in well under 30 seconds. A score out of 100 with all four dimensions shown.
-Exactly the findings the adoption table in [plan.md](./plan.md#adoption-how-this-lands-without-breaking-every-open-pr)
-predicts — most importantly **one** `refs/dangling-path` error at
-`tooling/skills/catalog/copywriting/references/natural-transitions.md:276`, and no other error-severity finding
-that is not either fixed or baselined.
+**Expect**: ~140 artifacts across 19 bundles in well under 60 seconds, and the `--rules-only` run in under 2.
+A score out of 100 with all four analyser dimensions and the analyser's name, version, encoding and profile
+shown, plus per-bundle scores. Exactly the findings the adoption table in
+[plan.md](./plan.md#adoption-how-this-lands-without-breaking-every-open-pr) predicts — most importantly **one**
+`refs/dangling-path` error at `tooling/skills/catalog/copywriting/references/natural-transitions.md:276`, and no
+other error-severity finding that is not either fixed or baselined.
 
 **Fails if**: `refs/dangling-path` reports more than the known instance. That is the false-positive condition
 research [R2](./research.md#r2) exists to prevent, and SC-011 forbids reaching adoption with it unresolved.
+
+**Also fails if** the `--rules-only` run prints a score, or prints no explanation of what it skipped. It must
+show `context: not evaluated (--rules-only)` and list the five delegated rules under not-evaluated (FR-053).
+
+**The measurement to record**: this run produces the first real numbers for `minScore` and the token budgets.
+Both ship inert until this scenario has been run and the numbers reviewed — see the open questions in
+[research.md](./research.md).
 
 ## Scenario 3 — Deterministic output (FR-029, FR-039, SC-005)
 
@@ -59,7 +79,18 @@ grep -c "$(pwd)" /tmp/a.json || echo "no absolute paths — correct"
 ```
 
 **Expect**: `byte-identical`, and zero occurrences of the absolute working directory. Also check by eye that there
-is no timestamp and no duration field.
+is no timestamp, no duration field, and no temp path from the payload handed to the analyser.
+
+Then the half we do not control:
+
+```sh
+contextops stability                        # the analyser's own determinism check
+pnpm prompt-lint --json | jq .analyser      # must name version 0.3.3, and the route it resolved by
+```
+
+**Expect**: `stability` passes, and `analyser.version` equals the pin. This is the property that makes a score in
+CI comparable with a score on a laptop; if it does not hold, the score is a number about a machine rather than
+about the repository (FR-050).
 
 ## Scenario 4 — A contributor's broken edit is caught locally (US1, all five scenarios)
 
@@ -117,17 +148,24 @@ pnpm prompt-lint:diff "origin/main"; echo "exit=$?"
 
 Verify the exit-code contract from [contracts/cli.md](./contracts/cli.md#exit-codes) by provoking each code:
 
-| Provoke                                | Command                                       | Expect exit |
-| -------------------------------------- | --------------------------------------------- | ----------- |
-| Clean tree                             | `pnpm prompt-lint:diff`                       | `0`         |
-| One error-severity defect (Scenario 4) | `pnpm prompt-lint:diff`                       | `1`         |
-| Unknown flag                           | `pnpm prompt-lint --nope`                     | `2`         |
-| Mutually exclusive scopes              | `pnpm prompt-lint --all --staged`             | `2`         |
-| Contradictory config                   | `PROMPT_LINT_MIN_SCORE=101 pnpm prompt-lint`  | `3`         |
-| Unresolvable base ref                  | `pnpm prompt-lint:diff origin/does-not-exist` | `4`         |
+| Provoke                                | Command                                             | Expect exit |
+| -------------------------------------- | --------------------------------------------------- | ----------- |
+| Clean tree                             | `pnpm prompt-lint:diff`                             | `0`         |
+| One error-severity defect (Scenario 4) | `pnpm prompt-lint:diff`                             | `1`         |
+| Unknown flag                           | `pnpm prompt-lint --nope`                           | `2`         |
+| Mutually exclusive scopes              | `pnpm prompt-lint --all --staged`                   | `2`         |
+| Contradictory config                   | `PROMPT_LINT_MIN_SCORE=101 pnpm prompt-lint`        | `3`         |
+| Unresolvable base ref                  | `pnpm prompt-lint:diff origin/does-not-exist`       | `4`         |
+| Analyser missing                       | `PROMPT_LINT_CONTEXTOPS_BIN=/nope pnpm prompt-lint` | `6`         |
 
 The `4` case is the one to test deliberately: it is US2 scenario 5, and the whole point is that a shallow CI
 checkout must **fail** rather than evaluate zero artifacts and pass. The message must name the ref.
+
+The `6` case is the same failure one level out, and has three parts to check rather than one: the exit code is
+`6` and not `1` (the environment is wrong, not the prompts); the message names every route to providing
+`contextops`, including `--rules-only` and the fact that it is not a substitute; and **no score, no partial pass
+and no verdict of `pass` is printed**. Point it at a wrong-version binary too, if one is to hand — the message
+must name both versions (FR-050, FR-051).
 
 **Also verify the override is visible**:
 
@@ -199,9 +237,13 @@ assume:
 - **`knip:orphans`** — `@bluetel-ai/prompt-lint` must be in `knip.json`'s `ignoreDependencies`, exactly as
   `@bluetel-ai/qlty-diff` is. Without it, a root devDependency consumed only by a script reads as unused and this
   blocking step fails.
-- **`qlty:diff` duplication** — 13 rule modules of similar shape is how a diff crosses the 10% duplication limit.
+- **`qlty:diff` duplication** — 11 rule modules of similar shape is how a diff crosses the 10% duplication limit.
   If it fails here, the fix is `defineRule` and shared test fixtures, not a threshold override
   ([plan.md](./plan.md#constitution-check), Principle IV).
+- **The suite passes without Python.** `pnpm nx test prompt-lint` on a machine with no `contextops` must be green:
+  the payload and mapping suites run from recorded fixtures, and the one contract test skips with a message
+  naming what it skipped. Verify by running it with `PROMPT_LINT_CONTEXTOPS_BIN=/nonexistent`. A suite that goes
+  red without the dependency makes the dependency mandatory for contributors, which it is not.
 
 ## Scenario 9 — Pre-commit path (FR-043)
 
@@ -219,17 +261,18 @@ Clean up: `git reset --hard HEAD && git switch - && git branch -D scratch/hook-c
 
 ## Traceability
 
-| Scenario | Covers                                                   |
-| -------- | -------------------------------------------------------- |
-| 1        | FR-006, FR-047, SC-010                                   |
-| 2        | US4 §1, FR-027–FR-030, SC-002, SC-003, SC-011            |
-| 3        | FR-029, FR-038, FR-039, SC-005                           |
-| 4        | US1 §1–5, FR-015, FR-020, FR-031, FR-040, SC-001, SC-006 |
-| 5        | US2 §1–5, FR-032–FR-034, FR-042, SC-008, SC-009          |
-| 6        | US3 §1–5, FR-012–FR-021, FR-044                          |
-| 7        | FR-009, FR-010, FR-035, SC-011                           |
-| 8        | Constitution I–IV                                        |
-| 9        | FR-043                                                   |
+| Scenario | Covers                                                          |
+| -------- | --------------------------------------------------------------- |
+| 1        | FR-006, FR-047, FR-049, SC-010                                  |
+| 2        | US4 §1, FR-027, FR-028, FR-030, FR-053, SC-002, SC-003, SC-011  |
+| 3        | FR-029, FR-038, FR-039, FR-050, SC-005                          |
+| 4        | US1 §1–5, FR-015, FR-020, FR-031, FR-040, SC-001, SC-006        |
+| 5        | US2 §1–5, US4 §6, FR-032–FR-034, FR-042, FR-051, SC-008, SC-009 |
+| 6        | US3 §1–5, FR-012–FR-021, FR-044                                 |
+| 7        | FR-009, FR-010, FR-035, SC-011                                  |
+| 8        | Constitution I–IV, FR-052, FR-053                               |
+| 9        | FR-043                                                          |
 
-Not covered here, by design: `content/density` calibration (waits on the first measurement — see
-[research.md](./research.md)) and target-project adoption (deferred, [research.md](./research.md#r8)).
+Not covered here, by design: the `minScore` and token-budget calibration (both wait on scenario 2's first
+measurement — see [research.md](./research.md)) and target-project adoption (deferred,
+[research.md](./research.md#r8)).

@@ -37,11 +37,23 @@ A human reviewer catches these inconsistently, because catching them means holdi
 and following every path in every one. That is precisely the kind of work a deterministic checker does perfectly
 and for free.
 
-So: **a static validator for the prompt surface, run the same way `qlty:diff` is run** — deterministic, offline,
-model-independent, diff-scoped, blocking. It borrows its shape from `contextops` (named rules, a bounded health
-score, an inspect / gate / compare command trio) without borrowing its code: `contextops` is Python,
-Sustainable-Use-licensed, and knows nothing about `skill.meta`, `.agents/skills.config`, or the catalog-to-target
-install model that produces most of what actually breaks here.
+So: **a static validator for the prompt surface, run the same way `qlty:diff` is run** — deterministic,
+model-independent, diff-scoped, blocking.
+
+It is two halves, and the split follows from a single question: _who is better placed to know this?_
+
+- **The repository's own invariants** — do the references resolve, is the metadata complete, has the installed
+  copy drifted from the catalog, was the version bumped, does this file contradict `.agents/skills.config` —
+  are things only this repository knows. They are specified here and built here.
+- **Context economy** — redundancy, density, structure, concentration, token cost, a bounded health score — is
+  what [`contextops`](https://github.com/Abhijeet777ui/contextops) already does, deterministically and offline.
+  It is taken as a **pinned dependency and called**, not reimplemented. The validator's job there is to hand it
+  the right input: this repository's files assembled into the context bundles an agent actually loads.
+
+That second point was decided the other way in the first revision of this spec, which treated `contextops` as
+prior art to imitate. Reviewer instruction on [PR #28](https://github.com/bluetel/bluetel-ai/pull/28) — _"we were
+hoping to use this tool as a dependency dont re-write it"_ — reversed it, and reversing it deleted three
+hand-written algorithms, a set of invented scoring weights, and the obligation to keep all of them correct.
 
 It is worth being blunt about what this **cannot** do, since the issue title says "quality". It cannot tell you
 whether a prompt elicits good behaviour from a model. It makes no model calls and forms no opinion about wording.
@@ -164,9 +176,10 @@ findings.
 ### User Story 4 - Anyone can see the whole prompt surface's health, and an agent can consume it (Priority: P4)
 
 Someone runs the validator over every artifact in the repository, without a diff. They get a bounded health score
-per artifact and for the repository as a whole, broken into the dimensions that produced it, plus the ranked
-finding list. Passing a flag yields the same report as structured data, so an agent asked to "clean up our
-prompts" can read it directly instead of parsing human prose.
+for each context bundle — the guidance every run loads, and each skill as an agent actually receives it — and for
+the repository as a whole, broken into the dimensions that produced it, plus the ranked finding list. Passing a
+flag yields the same report as structured data, so an agent asked to "clean up our prompts" can read it directly
+instead of parsing human prose.
 
 **Why this priority**: This is the reporting and triage half, valuable for planning work rather than blocking it.
 It is genuinely last: the gate stories deliver value with nothing but a pass/fail and a finding list, and a score
@@ -174,7 +187,7 @@ that nothing blocks on is a metric, not a control. It earns its place because th
 comparable over time and across repositories — and because the agents that write most of these artifacts are also
 the most efficient consumers of the fix list.
 
-**Independent Test**: Run the validator in all-files mode over this repository. Confirm it produces a per-artifact
+**Independent Test**: Run the validator in all-files mode over this repository. Confirm it produces a per-bundle
 and aggregate score with a per-dimension breakdown, that the same run with the machine-readable flag emits valid
 structured output carrying every field the human output showed, and that two runs over an unchanged tree produce
 byte-identical results.
@@ -182,19 +195,23 @@ byte-identical results.
 **Acceptance Scenarios**:
 
 1. **Given** the repository as it stands, **When** the validator runs in all-files mode, **Then** it reports a
-   score in the range 0–100 for each artifact and for the repository, with the contribution of each scoring
-   dimension shown.
+   score in the range 0–100 for each context bundle and for the repository, with the contribution of each scoring
+   dimension shown, and names the analyser and version that computed it.
 2. **Given** any run, **When** the machine-readable flag is passed, **Then** the output is valid structured data
    against a documented schema, containing every finding with artifact, line, rule, severity and remediation, and
    the scores.
 3. **Given** an unchanged working tree, **When** the validator runs twice, **Then** both runs produce identical
    findings, identical scores and the same exit code — no ordering instability, no timestamps, no machine-specific
    paths in the report body.
-4. **Given** two artifacts that share a substantial identical instruction block, **When** the validator runs
-   over both, **Then** it reports the redundancy once, naming both locations, rather than once per file.
-5. **Given** an artifact whose content is far above the configured length budget, **When** the validator runs,
+4. **Given** two artifacts loaded together in one bundle that share a substantial identical instruction block,
+   **When** the validator runs over both, **Then** it reports the redundancy once, naming both locations, rather
+   than once per file.
+5. **Given** an artifact whose content is far above the configured token budget, **When** the validator runs,
    **Then** it reports the budget breach with the measured and permitted sizes, so the finding is arguable on
    numbers rather than taste.
+6. **Given** the external analyser is not available on the machine, **When** the validator runs, **Then** it
+   fails with its own exit code and names each supported way to provide it — and does not report a score, a pass,
+   or a repository that looks clean because half the checks did not run.
 
 ---
 
@@ -225,6 +242,17 @@ byte-identical results.
   same act as breaking the build.
 - **An artifact is empty, or is a symlink, or is not valid UTF-8.** Each is reported as a finding rather than
   crashing the run or being skipped in silence.
+- **The external analyser is absent, or is the wrong version.** A developer machine without Python, a CI job whose
+  setup step was removed, a version that drifted from the pin. The run fails with its own exit code and a message
+  naming the ways to provide it. It must not report a pass on half the checks, and must not fall back to an
+  internal approximation — a score computed by a different engine than the pinned one is not comparable with the
+  one in the last report, which is the whole point of pinning it.
+- **The analyser is present but cannot run** — no cached tokenizer vocabulary and no network, or it exits
+  non-zero on a payload. Reported as a run failure naming the bundle and the analyser's own message, never as a
+  clean bundle.
+- **A skill has no references and is short.** Its context bundle is nearly all fixed guidance prefix. Structure
+  and concentration will say so, correctly — that is a real property of what the agent receives — but it must be
+  reported in a way that names the guidance documents as the cost, not the small skill as the offender.
 - **No artifacts exist at all** (the validator adopted by a fresh project). The run succeeds, states that it found
   no artifacts, and does not report a perfect score for an empty set.
 
@@ -287,27 +315,49 @@ byte-identical results.
   MUST be accompanied by a `version` change in its `skill.meta`.
 - **FR-021**: **Declared dependencies exist** — `requires=` names installable skills, `assets=` names an existing
   bundle, `next_step=` lines carry their mandatory fields.
-- **FR-022**: **Redundancy** — substantially duplicated instruction blocks across artifacts MUST be reported
-  once, naming every location, with the duplicated size measured.
-- **FR-023**: **Density** — structural bloat within an artifact (repeated headings, restated instructions, filler
-  that carries no directive) MUST be measured and reported against a threshold.
-- **FR-024**: **Size budget** — an artifact exceeding its kind's configured size budget MUST be reported with
-  measured and permitted sizes.
+- **FR-022**: **Redundancy** — substantially duplicated instruction between the artifacts an agent loads together
+  MUST be reported once, naming every location, with the duplicated size measured.
+- **FR-023**: **Density** — token waste from formatting and structural bloat within a loaded context MUST be
+  measured and reported against a threshold.
+- **FR-024**: **Token cost** — the token cost of an artifact and of a whole context bundle MUST be measured and
+  reported against a configured budget, with measured and permitted sizes named.
 - **FR-025**: **Structure** — an artifact MUST be reported when its shape is degenerate for its kind: no headings,
-  a single undifferentiated block, or a heading hierarchy that skips levels.
+  a single undifferentiated block, or a heading hierarchy that skips levels. A context bundle MUST be reported
+  when the distribution between its components is imbalanced, or when a single artifact dominates it.
 - **FR-026**: **Contradiction within an artifact** — a directive that both requires and forbids the same
   mechanically-comparable thing (e.g. two metadata fields with conflicting values, or a stated rule and its
   negation in the same artifact) MUST be reported. Scope is limited to mechanically decidable contradictions.
 
 **Scoring**
 
-- **FR-027**: The validator MUST compute a bounded health score (0–100) per artifact and for the whole run,
-  derived only from the findings and measurements of that run.
+- **FR-027**: The validator MUST report a bounded health score (0–100) per context bundle and for the whole run,
+  derived only from the measurements of that run.
 - **FR-028**: The score MUST decompose into named dimensions, each with a maximum contribution, and the
   decomposition MUST be shown wherever the score is shown.
 - **FR-029**: Scoring MUST be deterministic: identical input produces an identical score, with no dependence on
   file ordering, wall-clock time, machine, or working directory.
 - **FR-030**: A run over an empty artifact set MUST NOT report a score, and MUST state that the set was empty.
+- **FR-048**: The score MUST be reported exactly as the tool that computes it produces it — not re-weighted, not
+  reduced by dropping a dimension, and not blended with findings from other rules. Correctness findings MUST be
+  reported alongside the score, never folded into it.
+
+**Depending on an external analyser**
+
+- **FR-049**: The measurements in FR-022 – FR-025 and the score in FR-027 MUST be obtained from an existing,
+  deterministic, offline context analyser rather than reimplemented. The validator's own responsibility for them
+  is limited to assembling the input and mapping the results into its finding and reporting model.
+- **FR-050**: The external analyser's version MUST be pinned exactly in the same central configuration as the
+  thresholds, and MUST be verified at startup. A version other than the pinned one MUST fail the run naming both
+  versions, because a different engine silently produces different scores.
+- **FR-051**: When the analyser cannot be found or run, the validator MUST fail with a distinct, documented exit
+  code and a message naming each supported way to provide it. It MUST NOT skip those checks and report a pass,
+  and MUST NOT silently substitute an internal approximation.
+- **FR-052**: The validator MUST NOT install, vendor, bundle or redistribute the analyser. Making it available is
+  the operator's decision, on the operator's machine, under the analyser's own licence.
+- **FR-053**: Everything that depends on the analyser MUST be isolated behind a single internal boundary, so that
+  replacing it, or running without it, is a bounded change. A documented mode MUST exist that runs the
+  repository's own rules alone, states in its output that the delegated checks were not evaluated, and MUST NOT
+  be usable to satisfy the pull-request gate.
 
 **Invocation, scope and gating**
 
@@ -349,7 +399,10 @@ byte-identical results.
   skills project's own checks, so a skill cannot be published broken.
 - **FR-045**: The validator MUST be adoptable by a project that installs skills from this repository, without
   requiring that project to adopt this repository's toolchain beyond what installing skills already requires.
-- **FR-046**: The validator MUST have no network access and MUST make no model or inference calls.
+- **FR-046**: The validator MUST make no model or inference calls, and MUST make no network request whose result
+  could change a finding, a score or a verdict. The one permitted exception is the one-time, cached download of a
+  tokenizer vocabulary by the external analyser on a machine that has never run it; the run MUST work offline
+  once that cache exists, and MUST fail with an actionable message rather than degrade when it does not.
 - **FR-047**: Every rule MUST be documented in a single human-readable catalogue that states its identifier,
   severity, rationale, and how to fix a violation — and that catalogue MUST be verified against the implemented
   rule set, so a rule cannot exist undocumented and a documented rule cannot cease to exist.
@@ -361,15 +414,19 @@ byte-identical results.
 - **Artifact kind**: The classification that decides which rules apply and which budgets and required sections
   hold — catalog skill body, catalog skill metadata, installed shared skill, agent pointer, repo guidance
   document, Spec Kit template, constitution.
-- **Rule**: A named, deterministic check over one artifact or over the artifact set. Has a stable identifier, a
-  default severity, an enforcement statement, a rationale, and the kinds it applies to.
+- **Context bundle**: A set of artifacts an agent loads together for one run — the repository-wide guidance, plus
+  one bundle per skill consisting of that guidance and the skill's own body and references. The unit the
+  context-economy measurements and the score are computed over, because it is the unit an agent experiences.
+- **Rule**: A named, deterministic check over one artifact, over the artifact set, or over a context bundle. Has a
+  stable identifier, a default severity, an enforcement statement, a rationale, the kinds it applies to, and
+  whether it is evaluated here or delegated to the external analyser.
 - **Finding**: One violation. Carries artifact, location, rule identifier, severity, what is wrong, and the
   remediation. Ordered deterministically.
 - **Severity**: Blocking, reported-but-passing, or informational. Configurable per rule.
 - **Suppression**: An in-artifact, reasoned exemption of one rule at one location. Reported, and reported again
   when it goes stale.
-- **Scorecard**: The bounded score for an artifact or a run, decomposed into named dimensions with maximum
-  contributions.
+- **Scorecard**: The bounded score for a context bundle or a run, decomposed into named dimensions with maximum
+  contributions, and attributed to the analyser and version that produced it.
 - **Scope**: The artifact set a run evaluates — the diff against a base ref, the staged set, or everything —
   together with what was excluded and why.
 - **Thresholds**: The single central set of limits that decide pass or fail: permitted counts by severity,
@@ -383,13 +440,17 @@ byte-identical results.
 
 - **SC-001**: Every one of the failure modes listed in "Why This Change" is caught by a named rule, demonstrated
   by a test that reproduces the failure and asserts the rule fires.
-- **SC-002**: A diff-scoped run over a typical branch (fewer than 20 changed artifacts) completes in under 5
-  seconds on a developer machine, and a whole-repository run in under 30 seconds.
+- **SC-002**: A diff-scoped run over a typical branch (fewer than 20 changed artifacts) completes in under 10
+  seconds on a developer machine, and a whole-repository run in under 60 seconds. The repository's own rules
+  account for under 2 seconds of either; the remainder is the external analyser, and the mode that skips it
+  returns the run to under 2 seconds.
 - **SC-003**: The validator reports zero error-severity findings against this repository's artifacts once
   adoption is complete — the surface it gates is a surface it passes.
 - **SC-004**: Every rule has at least one test proving it fires on a violating artifact and one proving it does
   not fire on a compliant one; the second is what keeps the gate from being ignored.
-- **SC-005**: Two runs over an identical tree produce byte-identical reports in both output modes.
+- **SC-005**: Two runs over an identical tree produce byte-identical reports in both output modes — including the
+  delegated measurements and the score, and including a run on a different machine with the pinned analyser
+  version.
 - **SC-006**: A contributor can go from a failing run to a fixed artifact using only the run's output — no rule
   requires reading the validator's source to understand what to change. Verified by review against the rule
   catalogue.
@@ -413,20 +474,31 @@ Recorded because the request was made in a non-interactive run with no opportuni
   works. "Quality" in the issue title is scoped to the mechanically decidable properties enumerated in FR-012 –
   FR-026. Semantic prompt evaluation (LLM-as-judge over skill behaviour) is a separate, later feature and is out
   of scope here.
-- **`contextops` is prior art, not a dependency.** Its shape — named rules, a bounded 0–100 health score
-  decomposed into dimensions, an inspect / gate / compare command trio — is adopted. Its code is not: it is
-  Python under the Sustainable Use License, and it knows nothing of `skill.meta`, `.agents/skills.config`, or the
-  catalog-to-target install model that produces most of the defects this feature exists to catch. Vendoring or
-  depending on it is therefore rejected on both licence and fit grounds.
+- **`contextops` is a dependency, pinned at `0.3.3`.** Decided by reviewer instruction on
+  [PR #28](https://github.com/bluetel/bluetel-ai/pull/28), and it is the right call: it computes redundancy,
+  density, structure, concentration, token cost and the 0–100 score, guarantees determinism, runs offline, and
+  ships a command that verifies its own stability. The validator calls it rather than imitating it. What the
+  validator still owns is the half `contextops` cannot know — `skill.meta`, `.agents/skills.config`, the
+  catalog-to-target install model — and the input: turning this repository's files into the context bundles an
+  agent actually loads.
+- **Nothing about the dependency is installed, shipped or vendored by this feature.** `contextops` is Python under
+  the Sustainable Use License, whose grant covers _"your own internal business operations"_ but not provision to
+  third parties as part of a commercial offering. Running it in this repository's CI is inside that grant;
+  shipping it to a client project is not, so the validator never does. **This reading was made by an agent from
+  the licence text and needs a human to confirm it before anything client-facing depends on it.** The
+  never-ship stance means that confirmation is only ever needed to unblock new work, never to undo shipped work.
+- **The dependency being absent is a failure, not a downgrade.** A run without `contextops` reports what it could
+  not evaluate and exits with its own code. A gate that quietly checks less when a tool is missing is worse than
+  no gate, because it reads identically to a clean pass.
 - **Artifact set is fixed at what exists today**, per FR-002. `apps/` and `packages/` currently hold no
   AI-authored prompt artifacts; when they do, they are added to the declared set rather than discovered by
   heuristic.
-- **Token counting is approximate.** Size budgets are measured with a deterministic offline approximation, not a
-  model-exact tokenizer. Budgets are therefore stated with enough headroom that the approximation's error cannot
-  flip a verdict.
-- **Snapshot comparison between two reports is deferred.** Diff-scoping the _artifact set_ (FR-031) is in scope;
-  comparing two _reports_ over time is reporting sugar that nothing blocks on, and it is left out of the first
-  delivery.
+- **Token counts are exact for an OpenAI encoding, and a consistent proxy for a Claude one.** They come from the
+  analyser's `tiktoken`-backed breakdown under a named encoding, which the report states. The absolute number is
+  not what an Anthropic model would charge; the comparison between artifacts, and against a budget calibrated on
+  the same scale, is sound.
+- **Snapshot comparison between two reports is deferred, not out of scope.** The analyser already provides it as
+  a command. Wiring it is a decision to take once two reports worth comparing exist, rather than work to plan.
 - **Adoption is staged.** The gate is introduced with existing violations either fixed or explicitly recorded
   (FR-035), so turning it on does not fail every unrelated pull request in flight. SC-003 and SC-011 are the
   end-state of that staging, not preconditions for merging the validator.

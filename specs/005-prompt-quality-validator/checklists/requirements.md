@@ -35,9 +35,20 @@
 
 ### Validation record
 
-Validated in a single pass. Every item passed; no spec revision was required. Four observations are recorded
-rather than treated as failures, because each is a property of the subject matter rather than a defect in the
-writing.
+Validated in a single pass, then re-validated after the `contextops`-as-dependency revision of 2026-08-11. Every
+item still passes. The revision added FR-048 – FR-053, changed FR-022 – FR-025, FR-027, FR-046 and SC-002,
+SC-005, and introduced one new key entity (context bundle); each of the new requirements is testable, and
+scenario 5 in [quickstart.md](../quickstart.md) exercises the ones about the dependency being absent.
+
+One checklist item deserves a second look after the revision — _"no implementation details leak into
+specification"_ — because the spec now names a specific third-party tool and a version. The naming is in
+**Assumptions** and in the FRs' rationale, not in the requirements themselves: FR-049 – FR-053 are written
+against "an external context analyser", so a reader can evaluate the requirement without accepting the choice,
+and a future replacement would change the assumption rather than the requirement. That is the honest line
+between a constraint the feature accepts and an implementation detail it should not be asserting.
+
+Four further observations are recorded rather than treated as failures, because each is a property of the
+subject matter rather than a defect in the writing.
 
 1. **The spec names concrete file paths throughout** — `tooling/skills/catalog/`, `.agents/skills.config`,
    `.claude/skills/<name>/SKILL.md`, `.specify/templates/*.md`. This is a deliberate exception to "no
@@ -71,8 +82,37 @@ This spec was produced in a non-interactive CI run where asking is not possible,
 would otherwise have been clarification questions were resolved as informed guesses and recorded in
 **Assumptions** instead:
 
-| Decision                                                  | Taken as                                                                               |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Does "quality" include semantic/LLM-judged evaluation?    | No — deterministic only; semantic evaluation is a separate later feature               |
-| Do we adopt `contextops` itself, or only its shape?       | Shape only — licence (Sustainable Use) and fit (no `skill.meta` awareness) rule it out |
-| Is the gate blocking from day one on existing violations? | No — staged adoption via FR-035; SC-003/SC-011 are the end state, not a precondition   |
+| Decision                                                  | Taken as                                                                                     |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Does "quality" include semantic/LLM-judged evaluation?    | No — deterministic only; semantic evaluation is a separate later feature                     |
+| Do we adopt `contextops` itself, or only its shape?       | ~~Shape only~~ → **the tool itself, pinned at `0.3.3`**. Answered by the reviewer; see below |
+| Is the gate blocking from day one on existing violations? | No — staged adoption via FR-035; SC-003/SC-011 are the end state, not a precondition         |
+
+### Resolution of the `contextops` guess — 2026-08-11
+
+The second guess was **wrong**, and the correction is the most useful thing this checklist records. It was
+resolved on [PR #28](https://github.com/bluetel/bluetel-ai/pull/28): _"we were hoping to use this tool as a
+dependency dont re-write it"._
+
+What the guess got wrong, in order of how much it cost:
+
+1. **It treated "no new dependency" as a virtue rather than a trade.** The price of that virtue was hand-writing
+   shingle clustering, a token approximation and a bespoke scoring scheme — three algorithms to specify, test,
+   calibrate and keep correct, replacing three that already existed with a published determinism guarantee.
+2. **It over-read the licence.** The Sustainable Use License permits use for internal business operations, which
+   is what a CI gate in this repository is. The real constraint is narrower and was missed: it restricts
+   _providing_ the software to third parties, which bears on shipping it to client projects — a question the
+   design now answers by never shipping it at all ([research.md](../research.md#r8)).
+3. **It over-read the fit objection.** "It knows nothing of `skill.meta`" is true and irrelevant: those checks
+   were always going to be ours. The half it does know about is the half we were about to rebuild.
+4. **It dropped a dimension it should have kept.** `concentration` was rejected as having no referent for
+   hand-authored documents. It has an excellent one — a single reference file dominating a skill's context — and
+   the design would have shipped without measuring it.
+
+Recorded rather than quietly amended, because "the agent's informed guess, and then what a human who knew the
+context actually wanted" is the useful artifact here.
+
+**One clarification remains open, and it needs a human**: whether Bluetel's use of a Sustainable-Use-licensed
+tool is acceptable beyond this repository's own CI. The design is deliberately arranged so the answer is only
+needed to unblock new work — nothing is shipped, vendored or installed onto anyone else's machine (FR-052) — but
+it should not be treated as settled by an agent reading a licence file.
