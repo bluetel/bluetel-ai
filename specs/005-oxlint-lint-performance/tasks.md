@@ -274,7 +274,7 @@ parity suite passes, and the staged-file pass is under 1 s.
       `pnpm nx affected -t lint-workspace` after `pnpm typecheck` and before `pnpm qlty:diff`. Make the
       oxlint step **fail closed** if either `oxlint` or `oxlint-tsgolint` is missing, matching the
       existing `qlty` treatment (FR-018). Confirm a staged-deletion-only commit still succeeds (FR-019).
-- [ ] **T034** Update `.github/workflows/ci.yml` to run `lint-workspace` alongside the existing targets:
+- [x] **T034** Update `.github/workflows/ci.yml` to run `lint-workspace` alongside the existing targets:
       `pnpm exec nx affected -t lint lint-workspace test typecheck design-lint --parallel=$(nproc)`.
       Without this, CI stops enforcing the 4 workspace-scoped rules — `@nx/enforce-module-boundaries`,
       `@cspell/spellchecker`, `no-octal`, `no-dupe-args` — an FR-011 violation and the worst possible
