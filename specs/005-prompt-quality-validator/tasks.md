@@ -246,10 +246,10 @@ it. Full script: [quickstart.md](./quickstart.md) Scenario 4.
 - [ ] T036 [US1] Implement `tooling/prompt-lint/src/cli.ts` + `cli.test.ts` — argv per
       [contracts/cli.md](./contracts/cli.md#arguments-and-flags): the positional base ref, `--all`, `--staged`,
       `--max-findings=<n>`. Mutually exclusive scopes and unknown flags are usage errors (exit `2`), never
-      silently resolved or ignored. **`cli.test.ts` is an addition to the module tree in
-      [plan.md](./plan.md#source-code-repository-root), which lists `cli.ts` without a colocated suite**;
-      Constitution III is non-negotiable and admits no exception for an entry point, so the suite exists and the
-      plan's tree is the thing that is wrong. Recorded rather than quietly resolved.
+      silently resolved or ignored. `cli.test.ts` was absent from the module tree in
+      [plan.md](./plan.md#source-code-repository-root) when this list was generated; Constitution III admits no
+      exception for an entry point, so the suite exists and the tree was corrected in the same change that added
+      this task, along with an explicit statement that the `index.ts` barrels are the one exemption.
 - [ ] T037 [US1] Run the US1 acceptance script end to end —
       [quickstart.md](./quickstart.md#scenario-4--a-contributors-broken-edit-is-caught-locally-us1-all-five-scenarios).
       All five US1 scenarios in one pass: a dangling reference reported with line and fix (§1), a diff touching
@@ -366,11 +366,12 @@ table.
       when deciding whether to invoke a skill. Fires on the ten `speckit-*` descriptions, which describe what they
       do but never when — which is why they get selected by name rather than by need; does not fire on the seven
       that already carry the clause (`review`, `merging`, `pr-creation`, `copywriting`, `jira-ticket`,
-      `skills-install`, `frontend-design`). It ships at `warn` with those ten baselined (T058). **This rule is
-      absent from the plan's phase table**: [plan.md](./plan.md#phasing-delivery-order-by-user-story) lists it in
-      no phase, while [contracts/rules.md](./contracts/rules.md#skill--skill-body-contract) and
+      `skills-install`, `frontend-design`). It ships at `warn` with those ten baselined (T058). **This rule was absent from the
+      plan's phase table**: [plan.md](./plan.md#phasing-delivery-order-by-user-story) listed it in no phase, while
+      [contracts/rules.md](./contracts/rules.md#skill--skill-body-contract) and
       [data-model.md](./data-model.md#the-25-rules-by-family) both require it. It belongs here, with the rest of
-      the catalog-publishing invariants that US3 §2 names; the phase table is the artifact that needs correcting.
+      the catalog-publishing invariants US3 §2 names; phase C of that table was corrected in the same change that
+      added this task.
 - [ ] T054 [US3] Implement `tooling/prompt-lint/src/rules/install.ts` + `install.test.ts` — the three
       `scope: 'set'` rules: `install/catalog-drift` (`.agents/skills/<name>/` matches
       `tooling/skills/catalog/<name>/` byte for byte, **excluding** the files the installer's model deliberately
@@ -802,5 +803,8 @@ the requirement becomes true.
   found, and T089 raises the constitution amendment for agent-run branch names. Each is its own commit or pull
   request, for the reason [plan.md](./plan.md#files-changed-outside-the-new-project) gives: the validator's diff
   and its first findings must not arrive entangled.
-- T036 adds `cli.test.ts`, which the plan's module tree omits. Constitution III admits no exception for an entry
-  point, so the suite exists and the tree is what needs correcting.
+- Four inconsistencies between the three artifacts were found while generating this list and corrected in the
+  same change: the missing phase entry for `skill/use-when-trigger` (T053), the missing `cli.test.ts` (T036), the
+  module count in the plan's Scale/Scope, and two counts in the rule catalogue. Two more need a human and are
+  recorded rather than corrected: FR-045's `MUST` has no shipping task by design, and the `contextops` licence
+  reading is an agent's (T060).
