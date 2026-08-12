@@ -1,63 +1,75 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { describe, it, expect } from 'vitest'
 
-import type { ExtractedRule } from './extract'
-import { ESLINT_WORKSPACE_RULES, postMigrationAssignment, preMigrationAssignment } from './owners'
+import {
+  ESLINT_WORKSPACE_RULES,
+  OXLINT_JS_PLUGIN_RULES,
+  isOxlintOwned,
+  oxlintEnforcedRules,
+  readOxlintConfig,
+} from './owners'
 
-const rule = (overrides: Partial<ExtractedRule> = {}): ExtractedRule => ({
-  name: 'no-useless-return',
-  plugin: 'eslint',
-  severity: 'error',
-  options: [],
-  requiresTypeChecking: false,
-  fixable: true,
-  enabledFor: ['probe.ts'],
-  ...overrides,
-})
+const packageRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+const repoRoot = path.dirname(path.dirname(packageRoot))
 
-describe('preMigrationAssignment', () => {
-  it('assigns every rule to the single ESLint layer', () => {
-    expect(preMigrationAssignment()).toMatchObject({ owner: 'eslint', status: 'covered' })
-  })
-
-  it('says the same thing for every rule, because today one layer runs them all', () => {
-    expect(preMigrationAssignment()).toEqual(preMigrationAssignment())
-  })
-})
-
-describe('postMigrationAssignment', () => {
-  it('keeps the two workspace-scoped rules with ESLint, each with a stated reason', () => {
-    for (const name of Object.keys(ESLINT_WORKSPACE_RULES)) {
-      const assignment = postMigrationAssignment(rule({ name }))
-      expect(assignment.owner).toBe('eslint-workspace')
-      expect(assignment.status).toBe('relocated')
-      expect(assignment.notes).toBeTruthy()
+describe('ESLINT_WORKSPACE_RULES', () => {
+  it('gives every rule that stays behind a stated reason', () => {
+    for (const [rule, reason] of Object.entries(ESLINT_WORKSPACE_RULES)) {
+      expect(reason, `${rule} has no reason`).toBeTruthy()
     }
   })
 
-  it('sends a type-aware rule to the tsgolint layer', () => {
-    expect(
-      postMigrationAssignment(
-        rule({ name: '@typescript-eslint/no-floating-promises', requiresTypeChecking: true }),
-      ).owner,
-    ).toBe('oxlint-type-aware')
+  it('is a short list — the migration is the default, staying behind is the exception', () => {
+    expect(Object.keys(ESLINT_WORKSPACE_RULES)).toHaveLength(4)
+  })
+})
+
+describe('oxlintEnforcedRules', () => {
+  const enforced = oxlintEnforcedRules(readOxlintConfig(repoRoot))
+
+  it('reads the committed config rather than restating it', () => {
+    expect(enforced.size).toBeGreaterThan(100)
   })
 
-  it('sends everything else to a native oxlint rule', () => {
-    expect(postMigrationAssignment(rule()).owner).toBe('oxlint-native')
+  it('includes the type-aware rules', () => {
+    expect(enforced.has('no-floating-promises')).toBe(true)
+    expect(enforced.has('no-misused-promises')).toBe(true)
+    expect(enforced.has('restrict-template-expressions')).toBe(true)
   })
 
-  it('never leaves a rule unassigned or dropped', () => {
-    const samples = [
-      rule(),
-      rule({ name: '@cspell/spellchecker', plugin: '@cspell' }),
-      rule({ name: '@nx/enforce-module-boundaries', plugin: '@nx' }),
-      rule({ name: '@typescript-eslint/no-misused-promises', requiresTypeChecking: true }),
-    ]
-
-    for (const sample of samples) {
-      const assignment = postMigrationAssignment(sample)
-      expect(assignment.owner).not.toBe('unassigned')
-      expect(assignment.status).not.toBe('dropped')
+  it('includes every rule routed through the JS plugin API', () => {
+    for (const alias of Object.values(OXLINT_JS_PLUGIN_RULES)) {
+      expect(alias).toBeDefined()
+      const bare = (alias ?? '').slice((alias ?? '').lastIndexOf('/') + 1)
+      expect(enforced.has(bare), alias).toBe(true)
     }
+  })
+
+  it('does not include the rules that stayed with ESLint', () => {
+    expect(enforced.has('spellchecker')).toBe(false)
+    expect(enforced.has('enforce-module-boundaries')).toBe(false)
+    expect(enforced.has('no-octal')).toBe(false)
+    expect(enforced.has('no-dupe-args')).toBe(false)
+  })
+})
+
+describe('isOxlintOwned', () => {
+  const enforced = oxlintEnforcedRules(readOxlintConfig(repoRoot))
+
+  it('claims a rule oxlint enforces', () => {
+    expect(isOxlintOwned('@typescript-eslint/no-floating-promises', enforced)).toBe(true)
+    expect(isOxlintOwned('arrow-body-style', enforced)).toBe(true)
+  })
+
+  it('never claims a rule that stayed with ESLint, even if a name would match', () => {
+    for (const rule of Object.keys(ESLINT_WORKSPACE_RULES)) {
+      expect(isOxlintOwned(rule, enforced), rule).toBe(false)
+    }
+  })
+
+  it('does not claim a rule nobody enforces', () => {
+    expect(isOxlintOwned('@typescript-eslint/no-such-rule', enforced)).toBe(false)
   })
 })

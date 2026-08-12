@@ -89,15 +89,64 @@ the project config and **zero** diagnostics under the staged config. The rule mo
 
 ---
 
-## 4. Phase 3 — spike measurements (T017, T048)
+## 4. Phase 3 — spike (T013–T018, T048)
 
-_Pending._
+Method: oxlint **fails config parsing on an unknown rule name**, so "the config parses" is a
+direct proof that a rule exists. All 129 rules enabled for a `.ts` file were probed by writing
+a one-rule config and checking whether it parsed. No documentation was taken on trust.
+
+| Question | Answer |
+| --- | --- |
+| **G1** — native rule coverage | **120 / 129**. The 9 without a native rule: `no-octal`, `@nx/enforce-module-boundaries`, `@cspell/spellchecker`, `unused-imports/no-unused-imports`, `import-x/order`, `prefer-arrow-functions/prefer-arrow-functions`, both `check-file` rules, `@bluetel-ai/enforce-safe-env` |
+| **G1b** — the 18 core rules only enabled for `.js`/`.mjs` | 17 native; `no-dupe-args` absent |
+| **G2** — JS plugin loading | All four ESLint plugins load unchanged through `jsPlugins`. `import-x` and `unused-imports` collide with built-in oxlint namespaces and must be **aliased** — oxlint refuses the collision rather than silently shadowing |
+| **G5 / SC-001** — cost with every JS plugin loaded | **0.78 s** for one file including type-aware rules, against a 1 s target and a 5.58 s baseline |
+| **T048** — do the type-aware rules fire? | **41 / 41**, and 39 of them report nothing without `--type-aware`, so the flag is demonstrably doing the work |
+| **G10** — the 5 `no-unnecessary-type-assertion` divergences | **oxlint is right.** `tsc --noEmit` passes with all six `issues as readonly StandardSchemaV1.Issue[]` assertions removed, so they were unnecessary and ESLint was missing them. Removed in the migration commit |
+| **G10b** — the divergence in the other direction | ESLint reports one assertion oxlint does not (`(await importOriginal()) as Record<string, unknown>`). It was already suppressed, so nothing changes in enforcement — but it is a real gap in oxlint's implementation and is recorded rather than assumed away |
+
+### Two findings that would have silently weakened the rule set
+
+1. **`"categories": {}` does not disable oxlint's defaults.** Listing a plugin turns on its
+   `correctness` category, and an empty `categories` object leaves that alone — a
+   `unicorn/no-useless-spread` diagnostic appeared on existing code from a rule nobody had
+   asked for, breaching FR-013. Every category has to be set to `off` **by name**.
+2. **`restrict-plus-operands` and `restrict-template-expressions` fire on nothing at their
+   oxlint defaults.** Both are configured here with non-default options, and with the
+   workspace's own options supplied they fire correctly. A migration that carried rule names
+   without their options would have left two rules enabled, green, and doing nothing.
+
+### A third: `extends` is lossy
+
+`.oxlintrc.json` extending `tooling/oxlint-config/oxlintrc.base.json` merged `rules` and
+`overrides` but **silently dropped `ignorePatterns`, `env`, `globals` and `categories`** — the
+resolved config showed `ignorePatterns: []` against three authored entries. The root
+`.oxlintrc.json` is therefore the complete config, and `tooling/oxlint-config` holds the JS
+plugins. Checked with `oxlint --print-config`, which is the only way to see it.
 
 ---
 
 ## 5. Phase 5 — success criteria (T036–T038)
 
-_Pending._
+| SC | Target | Before | After | Verdict |
+| --- | --- | ---: | ---: | --- |
+| **SC-001** | staged-file lint < 1 s | 5.58 s | **0.78 s** | **met** (7.2× faster) |
+| **SC-004** | staged-file peak RSS well below 780 MB | 825 512 KB | **119 208 KB** | **met** (−86 %); `--max-old-space-size=8192` dropped |
+| **SC-003** | cold full lint ≤ 15 s combined | 31.86 s | **33.1 s** (9.96 s oxlint + 23.1 s ESLint) | **missed** — see below |
+
+**SC-003 is missed, and the reason is not oxlint.** The oxlint layer does all 142 rules across
+the workspace in **9.96 s** cold, or **1.52 s** as a single invocation over the whole repo. The
+23.1 s is the ESLint layer: four rules, but nine separate Node processes each paying ~2.5 s of
+flat-config resolution and `@cspell/eslint-plugin` dictionary loading. The per-project split is
+what Nx needs for caching and `affected`, and it is what makes the pre-commit step cheap in the
+case that actually matters — one project changed, warm cache. A cold full run of every project
+is the worst case for it and the rarest.
+
+The route to SC-003 is `research.md` §3.5 option B: run `cspell` as its own workspace-wide Nx
+target instead of as an ESLint rule, leaving ESLint with two rules and no dictionary load. That
+is a separate change with its own dependency, and it is queued rather than smuggled in here.
+
+---
 
 ---
 

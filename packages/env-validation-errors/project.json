@@ -2,13 +2,25 @@
   "name": "env-validation-errors",
   "projectType": "library",
   "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "oxlint --type-aware .",
+        "cwd": "packages/env-validation-errors"
+      },
+      "cache": true
+    },
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {
         "command": "tsc --noEmit",
         "cwd": "packages/env-validation-errors"
       },
-      "inputs": ["default", "^default", "{projectRoot}/tsconfig.json"],
+      "inputs": [
+        "default",
+        "^default",
+        "{projectRoot}/tsconfig.json"
+      ],
       "cache": true
     },
     "test": {

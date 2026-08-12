@@ -165,7 +165,9 @@
     // 005's vocabulary: the linter being migrated to, its type-aware checker, and its config file.
     "oxlint",
     "oxlintrc",
-    "tsgolint"
+    "tsgolint",
+    "fixability",
+    "unnamespaced"
   ],
   "ignorePaths": [
     "node_modules",

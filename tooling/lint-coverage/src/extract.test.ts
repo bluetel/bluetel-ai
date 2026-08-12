@@ -22,34 +22,30 @@ describe('extractRules', () => {
     const rules = await extractFixture()
 
     expect(rules.map((rule) => rule.name)).toEqual([
-      '@typescript-eslint/consistent-type-imports',
-      '@typescript-eslint/no-explicit-any',
-      '@typescript-eslint/no-floating-promises',
       'arrow-body-style',
       'no-useless-return',
+      'probe/needs-types',
+      'probe/syntax-only',
+      'probe/warned',
     ])
   })
 
   it('does not count a rule that is explicitly off', async () => {
     const rules = await extractFixture()
 
-    expect(rules.map((rule) => rule.name)).not.toContain('@typescript-eslint/no-non-null-assertion')
+    expect(rules.map((rule) => rule.name)).not.toContain('probe/disabled')
   })
 
   it('classifies a type-aware rule from the rule meta, not from a hand-kept list', async () => {
     const rules = await extractFixture()
-    const floatingPromises = rules.find(
-      (rule) => rule.name === '@typescript-eslint/no-floating-promises',
-    )
+    const floatingPromises = rules.find((rule) => rule.name === 'probe/needs-types')
 
     expect(floatingPromises?.requiresTypeChecking).toBe(true)
   })
 
   it('classifies a syntactic rule as not needing types', async () => {
     const rules = await extractFixture()
-    const consistentTypeImports = rules.find(
-      (rule) => rule.name === '@typescript-eslint/consistent-type-imports',
-    )
+    const consistentTypeImports = rules.find((rule) => rule.name === 'probe/syntax-only')
 
     expect(consistentTypeImports?.requiresTypeChecking).toBe(false)
     expect(consistentTypeImports?.fixable).toBe(true)
@@ -63,8 +59,8 @@ describe('extractRules', () => {
       severity: 'error',
       options: ['as-needed'],
     })
-    expect(rules.find((rule) => rule.name === '@typescript-eslint/no-explicit-any')).toMatchObject({
-      plugin: '@typescript-eslint',
+    expect(rules.find((rule) => rule.name === 'probe/warned')).toMatchObject({
+      plugin: 'probe',
       severity: 'warn',
       options: [],
     })
@@ -74,9 +70,9 @@ describe('extractRules', () => {
     const rules = await extractFixture()
 
     expect(rules.find((rule) => rule.name === 'no-useless-return')?.enabledFor).toEqual(probeFiles)
-    expect(
-      rules.find((rule) => rule.name === '@typescript-eslint/no-floating-promises')?.enabledFor,
-    ).toEqual(['probe.ts'])
+    expect(rules.find((rule) => rule.name === 'probe/needs-types')?.enabledFor).toEqual([
+      'probe.ts',
+    ])
   })
 
   it('sorts by rule name so successive runs diff cleanly', async () => {
@@ -94,6 +90,6 @@ describe('summarise', () => {
     expect(totals.total).toBe(5)
     expect(totals.typeAware).toBe(1)
     expect(totals.syntactic).toBe(4)
-    expect(totals.byPlugin).toEqual({ '@typescript-eslint': 3, eslint: 2 })
+    expect(totals.byPlugin).toEqual({ eslint: 2, probe: 3 })
   })
 })

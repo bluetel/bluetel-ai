@@ -53,7 +53,8 @@ export const severityOf = (entry: RuleEntry): Severity => {
 export const isEnabled = (entry: RuleEntry): boolean => severityOf(entry) !== 'off'
 
 /** The options a rule was configured with, or `[]` when it was given a bare severity. */
-export const optionsOf = (entry: RuleEntry): unknown[] => (isTuple(entry) ? [...entry.slice(1)] : [])
+export const optionsOf = (entry: RuleEntry): unknown[] =>
+  isTuple(entry) ? [...entry.slice(1)] : []
 
 /**
  * The plugin a rule belongs to, derived from its name.

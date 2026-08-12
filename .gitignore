@@ -37,7 +37,3 @@ vite.config.*.timestamp*
 
 # Spec Kit
 .specify/feature.json
-
-# Lint-coverage fixtures — materialised at test time, never committed. They are deliberately
-# full of rule violations, so keeping them on disk would fail the repo's own gates.
-tooling/lint-coverage/fixtures/generated

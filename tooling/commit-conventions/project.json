@@ -2,13 +2,25 @@
   "name": "commit-conventions",
   "projectType": "library",
   "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "oxlint --type-aware .",
+        "cwd": "tooling/commit-conventions"
+      },
+      "cache": true
+    },
     "typecheck": {
       "executor": "nx:run-commands",
       "options": {
         "command": "tsc --noEmit",
         "cwd": "tooling/commit-conventions"
       },
-      "inputs": ["default", "^default", "{projectRoot}/tsconfig.json"],
+      "inputs": [
+        "default",
+        "^default",
+        "{projectRoot}/tsconfig.json"
+      ],
       "cache": true
     },
     "test": {

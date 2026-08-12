@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 import { ESLint } from 'eslint'
@@ -6,17 +7,43 @@ import { ESLint } from 'eslint'
 import type { RuleFixture } from './fixtures'
 
 /**
- * Where fixtures are written before being linted. Gitignored; recreated on every run.
+ * A fresh directory outside the repository, holding the materialised fixtures plus the
+ * `tsconfig.json` the type-aware layer needs to build a program for them.
  *
- * Deliberately not a dot-directory. `check-file`'s patterns go through micromatch with the
- * default `dot: false`, so a `**` glob does not descend into `.generated` and
+ * Outside the repository deliberately. A fixture tree inside it has to be ignored by the
+ * repo's own gates, and both linters take their ignore rules partly from `.gitignore` —
+ * which then also hides the fixtures from the harness. `--no-ignore` does not bring them
+ * back. Somewhere neither tool has an opinion about is the only place the fixtures are
+ * reliably visible to the harness and reliably invisible to `pnpm lint`.
+ *
+ * The directory name has no leading dot: `check-file`'s patterns go through micromatch with
+ * the default `dot: false`, so a `**` glob never descends into a dot-directory and
  * `check-file/filename-naming-convention` reported nothing at all — a rule looking exactly
  * as silent as one that had stopped working.
  */
-export const GENERATED_DIR = 'generated'
+export const createFixtureDir = (): string =>
+  fs.mkdtempSync(path.join(os.tmpdir(), 'lint-coverage-'))
+
+const FIXTURE_TSCONFIG = {
+  compilerOptions: {
+    target: 'ES2020',
+    module: 'ESNext',
+    moduleResolution: 'bundler',
+    strict: true,
+    skipLibCheck: true,
+    esModuleInterop: true,
+    resolveJsonModule: true,
+    isolatedModules: true,
+    lib: ['ES2022', 'DOM'],
+    types: ['node'],
+    noEmit: true,
+  },
+  include: ['*.ts', '*.tsx'],
+  exclude: [],
+}
 
 export interface MaterialiseOptions {
-  /** The `fixtures/` directory. Must already contain the `tsconfig.json` the fixtures compile under. */
+  /** An empty directory to write into, from `createFixtureDir()`. */
   fixturesRoot: string
   fixtures: readonly RuleFixture[]
 }
@@ -28,8 +55,7 @@ export interface MaterialisedFixture {
 }
 
 /**
- * Write the fixtures to disk under `<fixturesRoot>/generated`, replacing whatever was
- * there before.
+ * Write the fixtures to disk, along with the `tsconfig.json` that puts them in a program.
  *
  * They have to exist as real files: type-aware rules need the file to be part of a
  * TypeScript program, which means a path a `tsconfig.json` can `include`.
@@ -38,20 +64,23 @@ export const materialiseFixtures = ({
   fixturesRoot,
   fixtures,
 }: MaterialiseOptions): MaterialisedFixture[] => {
-  const target = path.join(fixturesRoot, GENERATED_DIR)
-  fs.rmSync(target, { recursive: true, force: true })
-  fs.mkdirSync(target, { recursive: true })
+  fs.mkdirSync(fixturesRoot, { recursive: true })
+  fs.writeFileSync(
+    path.join(fixturesRoot, 'tsconfig.json'),
+    `${JSON.stringify(FIXTURE_TSCONFIG, null, 2)}\n`,
+    'utf8',
+  )
 
   return fixtures.map((fixture) => {
-    const file = path.join(target, fixture.filename)
+    const file = path.join(fixturesRoot, fixture.filename)
     fs.writeFileSync(file, fixture.code, 'utf8')
     return { fixture, file }
   })
 }
 
-/** Remove the generated fixture tree. */
-export const cleanFixtures = (fixturesRoot: string): void => {
-  fs.rmSync(path.join(fixturesRoot, GENERATED_DIR), { recursive: true, force: true })
+/** Remove a path the harness created. */
+export const cleanFixtures = (target: string): void => {
+  fs.rmSync(target, { recursive: true, force: true })
 }
 
 export interface LintLayerOptions {
@@ -82,7 +111,11 @@ export const lintFixtures = async (
 ): Promise<FixtureResult[]> => {
   const eslint = new ESLint({
     cwd: options.cwd,
-    // Fixtures live outside any linted tree, so ESLint would otherwise warn about each one.
+    // The workspace config excludes the fixture tree, for the same reason the oxlint config
+    // does: it is full of deliberate violations. The harness has to look past that, or every
+    // rule it is meant to be checking reports nothing and the suite reads as a total loss of
+    // coverage rather than as a misconfigured harness.
+    ignore: false,
     warnIgnored: false,
     ...(options.overrideConfigFile === undefined
       ? {}

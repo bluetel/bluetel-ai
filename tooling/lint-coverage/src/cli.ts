@@ -1,69 +1,138 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { extractRules, summarise } from './extract'
-import { renderInventory } from './inventory'
-import { preMigrationAssignment } from './owners'
+import { pluginOf, severityOf, optionsOf, type RuleEntry } from './classify'
+import { extractRules, summarise, type ExtractedRule } from './extract'
+import { renderInventory, type RuleAssignment } from './inventory'
+import { ESLINT_WORKSPACE_RULES, readOxlintConfig } from './owners'
 
 /**
- * Regenerate `specs/005-oxlint-lint-performance/rule-inventory.md` from the resolved lint
- * config. Run with `pnpm lint-inventory` from the repo root.
+ * Regenerate `specs/005-oxlint-lint-performance/rule-inventory.md`.
  *
- * The probe files are one per file type the config discriminates on. A rule scoped to
- * `**\/*.{ts,tsx}` would be missing from the inventory if only a `.mjs` file were probed —
- * an omission that would look exactly like a rule that is not enabled.
+ * Both layers are enumerated from what they actually run, not from a list kept alongside
+ * them: the ESLint side by asking ESLint to resolve its config, the oxlint side by reading
+ * the committed `.oxlintrc.json`. An inventory assembled by hand would agree with itself
+ * forever and with the linters never.
+ *
+ * Run with `pnpm lint-inventory` from the repo root.
  */
-const TYPESCRIPT_PROBE = 'packages/env-validation-errors/src/index.ts'
 
-const PROBE_FILES = [
-  TYPESCRIPT_PROBE,
+/** One probe per file type the ESLint config discriminates on. */
+const ESLINT_PROBES = [
+  'packages/env-validation-errors/src/index.ts',
   'packages/env-validation-errors/src/probe.tsx',
   'eslint.config.mjs',
   'probe.cjs',
 ] as const
 
 /**
- * The rule count `research.md` §2 recorded, asserted rather than assumed.
+ * The rule total after the migration, asserted rather than assumed.
  *
- * It is the count for a **TypeScript** file specifically. The inventory's own total is
- * larger, because `typescript-eslint`'s `eslint-recommended` turns off the core rules the
- * compiler already covers — but only for TypeScript files, so a `.mjs` file has those back.
+ * 147 rules were enforced before it — 129 for a TypeScript file plus the 18 core rules
+ * typescript-eslint switches off for TypeScript but leaves on for `.js`/`.mjs`/`.cjs`.
+ * One fewer survives, and the missing one is not a loss: ESLint had both
+ * `unused-imports/no-unused-vars` (with this workspace's `^_` ignore patterns) and
+ * `@typescript-eslint/no-unused-vars` (bare, `.mjs` only), and oxlint canonicalises both to
+ * the single core `no-unused-vars`. The entry that survives is the one carrying the options,
+ * so the rule is enforced everywhere it was, under one name instead of two.
  */
-const EXPECTED_TYPESCRIPT_TOTAL = 129
+const EXPECTED_TOTAL = 146
+
+const oxlintRow = (
+  name: string,
+  entry: RuleEntry,
+  scope: 'base' | 'type-aware' | 'module-only',
+): ExtractedRule => ({
+  name,
+  plugin: pluginOf(name),
+  severity: severityOf(entry) === 'off' ? 'error' : severityOf(entry),
+  options: optionsOf(entry),
+  requiresTypeChecking: scope === 'type-aware',
+  // oxlint does not expose per-rule fixability from the config, and guessing would put a
+  // number in the table that nobody had checked.
+  fixable: false,
+  enabledFor: scope === 'module-only' ? ['*.mjs'] : ['*.ts'],
+})
 
 const main = async (): Promise<void> => {
   const repoRoot = process.cwd()
-  const typescriptProbe = path.join(repoRoot, TYPESCRIPT_PROBE)
-  const rules = await extractRules({
+
+  const eslintRules = await extractRules({
     cwd: repoRoot,
-    files: PROBE_FILES.map((file) => path.join(repoRoot, file)),
+    files: ESLINT_PROBES.map((file) => path.join(repoRoot, file)),
   })
 
-  const typescriptCount = rules.filter((rule) => rule.enabledFor.includes(typescriptProbe)).length
+  const oxlintConfig = readOxlintConfig(repoRoot)
+  const typeAwareOverride = (oxlintConfig.overrides ?? []).find(
+    (override) => override.files.includes('**/*.ts') && override.files.includes('**/*.tsx'),
+  )
+  const moduleOverride = (oxlintConfig.overrides ?? []).find((override) =>
+    override.files.includes('**/*.mjs'),
+  )
 
-  // Phase 4 swaps this for `postMigrationAssignment`; that swap is the single place the
-  // inventory's meaning changes from "ESLint enforces everything" to the split ownership.
-  const markdown = renderInventory(rules, preMigrationAssignment, {
+  const oxlintRules: ExtractedRule[] = [
+    ...Object.entries(oxlintConfig.rules).map(([name, entry]) =>
+      oxlintRow(name, entry as RuleEntry, 'base'),
+    ),
+    ...Object.entries(typeAwareOverride?.rules ?? {}).map(([name, entry]) =>
+      oxlintRow(name, entry as RuleEntry, 'type-aware'),
+    ),
+    ...Object.entries(moduleOverride?.rules ?? {}).map(([name, entry]) =>
+      oxlintRow(name, entry as RuleEntry, 'module-only'),
+    ),
+  ]
+
+  const all = [...eslintRules, ...oxlintRules].sort((a, b) => a.name.localeCompare(b.name))
+
+  const assign = (rule: ExtractedRule): RuleAssignment => {
+    const eslintReason = ESLINT_WORKSPACE_RULES[rule.name]
+    if (eslintReason !== undefined) {
+      return { owner: 'eslint-workspace', status: 'covered', notes: eslintReason }
+    }
+    if (rule.requiresTypeChecking) {
+      return {
+        owner: 'oxlint-type-aware',
+        status: 'relocated',
+        notes: 'Runs under oxlint-tsgolint, which embeds its own typechecker.',
+      }
+    }
+    if (
+      rule.name.includes('-js/') ||
+      rule.name.startsWith('bluetel-ai/') ||
+      rule.name.startsWith('check-file/') ||
+      rule.name.startsWith('prefer-arrow-functions/')
+    ) {
+      return {
+        owner: 'oxlint-js-plugin',
+        status: 'relocated',
+        notes: 'No native oxlint implementation; runs through the ESLint-compatible JS plugin API.',
+      }
+    }
+    return { owner: 'oxlint-native', status: 'relocated' }
+  }
+
+  const markdown = renderInventory(all, assign, {
     generatedBy: 'pnpm lint-inventory',
     expectation: {
-      label: 'Rules enabled for a TypeScript file',
-      count: typescriptCount,
-      expected: EXPECTED_TYPESCRIPT_TOTAL,
-      source: '`research.md` §2',
+      label: 'Rules enforced across both layers',
+      count: all.length,
+      expected: EXPECTED_TOTAL,
+      source:
+        '`research.md` §2 plus the 18 core rules typescript-eslint switches off for TypeScript',
     },
   })
 
   const output = path.join(repoRoot, 'specs/005-oxlint-lint-performance/rule-inventory.md')
   fs.writeFileSync(output, markdown, 'utf8')
 
-  const totals = summarise(rules)
+  const totals = summarise(all)
   process.stdout.write(
-    `Wrote ${String(totals.total)} rules (${String(totals.typeAware)} type-aware, ${String(totals.syntactic)} syntactic; ${String(typescriptCount)} enabled for a .ts file) to ${path.relative(repoRoot, output)}\n`,
+    `Wrote ${String(totals.total)} rules (${String(totals.typeAware)} type-aware, ${String(eslintRules.length)} still on ESLint) to ${path.relative(repoRoot, output)}\n`,
   )
 
-  if (typescriptCount !== EXPECTED_TYPESCRIPT_TOTAL) {
+  if (totals.total !== EXPECTED_TOTAL) {
     process.stdout.write(
-      `Rules enabled for a TypeScript file is ${String(typescriptCount)}, not the ${String(EXPECTED_TYPESCRIPT_TOTAL)} recorded in research.md §2. Reconcile before relying on the inventory.\n`,
+      `Total is ${String(totals.total)}, not the ${String(EXPECTED_TOTAL)} expected after the migration. Reconcile before relying on the inventory.\n`,
     )
     process.exitCode = 1
   }

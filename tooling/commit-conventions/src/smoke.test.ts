@@ -35,19 +35,28 @@ describe('Smoke tests: hook script structure', () => {
       expect(pkg['lint-staged']).toBeDefined()
     })
 
-    it('eslint --config eslint.staged.config.mjs --fix and prettier --write on JS/TS files', () => {
+    it('oxlint --type-aware --fix and prettier --write on JS/TS files', () => {
       const jsTsGlob = pkg['lint-staged']['**/*.{js,jsx,ts,tsx}']
-      expect(jsTsGlob).toEqual([
-        'node --max-old-space-size=8192 ./node_modules/.bin/eslint --config eslint.staged.config.mjs --fix',
-        'prettier --write',
-      ])
+      expect(jsTsGlob).toEqual(['oxlint --type-aware --fix', 'prettier --write'])
     })
 
-    // The staged pass deliberately resolves a different config from the per-project one.
-    // Asserting the file exists keeps the two from drifting apart silently: a rename would
-    // otherwise leave lint-staged pointing at nothing and ESLint falling back to lookup.
-    it('points at a staged config that exists', () => {
-      expect(fs.existsSync(path.join(REPO_ROOT, 'eslint.staged.config.mjs'))).toBe(true)
+    // --max-old-space-size=8192 existed only to survive ESLint's memory profile: the same
+    // one-file pass peaked at 825 MB. oxlint peaks at 88 MB, so the wrapper is gone, and
+    // asserting its absence stops it drifting back in with nobody noticing.
+    it('does not wrap the linter in a raised Node heap limit', () => {
+      const jsTsGlob = pkg['lint-staged']['**/*.{js,jsx,ts,tsx}']
+      expect(jsTsGlob.join(' ')).not.toContain('max-old-space-size')
+    })
+
+    // Type-aware rules are 41 of the 146, and they only run when this flag is present.
+    // Without it oxlint reports nothing from them and the staged pass looks clean.
+    it('runs the staged pass with type-aware rules enabled', () => {
+      const jsTsGlob = pkg['lint-staged']['**/*.{js,jsx,ts,tsx}']
+      expect(jsTsGlob.some((command) => command.includes('--type-aware'))).toBe(true)
+    })
+
+    it('points at an oxlint config that exists', () => {
+      expect(fs.existsSync(path.join(REPO_ROOT, '.oxlintrc.json'))).toBe(true)
     })
 
     it('runs prettier --write on JSON/YAML/MD files', () => {

@@ -1,18 +1,38 @@
-import tseslint from 'typescript-eslint'
-
 /**
  * A deliberately tiny flat config, used only by `extract.test.ts`.
  *
- * Six enabled rules chosen to exercise every branch of the extractor: a core rule, a
- * `.ts`-scoped plugin rule, a rule with options, a rule that is explicitly turned `off`
- * (and must therefore not be counted), a known type-aware rule
- * (`@typescript-eslint/no-floating-promises`) and a known syntactic one
- * (`@typescript-eslint/consistent-type-imports`).
+ * The plugin is defined here rather than imported so the test exercises the extractor and
+ * nothing else. Pointing it at a real plugin would make the assertions restate whatever that
+ * plugin currently claims about its own rules, and would put typescript-eslint back in the
+ * dependency tree that the migration exists to empty.
  *
- * It is a fixture, not a config anything is linted with. Asserting against the real
- * workspace config here would make the test restate whatever the config happens to say.
+ * Six enabled rules covering every branch: a core rule, a `.ts`-scoped plugin rule, a rule
+ * with options, a rule explicitly turned `off` (which must not be counted), one whose meta
+ * says `requiresTypeChecking`, and one whose meta does not.
  */
-export default tseslint.config(
+const probePlugin = {
+  meta: { name: 'probe' },
+  rules: {
+    'needs-types': {
+      meta: {
+        docs: { description: 'Needs type information', requiresTypeChecking: true },
+      },
+      create: () => ({}),
+    },
+    'syntax-only': {
+      meta: {
+        fixable: 'code',
+        schema: [{ type: 'object', properties: { prefer: { type: 'string' } } }],
+        docs: { description: 'Syntactic only' },
+      },
+      create: () => ({}),
+    },
+    warned: { meta: { docs: {} }, create: () => ({}) },
+    disabled: { meta: { docs: {} }, create: () => ({}) },
+  },
+}
+
+export default [
   {
     files: ['**/*.{js,mjs,cjs,ts,tsx}'],
     rules: {
@@ -22,12 +42,12 @@ export default tseslint.config(
   },
   {
     files: ['**/*.{ts,tsx}'],
-    plugins: { '@typescript-eslint': tseslint.plugin },
+    plugins: { probe: probePlugin },
     rules: {
-      '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
-      '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-non-null-assertion': 'off',
+      'probe/needs-types': 'error',
+      'probe/syntax-only': ['error', { prefer: 'type-imports' }],
+      'probe/warned': 'warn',
+      'probe/disabled': 'off',
     },
   },
-)
+]

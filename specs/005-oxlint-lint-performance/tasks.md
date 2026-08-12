@@ -102,33 +102,33 @@ not, the harness is wrong, not the config.
 **⚠️ CRITICAL**: Phase 4 must not begin until this phase is complete and green. A harness written after
 a migration tends to agree with whatever the migration did.
 
-- [X] **T006** Add `scripts/extract-lint-rules.mjs`: runs
+- [x] **T006** Add `scripts/extract-lint-rules.mjs`: runs
       `eslint --print-config <file>` for a representative `.ts`, `.tsx`, `.mjs` and `.cjs` file, unions
       the enabled rules, and emits JSON — rule name, source plugin, severity, options,
       `requiresTypeChecking` (read from the plugin's own `meta.docs`). Deterministic output so it diffs
       cleanly.
-- [X] **T007** [P] Colocated `scripts/extract-lint-rules.test.mjs`: asserts the extractor finds the
+- [x] **T007** [P] Colocated `scripts/extract-lint-rules.test.mjs`: asserts the extractor finds the
       expected rule count for a fixture config and correctly classifies a known type-aware rule
       (`no-floating-promises`) and a known syntactic one (`consistent-type-imports`).
-- [X] **T008** Generate `specs/005-oxlint-lint-performance/rule-inventory.md` from T006's output. One
+- [x] **T008** Generate `specs/005-oxlint-lint-performance/rule-inventory.md` from T006's output. One
       row per rule: name, plugin, severity, options, **Owner** (`oxlint-native` / `oxlint-js-plugin` /
       `oxlint-type-aware` / `eslint-workspace` / `other`), **Status** (`covered` / `relocated` /
       `dropped`), notes. At this
       point every Owner is `eslint` — the column gets filled in during Phase 4. Assert the row count is
       **129** for `.ts`; if it differs, reconcile against `research.md` §2 before proceeding.
-- [X] **T009** Create `tooling/lint-coverage/` — a workspace member holding the parity harness, with
+- [x] **T009** Create `tooling/lint-coverage/` — a workspace member holding the parity harness, with
       `package.json`, `project.json`, `vitest.config.ts`, and an `index.ts` barrel per Constitution
       principle II.
-- [X] **T010** Add `tooling/lint-coverage/fixtures/` — one minimal file per previously-enforced rule
+- [x] **T010** Add `tooling/lint-coverage/fixtures/` — one minimal file per previously-enforced rule
       that violates exactly that rule. Fixtures MUST sit outside the linted source tree (add to
       `ignorePatterns` / `.prettierignore` as needed) so they do not fail the repo's own gates. Start
       with the 11 non-`recommended` rules the repo configures by hand plus the 41 type-aware rules —
       these carry the real regression risk. Cover the `recommended` presets by preset assertion rather
       than 88 hand-written fixtures.
-- [X] **T011** Add `tooling/lint-coverage/src/parity.ts` + colocated `parity.test.ts`: for each fixture,
+- [x] **T011** Add `tooling/lint-coverage/src/parity.ts` + colocated `parity.test.ts`: for each fixture,
       run the owning layer and assert the expected rule ID appears in the diagnostics. Assert on **rule
       ID**, not just non-zero exit code — a different rule firing is not coverage.
-- [X] **T012** Run the suite against the current setup. It MUST pass. Fix the harness until it does, and
+- [x] **T012** Run the suite against the current setup. It MUST pass. Fix the harness until it does, and
       commit it green.
 
 **Checkpoint**: a test that fails loudly the moment any rule stops being enforced.
@@ -146,27 +146,27 @@ numbers and the type-aware layer's fix-parity table.
 **Do not skip on the basis that the docs say it works.** The JS plugin API is alpha; G1–G5 exist
 because documentation cannot answer them for this specific rule set.
 
-- [ ] **T013** [P] **G1**: `npx oxlint@1.78.0 --rules` → save to
+- [X] **T013** [P] **G1**: `npx oxlint@1.78.0 --rules` → save to
       `specs/005-oxlint-lint-performance/oxlint-rules.txt`. **Note**: `--rules` produced no output on
       1.78.0 in this environment, so if it is still empty, cross-check against the docs' rule index and
       say in the file which source was used. Diff against T006's 129-rule extraction and
       record, per rule, whether oxlint implements it natively. Every unmatched rule is assigned
       `eslint-type-aware` or `oxlint-js-plugin` in `rule-inventory.md` — never left blank.
-- [ ] **T014** [P] **G2**: in a scratch `.oxlintrc.json`, load `eslint-plugin-import-x`,
+- [X] **T014** [P] **G2**: in a scratch `.oxlintrc.json`, load `eslint-plugin-import-x`,
       `eslint-plugin-check-file` and `eslint-plugin-prefer-arrow-functions` via `jsPlugins`. Run against
       the repo and diff diagnostics against ESLint's for the same rules. Record which load cleanly and
       which diverge.
-- [ ] **T015** [P] **G3**: plant an unused import, run oxlint's `no-unused-vars` with `--fix` (try
+- [X] **T015** [P] **G3**: plant an unused import, run oxlint's `no-unused-vars` with `--fix` (try
       `fixKind=dangerous-fix` if the plain fix does not remove it) and record whether the import is
       removed the way `unused-imports/no-unused-imports` removes it today. This decides whether US1
       acceptance scenario 2 holds.
-- [ ] **T016** [P] **G4**: compare oxlint's React Compiler rule against
+- [X] **T016** [P] **G4**: compare oxlint's React Compiler rule against
       `eslint-plugin-react-compiler@19.1.0-rc.2` on a file with a known violation. Record parity, and
       note that oxlint's is experimental and opt-in.
-- [ ] **T017** **G5**: time the staged-file oxlint pass with (a) no JS plugins and (b) every JS plugin
+- [X] **T017** **G5**: time the staged-file oxlint pass with (a) no JS plugins and (b) every JS plugin
       G2 validated. Append both to `measurements.md`. **This is the go/no-go for SC-001** — if (b)
       exceeds 1 s, record which plugin dominates and plan to leave its rules with ESLint.
-- [ ] **T048** **The type-aware layer, validated before it is relied on.** Install `oxlint-tsgolint`
+- [X] **T048** **The type-aware layer, validated before it is relied on.** Install `oxlint-tsgolint`
       into a scratch project and, for each of the 41 `requiresTypeChecking` rules: (a) confirm the rule
       name is accepted — oxlint fails config parsing on an unknown rule, so a parsing config already
       proves all 41 exist; (b) plant a violation and confirm the rule fires; (c) record whether the rule
@@ -178,7 +178,7 @@ because documentation cannot answer them for this specific rule set.
       wrong and that one rule stays with ESLint pending an upstream fix. And settle the `.mjs` scoping:
       reproduce ESLint's file scoping in the oxlint config so the 34 `.mjs` diagnostics in
       `research.md` §7.5 do not land as surprise debt.
-- [ ] **T018** Write the answers back into `research.md` §5, replacing each "how to resolve" row with
+- [X] **T018** Write the answers back into `research.md` §5, replacing each "how to resolve" row with
       the result. Where an answer is bad, apply the stated fallback and say so — a rule moving back to
       the ESLint layer is a success of the process, not a failure.
 
@@ -197,12 +197,12 @@ parity suite passes, and the staged-file pass is under 1 s.
 
 ### Dependencies
 
-- [ ] **T019** Add `oxlint` as a root devDependency, **pinned exactly** (no `^`). Honour
+- [X] **T019** Add `oxlint` as a root devDependency, **pinned exactly** (no `^`). Honour
       `pnpm-workspace.yaml` `minimumReleaseAge: 1 week` — pick a version at least a week old. Commit the
       updated `pnpm-lock.yaml`.
-- [ ] **T020** Add `eslint-plugin-oxlint` as a devDependency of `tooling/eslint-config-internal` (the
+- [X] **T020** Add `eslint-plugin-oxlint` as a devDependency of `tooling/eslint-config-internal` (the
       package that consumes it), per the Constitution's dependency standard.
-- [ ] **T049** Add `oxlint-tsgolint` as a root devDependency, **pinned exactly**, at the version whose
+- [X] **T049** Add `oxlint-tsgolint` as a root devDependency, **pinned exactly**, at the version whose
       major.minor matches the `oxlint` pin from T019 (`7.0.2001` alongside `oxlint` 1.78.0 — the tsgolint
       version tracks the TypeScript semantics it implements, not oxlint's version). Enable type-aware
       linting in `tooling/oxlint-config/oxlintrc.base.json` via `"options": { "typeAware": true }` rather
@@ -211,30 +211,30 @@ parity suite passes, and the staged-file pass is under 1 s.
 
 ### Shared oxlint config package
 
-- [ ] **T021** Create `tooling/oxlint-config/` — `package.json` (`@bluetel-ai/oxlint-config`, private,
+- [X] **T021** Create `tooling/oxlint-config/` — `package.json` (`@bluetel-ai/oxlint-config`, private,
       `type: module`), `project.json`, `vitest.config.ts`, and an `index.mjs` barrel.
-- [ ] **T022** Seed `tooling/oxlint-config/oxlintrc.base.json` with
+- [X] **T022** Seed `tooling/oxlint-config/oxlintrc.base.json` with
       `npx @oxlint/migrate eslint.config.mjs`, then hand-reconcile against `rule-inventory.md`. Every
       rule the inventory assigns to oxlint must be present at the **same severity with equivalent
       options**; every rule assigned to ESLint must be absent. Do not accept the generated file
       unreviewed — the docs warn that local custom plugins need manual configuration.
-- [ ] **T023** **Do not enable oxlint rule categories wholesale.** Enable only the rules in the
+- [X] **T023** **Do not enable oxlint rule categories wholesale.** Enable only the rules in the
       inventory. If a category is enabled for convenience it will light up existing code and breach
       FR-013 / US4. Any newly-available rule that looks worth having goes in a follow-up issue, not
       this change.
-- [ ] **T024** Port `tooling/eslint-config-base/rules/enforce-safe-env.mjs` to
+- [X] **T024** Port `tooling/eslint-config-base/rules/enforce-safe-env.mjs` to
       `tooling/oxlint-config/plugins/enforce-safe-env.mjs` as an oxlint JS plugin. Move
       `enforce-safe-env.test.mjs` with it (principle III) and adapt the harness to oxlint's rule-tester
       equivalent. Remove the rule and its ESLint wiring from `tooling/eslint-config-base/index.mjs`.
       Add `plugins/index.mjs` as the barrel.
-- [ ] **T025** Add root `.oxlintrc.json` extending `tooling/oxlint-config/oxlintrc.base.json`, and
+- [X] **T025** Add root `.oxlintrc.json` extending `tooling/oxlint-config/oxlintrc.base.json`, and
       declare the JS plugins via `jsPlugins` for every rule G2 validated. Port the `ignores` entries
       currently in `eslint-config-internal` (`**/image-sources.ts`, `**/importMap.js`) to
       `ignorePatterns`.
 
 ### Reduce the ESLint layer
 
-- [ ] **T026** Reduce `tooling/eslint-config-internal/index.mjs` to **two rules**:
+- [X] **T026** Reduce `tooling/eslint-config-internal/index.mjs` to **two rules**:
       `@nx/enforce-module-boundaries` and `@cspell/spellchecker` (from Phase 1), plus
       `eslint-config-prettier`. Remove `withTypeChecking` and the whole `strictTypeChecked` block — those
       41 rules now belong to oxlint (T049), and leaving them here would keep the lint gate bound to the
@@ -250,14 +250,14 @@ parity suite passes, and the staged-file pass is under 1 s.
 
 ### Wire up Nx and the hook
 
-- [ ] **T028** In `nx.json`: change the `@nx/eslint/plugin` `targetName` from `lint` to `lint-workspace`;
+- [X] **T028** In `nx.json`: change the `@nx/eslint/plugin` `targetName` from `lint` to `lint-workspace`;
       add a `lint` entry to `targetDefaults` running oxlint (type-aware enabled via config, per T049)
       with `cache: true` and a `fix` configuration mirroring the existing ESLint one; add the oxlint config paths
       (`{workspaceRoot}/.oxlintrc.json`, `{workspaceRoot}/tooling/oxlint-config/**/*`) to
       `namedInputs.sharedGlobals` so a rule change invalidates the cache (**gap G9**). Because the
       type-aware layer reads `tsconfig`s, confirm `tsconfig.base.json` is already in `sharedGlobals` — it
       is — so a `types` change also invalidates `lint`, not just `typecheck`.
-- [ ] **T029** Add an explicit `lint` target to all 7 `project.json` files, following the existing
+- [X] **T029** Add an explicit `lint` target to all 7 `project.json` files, following the existing
       `typecheck`/`test` shape (`nx:run-commands` + `cwd`). Verify `pnpm nx show project <name>` lists
       both `lint` and `lint-workspace`.
 - [ ] **T030** Verify **gap G9** empirically: change one rule's severity in the oxlint config, re-run
@@ -266,11 +266,11 @@ parity suite passes, and the staged-file pass is under 1 s.
 - [ ] **T031** Verify **gap G7**: plant a module-boundary violation and confirm
       `pnpm nx run <project>:lint-workspace` reports `@nx/enforce-module-boundaries`. This closes the
       pre-existing silent-skip gap found in `research.md` §1.
-- [ ] **T032** Update `package.json`: replace the `lint-staged` ESLint entry with
+- [X] **T032** Update `package.json`: replace the `lint-staged` ESLint entry with
       `oxlint --fix` (type-aware comes from the config, not a flag — T049; `prettier --write` stays last
       so Prettier owns formatting, FR-017), and **drop `node --max-old-space-size=8192`** — it exists only to survive ESLint's memory profile (SC-004).
       Point `lint` / `lint:check` at both targets.
-- [ ] **T033** Update `.husky/pre-commit`: keep `npx lint-staged` first, and insert
+- [X] **T033** Update `.husky/pre-commit`: keep `npx lint-staged` first, and insert
       `pnpm nx affected -t lint-workspace` after `pnpm typecheck` and before `pnpm qlty:diff`. Make the
       oxlint step **fail closed** if either `oxlint` or `oxlint-tsgolint` is missing, matching the
       existing `qlty` treatment (FR-018). Confirm a staged-deletion-only commit still succeeds (FR-019).
@@ -279,7 +279,7 @@ parity suite passes, and the staged-file pass is under 1 s.
       Without this, CI stops enforcing the 2 workspace-scoped rules — an FR-011 violation and the worst possible outcome of this
       feature. **Note**: the GitHub App cannot modify `.github/workflows/`, so this task must be applied
       by a human or in a separate human-authored commit.
-- [ ] **T035** Convert the two existing inline suppressions (**gap G8**):
+- [X] **T035** Convert the two existing inline suppressions (**gap G8**):
       `packages/env-validation-errors/src/index.ts:3` disables `@bluetel-ai/enforce-safe-env`, which now
       lives in oxlint, so it needs the `oxlint-disable-next-line` form;
       `packages/env-validation-errors/src/index.test.ts:253` disables
@@ -301,14 +301,14 @@ discoverable.
 **Independent Test**: `measurements.md` has a before/after row for SC-001 to SC-004, and
 `rule-inventory.md` accounts for all 129 rules.
 
-- [ ] **T036** **SC-001 / SC-004**: re-run the single-file timing with
+- [X] **T036** **SC-001 / SC-004**: re-run the single-file timing with
       `/usr/bin/time -f "%e s %M KB"`. Record wall time (target < 1 s, from 5.68 s) and peak RSS (target
       far below 798 648 KB). If SC-001 is missed, apply the T017 fallback and re-measure before
       declaring done.
 - [ ] **T037** **SC-002**: time the full `.husky/pre-commit` run on the same one-file staged diff used
       in T001. Target ≥ 40 % reduction. Note that step 4 is Nx-cached, so record both a warm and a cold
       figure — quoting only the warm one would overstate the result.
-- [ ] **T038** **SC-003**: `time pnpm lint:check --skip-nx-cache` and the `lint-workspace` equivalent.
+- [X] **T038** **SC-003**: `time pnpm lint:check --skip-nx-cache` and the `lint-workspace` equivalent.
       Target ≤ 15 s combined, from 30.7 s.
 - [ ] **T039** **SC-005**: complete `rule-inventory.md` — every one of the 129 rows has an Owner and a
       Status. Any `dropped` row needs a reason, a compensating check, and explicit sign-off in the PR
