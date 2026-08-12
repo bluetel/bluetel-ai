@@ -11,7 +11,7 @@ is the design record.
 **Identifiers are permanent.** A suppression comment and a `baseline.json` entry both name a rule by id, so
 renaming one silently disables it. Retire, never rename.
 
-**Two sources, one catalogue.** Nineteen rules are evaluated by `prompt-lint`; five, the `contextops/` family, are
+**Two sources, one catalogue.** Twenty rules are evaluated by `prompt-lint`; five, the `contextops/` family, are
 evaluated by the pinned `contextops==0.3.3` over a context bundle. Every entry below carries a **Source** line so
 that is never in doubt, but the distinction is deliberately invisible everywhere else: a delegated rule has an id,
 a severity you can configure, a suppression syntax, a baseline entry and a catalogue entry exactly like any
@@ -194,7 +194,7 @@ branch names in the config. It does not attempt to read the meaning of a sentenc
 
 ## `install/` — the catalog-to-target contract
 
-All four are `scope: 'set'` — properties of the collection, invisible to a per-file linter.
+All three are `scope: 'set'` — properties of the collection, invisible to a per-file linter.
 
 ### `install/catalog-drift`
 

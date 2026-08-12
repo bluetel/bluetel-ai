@@ -128,7 +128,8 @@ change of this shape means the **duplication** limit is the binding constraint: 
 skeleton is exactly how a diff crosses 10% duplicated lines. Mitigated by a single `defineRule` helper and shared
 assertion helpers in the tests rather than copy-paste per rule.
 
-**Scale/Scope**: ~19 new source modules + ~19 colocated suites in one new project, ~7 files modified outside it
+**Scale/Scope**: ~35 new source modules and their colocated suites, plus 7 `index.ts` barrels, in one new project;
+~7 files modified outside it
 (root `package.json`, `knip.json`, `.github/workflows/ci.yml`, `.husky/pre-commit`, `tooling/skills/project.json`,
 `cspell.json`, `README.md`). 25 rules across 11 families — 21 with a catalogue entry that can be promoted or
 demoted, of which 5 are backed by `contextops` rather than implemented here, plus 4 self-describing bookkeeping
@@ -169,7 +170,10 @@ within its grant for internal use but needs a human sign-off before anything cli
   exported from the barrel — which has a knip consequence, noted under Constraints and handled in
   [Files changed outside the new project](#files-changed-outside-the-new-project).
 - **III (colocated tests).** One rule per module means one suite per rule, and SC-004's "fires / does not fire"
-  pair lands in the module's own file. The registry gets its own suite for the catalogue cross-check (FR-047,
+  pair lands in the module's own file. Two clarifications the tree above makes explicit: `cli.ts` carries
+  `cli.test.ts` like any other module — Principle III admits no exception for an entry point — and the `index.ts`
+  barrels do not, because a re-export has no behaviour of its own to constrain, which is the precedent
+  `tooling/qlty-diff/src/index.ts` already sets. The registry gets its own suite for the catalogue cross-check (FR-047,
   SC-010) — the test that makes an undocumented rule impossible.
 - **IV (`qlty:diff`).** The duplication limit is the real risk here, not lint or security: a rule family written
   by copy-paste would breach 10% on its own. `defineRule` plus shared test helpers is a design constraint
@@ -213,6 +217,7 @@ tooling/prompt-lint/                     # NEW Nx project, @bluetel-ai/prompt-li
 ├── src/
 │   ├── index.ts                         # barrel: runPromptLintGate + public types
 │   ├── cli.ts                           # #!/usr/bin/env tsx — argv → gate → exit code
+│   ├── cli.test.ts                      #   argv parsing, mutually exclusive flags, exit-code mapping
 │   ├── config.ts                        # EVERY threshold + per-rule severity + the contextops pin; PROMPT_LINT_* overrides
 │   ├── config.test.ts                   #   incl. FR-036 contradictory-config rejection
 │   ├── gate.ts                          # orchestrate scope → load → rules → score → report → exit code
@@ -419,7 +424,7 @@ priorities. `/speckit-tasks` expands these into the ordered task list.
 | ----- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | A     | US1   | Project skeleton, `config.ts`, `scope/`, `artifact/`, `report/human.ts`, `rules/`: `meta/*`, `refs/dangling-path`, `skill/section-missing`, `template/placeholder-residue`; root scripts | A contributor runs `pnpm prompt-lint:diff` and gets correct findings on their own branch                               |
 | B     | US2   | `gate.ts` thresholds + exit-code contract, `baseline.ts`, per-rule severity, CI step, pre-commit hook, `docs/rules.md` + its cross-check                                                 | A PR with one error-severity defect fails CI; the same PR without it passes                                            |
-| C     | US3   | `install/*` rules, `meta/declared-dependency-missing`, `conventions/config-mismatch`, the `prompt-lint` target on `tooling/skills`                                                       | A broken catalog entry cannot be pushed green                                                                          |
+| C     | US3   | `install/*` rules, `meta/declared-dependency-missing`, `skill/use-when-trigger`, `conventions/config-mismatch`, the `prompt-lint` target on `tooling/skills`                             | A broken catalog entry cannot be pushed green                                                                          |
 | D     | US4   | `contextops/` (locate, bundle, payload, invoke, map), the five `contextops/*` rule declarations, `score/compose.ts`, `report/json.ts`, `structure/*`, `content/self-contradiction`       | `pnpm prompt-lint --json` emits the full schema; the score and its four dimensions are reported per bundle and per run |
 
 Phase A is the one that must be right; B–D are additive and each closes a story the spec ranked lower. Two things
@@ -459,8 +464,9 @@ two recorded deviations. Four things the design surfaced that the pre-Phase-0 ch
   `scope/` hands it — so `rules/` stayed pure and `references.test.ts` needs no temp tree.
 - **Principle IV's duplication risk is now concrete, not speculative.** `defineRule` and the shared fixture
   builders are load-bearing for the gate, so they are Phase A work rather than a later cleanup.
-- **Principle III is satisfiable for every module in the tree above** — checked module by module; no module in the
-  planned layout lacks a colocated suite, and no suite exists without its module.
+- **Principle III is satisfiable for every module in the tree above** — checked module by module; no behavioural
+  module in the planned layout lacks a colocated suite, and no suite exists without its module. The only files
+  without one are the seven `index.ts` barrels, per the exemption stated in the Constitution Check above.
 - **Principle II is what makes the dependency survivable.** The barrel rule forced `contextops/` to be a directory
   with one exported surface rather than subprocess calls scattered through `rules/`. That is the difference
   between "we depend on `contextops`" and "we are entangled with `contextops`", and it is the reason the
