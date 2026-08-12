@@ -131,10 +131,10 @@ it re-couples the lint gate to the TypeScript compiler API and re-blocks the upg
 
 ### Nx targets
 
-| Target           | Tool                                     | Scope       | Cached | Invoked by                                           |
-| ---------------- | ---------------------------------------- | ----------- | ------ | ---------------------------------------------------- |
-| `lint`           | oxlint, **including `--type-aware`**     | per project | yes    | `pnpm lint` / `lint:check`, CI `nx affected`, agents |
-| `lint-workspace` | ESLint (2 rules: nx boundaries + cspell) | per project | yes    | pre-commit via `nx affected`, CI `nx affected`       |
+| Target           | Tool                                     | Scope       | Cached | Invoked by                                                                      |
+| ---------------- | ---------------------------------------- | ----------- | ------ | ------------------------------------------------------------------------------- |
+| `lint`           | oxlint, **including `--type-aware`**     | per project | yes    | `pnpm lint` / `lint:check`, CI `nx affected`, agents                            |
+| `lint-workspace` | ESLint (2 rules: nx boundaries + cspell) | per project | yes    | CI `nx affected` only — removed from pre-commit, see Amendment 2026-08-12 below |
 
 `@nx/eslint/plugin`'s inferred target is renamed from `lint` to `lint-workspace` in `nx.json`, and each
 of the 7 `project.json` files gains an explicit `lint` target. Explicit per-project targets with a `cwd`
@@ -158,14 +158,19 @@ Ordered fail-fast — cheapest and most-likely-to-fire first:
 |    1 | `npx lint-staged` → `oxlint --type-aware --fix`, `prettier --write` | ESLint replaced by oxlint in the staged path; the `node --max-old-space-size=8192` wrapper is dropped. Measured 0.21 s for one file, type-aware included |
 |    2 | Vitest for staged tests + colocated tests                           | unchanged                                                                                                                                                |
 |    3 | `pnpm typecheck`                                                    | unchanged in shape; ~6× faster after the TypeScript 7 phase                                                                                              |
-|    4 | `pnpm nx affected -t lint-workspace`                                | **new** — the 2-rule ESLint layer, Nx-cached and affected-scoped                                                                                         |
-|    5 | `pnpm qlty:diff`                                                    | unchanged; still fails closed when `qlty` is absent                                                                                                      |
+|    4 | `pnpm qlty:diff`                                                    | unchanged; still fails closed when `qlty` is absent                                                                                                      |
 
 Type-aware rules stay blocking at commit time (FR-008) and stay in step 1 rather than being relegated to
-step 4 — the whole point of the revision is that they are affordable per-file. Step 4 exists only for the
-two rules that need the Nx project graph or have no oxlint equivalent, and it is also what closes the
-`@nx/enforce-module-boundaries` gap found in research §1: running under Nx means the project graph
-exists, so the rule actually executes.
+a separate step — the whole point of the revision is that they are affordable per-file.
+
+**Amendment 2026-08-12**: a step 4, `pnpm nx affected -t lint-workspace`, ran here from Phase 4 until
+this amendment. It existed only for the two (now four) rules that need the Nx project graph or have no
+oxlint equivalent, and it closed the `@nx/enforce-module-boundaries` gap found in research §1 by giving
+the rule a project graph to run against. Measured on a cold cache it was slower than the oxlint pass in
+step 1 it sat next to, for a 4-rule layer — the exact risk the Risks table below flagged before Phase 4
+landed. It is removed rather than tuned further: CI (`.github/workflows/ci.yml`, T034) is the sole
+blocking point for this layer now, so a locally-green commit can still be caught by CI on these 4 rules.
+`@nx/enforce-module-boundaries` still gets a project graph — CI always runs under Nx.
 
 Step 1 must fail closed if `oxlint` or `oxlint-tsgolint` is missing (FR-018), matching the existing
 `qlty` treatment. This matters more than it did before: **without tsgolint resolvable, `--type-aware`
@@ -317,7 +322,7 @@ else, which is why it is last rather than interleaved.
 | `oxlint-tsgolint` is a young dependency carrying 41 rules                                                 | Medium             | High                                                             | It fails loudly, not silently: a missing binary aborts the run and an unknown rule name fails config parsing (both verified). Pin exactly, and keep the ESLint fallback path documented so a rule can be moved back in one commit                               |
 | tsgolint applies TypeScript 7 semantics while the compiler is on 5.9                                      | High until Phase 6 | Medium                                                           | Known and deliberate (research §7.5). It is the argument for Phase 6, not a reason to delay Phase 4 — the mismatch already exists in the other direction today, unrecorded                                                                                      |
 | JS plugins erase the speed advantage (gap G5)                                                             | Medium             | Medium                                                           | Measure with 0 and with all JS plugins. If SC-001 fails, move the most expensive plugin's rules back to the ESLint layer and re-measure. Current headroom is large: 0.21 s against a 1 s target                                                                 |
-| `nx affected -t lint-workspace` in pre-commit is slower than the ESLint call it replaced, on a cold cache | Low                | Medium                                                           | It is now a 2-rule target rather than a 42-rule one, so the exposure is much smaller than in the original plan. Measure a cold single-project change in Phase 5                                                                                                 |
+| `nx affected -t lint-workspace` in pre-commit is slower than the ESLint call it replaced, on a cold cache | Low                | Medium                                                           | **Realized, 2026-08-12.** Resolved by removing the step from pre-commit entirely rather than tuning it further — see the Pre-commit hook order amendment above. CI is now the sole enforcement point for this layer (Constitution v2.0.0, Principle IV)         |
 | Nx caches a `lint` result across an oxlint config change                                                  | Low                | High — a rule change appears to do nothing                       | Gap G9: add the oxlint config paths to `sharedGlobals` and verify a deliberate severity change produces a cache miss                                                                                                                                            |
 | oxlint pinned version churn breaks CI                                                                     | Low                | Medium                                                           | Pin exactly (no `^`), honour `minimumReleaseAge: 1 week`, and let Renovate/manual bumps be reviewed like any dependency. `oxlint` and `oxlint-tsgolint` versions must be bumped **together** — tsgolint's version tracks the TypeScript semantics it implements |
 | **TypeScript 7 breaks a workspace tool** (Nx `@nx/js/typescript` inference, `knip`, Vitest)               | Medium             | Medium                                                           | Gap **G13**, task T050. The fallback is TypeScript 6.0.3 with the blocker recorded (FR-026). Phase 6 is last and independently revertible precisely so this costs nothing already landed                                                                        |

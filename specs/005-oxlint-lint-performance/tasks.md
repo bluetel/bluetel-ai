@@ -455,8 +455,37 @@ its excuse, and every rule count in the repo agrees with generated `rule-invento
 
 **Checkpoint**: `pnpm lint:check`, `pnpm typecheck` and `pnpm test` green from a clean install;
 `pnpm lint-inventory` reproduces the committed inventory byte-for-byte; every gate added here has been
-shown to fail when the thing it guards is broken. **T034 remains open** and is the only thing still
-standing between this feature and CI actually enforcing all 146 rules.
+shown to fail when the thing it guards is broken. **T034 has since landed** (Phase 8) — CI now
+enforces all 146 rules unconditionally.
+
+---
+
+## Phase 8: Amendment — take `lint-workspace` out of the pre-commit hot path
+
+**Goal**: PR #27 feedback: `nx affected -t lint-workspace` in `.husky/pre-commit` (Phase 4, T033) was
+the realized version of the Risks table's "slower than the ESLint call it replaced, on a cold cache" —
+a 4-rule ESLint layer costing a full `nx affected` graph resolution on every local commit, next to an
+oxlint pass that runs in under a second. T034 had already made CI enforce those 4 rules
+unconditionally, so the pre-commit step was re-doing work CI was about to do anyway. This phase removes
+it and reconciles every document that described it as running there.
+
+- [x] **T061** Remove `pnpm nx --no-tui affected -t lint-workspace` from `.husky/pre-commit` (was step
+      4 of 5, inserted by T033). The four rules it ran — `@nx/enforce-module-boundaries`,
+      `@cspell/spellchecker`, `no-octal`, `no-dupe-args` — are now enforced only by CI's
+      `nx affected -t lint lint-workspace test typecheck design-lint` (T034), not by the hook.
+- [x] **T062** Amend Constitution Principle IV (v1.1.0 → v2.0.0, MAJOR — the previous "MUST NOT be
+      weakened" pre-commit guarantee for `lint-workspace` is redefined to a CI-only guarantee) and the
+      Development Workflow & Quality Gates "Local loop" paragraph, which had named `lint-workspace` as
+      a pre-commit step.
+- [x] **T063** Amend `spec.md` FR-011 to exempt the `lint-workspace` layer from the "pre-commit MUST
+      match CI" requirement, and `plan.md`'s Nx targets table, pre-commit hook order table, and the one
+      Risks table row this decision realizes.
+- [x] **T064** Fix `AGENTS.md`'s lint table, which still said `lint-workspace` ran "pre-commit via
+      `nx affected` (not CI — see T034)" — stale on both counts: T034 had landed, and pre-commit no
+      longer runs it at all.
+
+**Checkpoint**: `pnpm lint:check`, `pnpm typecheck` and `pnpm test` still green; `.husky/pre-commit` has
+4 steps, not 5; `.github/workflows/ci.yml` is untouched and still runs `lint-workspace` unconditionally.
 
 ---
 

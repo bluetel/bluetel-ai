@@ -90,11 +90,11 @@ fi
 
 pnpm typecheck
 
-# The four rules oxlint cannot own: @nx/enforce-module-boundaries (needs the project graph),
-# @cspell/spellchecker (no oxlint equivalent, ~1555 ms), no-octal and no-dupe-args. Run under Nx
-# so they are cached and affected-scoped — and so the module-boundary rule actually fires,
-# which it never did on the old per-file path.
-pnpm nx --no-tui affected -t lint-workspace
+# The four rules oxlint cannot own — @nx/enforce-module-boundaries (needs the project graph),
+# @cspell/spellchecker (no oxlint equivalent, ~1555 ms), no-octal and no-dupe-args — are enforced
+# by `nx affected -t lint-workspace` in CI (.github/workflows/ci.yml), not here. Adding an
+# `nx affected` graph resolution to every local commit for a 4-rule layer measured slower than
+# the whole oxlint pass it sits next to; CI is the affected-scoped enforcement point for it.
 
 # Code-health gate for this branch's diff vs origin/main: lint, security,
 # duplication and complexity via qlty. Requires qlty to be installed.

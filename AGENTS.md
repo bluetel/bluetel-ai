@@ -27,10 +27,10 @@
 Two layers. Neither is optional, and they enforce disjoint rule sets — a rule belongs to
 exactly one of them.
 
-| Layer     | Tool                         | Rules | Nx target        | Runs                                             |
-| --------- | ---------------------------- | ----: | ---------------- | ------------------------------------------------ |
-| Per-file  | oxlint (+ `oxlint-tsgolint`) |   142 | `lint`           | `lint-staged` on every commit, CI, and on demand |
-| Workspace | ESLint                       |     4 | `lint-workspace` | pre-commit via `nx affected` (not CI — see T034) |
+| Layer     | Tool                         | Rules | Nx target        | Runs                                                          |
+| --------- | ---------------------------- | ----: | ---------------- | ------------------------------------------------------------- |
+| Per-file  | oxlint (+ `oxlint-tsgolint`) |   142 | `lint`           | `lint-staged` on every commit, CI, and on demand              |
+| Workspace | ESLint                       |     4 | `lint-workspace` | CI via `nx affected` only — not pre-commit, removed for speed |
 
 **Use `pnpm lint:fast` while editing.** It is `oxlint --type-aware .` over the whole
 repository — about 1.5 s, including every type-aware rule. There is no reason to reach for a

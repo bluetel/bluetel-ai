@@ -51,6 +51,38 @@ Templates requiring updates:
   - ✅ AGENTS.md — new "Linting" section describing both layers and how to add a rule
   - ✅ .claude/rules/typescript-conventions.md — same, in brief
   - ✅ .specify/templates/*.md — reviewed; no lint-tool references, no change required
+
+SYNC IMPACT REPORT — 1.1.0 → 2.0.0
+==================================
+Bump rationale: MAJOR. Principle IV is redefined in a backward-incompatible way: the ESLint
+`lint-workspace` layer was previously required to run in the pre-commit hook, `affected`-scoped,
+as part of the gate that "MUST NOT be weakened." It is now explicitly required to stay OUT of the
+pre-commit hook — CI is the sole blocking point for those 4 rules. A commit that is locally green
+on `lint-workspace`'s rules can now be caught by CI instead of the hook; that tradeoff, not an
+oversight, is the point of this amendment.
+
+Trigger: PR #27 review — `nx affected -t lint-workspace`'s cold graph resolution measured slower
+than the oxlint pass it sat next to, for a 4-rule layer. This was a foreseen risk (spec 005's
+`plan.md` Risks table flagged it before Phase 4 landed) that materialized. Per the Governance
+section, a tool/document disagreement is a defect to be fixed in the change that creates it; the
+hook was already being changed to stop calling `lint-workspace`, so the constitution is corrected
+in the same change rather than left describing behavior the hook no longer has.
+
+Modified sections:
+  - Core Principles IV — `lint-workspace` moves from "blocking pre-commit, affected-scoped" to
+    "blocking in CI only, MUST NOT be added to pre-commit"
+  - Development Workflow & Quality Gates — "Local loop" drops the `nx affected -t lint-workspace`
+    step; the CI paragraph is unchanged, it already named `lint-workspace` as CI's responsibility
+
+Templates requiring updates:
+  - ✅ specs/005-oxlint-lint-performance/spec.md — FR-011 amended
+  - ✅ specs/005-oxlint-lint-performance/plan.md — Nx targets table, pre-commit hook order table,
+       and the Risks table row this decision realizes, all amended
+  - ✅ specs/005-oxlint-lint-performance/tasks.md — new Phase 8 (T061–T064) records this amendment
+  - ✅ .husky/pre-commit — `nx affected -t lint-workspace` step removed
+  - ✅ AGENTS.md — lint table corrected; it still said `lint-workspace` ran pre-commit, not CI
+  - ✅ .claude/rules/typescript-conventions.md — reviewed; names the target but never claimed
+       where it runs, no change required
 -->
 
 # bluetel-ai Constitution
@@ -101,10 +133,12 @@ a change land:
   oxlint enforces the great majority of the rule set, including every rule that needs type
   information. The handful it cannot run — currently `@nx/enforce-module-boundaries`,
   `@cspell/spellchecker`, `no-octal` and `no-dupe-args` — are enforced by ESLint as the Nx
-  `lint-workspace` target, which the pre-commit hook runs `affected`-scoped. A rule MUST
-  belong to exactly one layer, and moving one between layers MUST come with a
-  planted-violation fixture in `tooling/lint-coverage` proving it still fires. A green lint
-  run is not evidence that a rule ran.
+  `lint-workspace` target. This layer is blocking in CI (`nx affected -t lint-workspace`) but
+  MUST NOT be added to the pre-commit hook: a cold `nx affected` graph resolution for this
+  4-rule layer measured slower than the oxlint pass it would sit next to, and CI already
+  catches any violation before merge. A rule MUST belong to exactly one layer, and moving
+  one between layers MUST come with a planted-violation fixture in `tooling/lint-coverage`
+  proving it still fires. A green lint run is not evidence that a rule ran.
 - `pnpm typecheck` across the workspace — TypeScript runs in `strict` mode.
 - The qlty code-health gate on the branch diff (`pnpm qlty:diff`): zero lint or security issues
   at `medium` severity or above, and at most 10% duplicated lines in the changed files.
@@ -154,10 +188,10 @@ Unused exports and dependencies MUST be removed rather than suppressed, unless a
 ## Development Workflow & Quality Gates
 
 **Local loop.** Work happens on a `feature/<name>` branch. The pre-commit hook runs, in order:
-lint-staged (oxlint + Prettier), the affected Vitest suites, `pnpm typecheck`,
-`nx affected -t lint-workspace` (the ESLint layer), and `pnpm qlty:diff` against `origin/main`.
-qlty MUST be installed locally, and `oxlint` and `oxlint-tsgolint` MUST both be resolvable; the
-hook fails closed when any of them is absent.
+lint-staged (oxlint + Prettier), the affected Vitest suites, `pnpm typecheck`, and
+`pnpm qlty:diff` against `origin/main`. The ESLint `lint-workspace` layer deliberately does not
+run here — see Principle IV — only in CI. qlty MUST be installed locally, and `oxlint` and
+`oxlint-tsgolint` MUST both be resolvable; the hook fails closed when any of them is absent.
 
 **Continuous integration.** Pull requests run two independent jobs. The `qlty` job re-runs the
 code-health gate against the PR base ref. The `main` job runs
@@ -201,4 +235,4 @@ described above, and those MUST remain the source of truth for anything mechanic
 `AGENTS.md` and `.claude/rules/`. Those documents elaborate on this constitution and MUST NOT
 contradict it.
 
-**Version**: 1.1.0 | **Ratified**: 2026-08-05 | **Last Amended**: 2026-08-12
+**Version**: 2.0.0 | **Ratified**: 2026-08-05 | **Last Amended**: 2026-08-12

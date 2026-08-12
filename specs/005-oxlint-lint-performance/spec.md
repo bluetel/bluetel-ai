@@ -4,8 +4,9 @@
 
 **Created**: 2026-08-11
 
-**Status**: Draft — scope expanded 2026-08-11 to include the TypeScript upgrade
-([PR #27 review comment](https://github.com/bluetel/bluetel-ai/pull/27))
+**Status**: Draft — scope expanded 2026-08-11 to include the TypeScript upgrade; FR-011 amended
+2026-08-12 to make `lint-workspace` CI-only
+([PR #27 review comments](https://github.com/bluetel/bluetel-ai/pull/27))
 
 **Input**: GitHub issue [#24](https://github.com/bluetel/bluetel-ai/issues/24) — "[Feature] Improve lint-staged and broader lint performance"
 
@@ -267,8 +268,13 @@ test build` plus `pnpm knip`. Compare `tsc` wall-clock and peak RSS against the 
 - **FR-009**: The workspace's custom lint rule (`@bluetel-ai/enforce-safe-env`) MUST remain enforced,
   with its unit tests still passing.
 - **FR-010**: Existing inline suppression comments MUST continue to suppress the rules they name.
-- **FR-011**: The rule set enforced by the pre-commit hook MUST match the rule set enforced by CI, so
-  a locally-green commit cannot fail CI on lint.
+- **FR-011**: The rule set enforced by the pre-commit hook's oxlint layer MUST match the oxlint rule
+  set enforced by CI, so a locally-green oxlint result cannot fail CI's oxlint layer. **Amended
+  2026-08-12**: the ESLint `lint-workspace` layer is exempted from this requirement — it MUST run in
+  CI (`.github/workflows/ci.yml`) but MUST NOT run in the pre-commit hook. A cold `nx affected` graph
+  resolution for a 4-rule layer measured slower than the oxlint pass it sat next to, so a commit can
+  now be locally green on those 4 rules and still be caught by CI. See Constitution v2.0.0, Principle
+  IV.
 
 **No new noise**
 
