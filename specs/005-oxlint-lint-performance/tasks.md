@@ -39,12 +39,12 @@ TypeScript 5.9.2 with the option set. Nothing else changes.
 Phase 4's type-aware layer and Phase 6's bump. Landing it separately means that if it _does_ break
 something, the breakage is unambiguous.
 
-- [ ] **T046** Add `"types": ["node"]` to `compilerOptions` in `tsconfig.base.json`. Before committing,
+- [X] **T046** Add `"types": ["node"]` to `compilerOptions` in `tsconfig.base.json`. Before committing,
       check gap **G14**: confirm no project relies on ambient types from another `@types` package (Vitest
       globals in particular — this repo imports `describe`/`it`/`expect` explicitly, so it should be
       clear, but verify rather than assume). If any project's needs differ, set `types` per project
       instead of in the base config and record why.
-- [ ] **T047** Verify and record: `pnpm typecheck --skip-nx-cache` passes, and per-project
+- [X] **T047** Verify and record: `pnpm typecheck --skip-nx-cache` passes, and per-project
       `tsc --noEmit` passes for `packages/env-validation-errors`, `tooling/commit-conventions`,
       `tooling/qlty-diff` and `tooling/skills`. Append the 5.9.2 per-project timings to
       `measurements.md` — these are the SC-010 / SC-011 baseline, and they must be taken **with** this
@@ -67,23 +67,23 @@ a ~1.5 s drop, with `@cspell/spellchecker` still reporting a planted misspelling
 it validates the two-layer premise before any new tool is adopted. If everything after this phase were
 abandoned, this would still be worth having.
 
-- [ ] **T001** Record the "before" numbers into `specs/005-oxlint-lint-performance/measurements.md`
+- [X] **T001** Record the "before" numbers into `specs/005-oxlint-lint-performance/measurements.md`
       using the exact commands in `research.md` §1: single-file ESLint (`/usr/bin/time -f "%e s %M KB"`),
       `pnpm lint:check --skip-nx-cache`, `pnpm typecheck --skip-nx-cache`, and the full `.husky/pre-commit`
       run on a one-file staged diff. This file is the evidence base for every SC.
-- [ ] **T002** In `tooling/eslint-config-internal/index.mjs`, move the `@cspell/spellchecker` config
+- [X] **T002** In `tooling/eslint-config-internal/index.mjs`, move the `@cspell/spellchecker` config
       block behind a named export (e.g. `workspaceChecks` — the same export that will hold
       `@nx/enforce-module-boundaries` after Phase 4) that is **not** part of `base`, so the rule is no
       longer in the config `lint-staged` resolves. Keep the rule, its severity and its options
       byte-identical — this is a relocation, not a change.
-- [ ] **T003** Add `@cspell/spellchecker` to the project-level lint path only: consume the new export
+- [X] **T003** Add `@cspell/spellchecker` to the project-level lint path only: consume the new export
       from each project's `eslint.config.mjs` alongside `withTypeChecking(...)`. Verify with
       `node ./node_modules/.bin/eslint --print-config <a .ts file>` that the rule is present for the
       project run and absent for the staged-file invocation.
-- [ ] **T004** Plant a misspelling in a scratch file, confirm `pnpm nx run env-validation-errors:lint`
+- [X] **T004** Plant a misspelling in a scratch file, confirm `pnpm nx run env-validation-errors:lint`
       still errors on it, then confirm the `lint-staged` command on that same file does not. Delete the
       scratch file.
-- [ ] **T005** Re-time the single-file `lint-staged` command and append to `measurements.md`. Expected:
+- [X] **T005** Re-time the single-file `lint-staged` command and append to `measurements.md`. Expected:
       ~5.7 s → ~4.2 s. If the drop is materially smaller, the `TIMING` attribution was misleading —
       stop and re-measure before continuing to Phase 2.
 

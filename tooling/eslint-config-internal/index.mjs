@@ -185,6 +185,28 @@ export const base = tseslint.config(
       'react-compiler/react-compiler': 'error',
     },
   },
+  // Must be last — disables ESLint rules that would conflict with Prettier formatting
+  prettierConfig,
+)
+
+/**
+ * Workspace-scoped checks: rules that are too expensive or too graph-dependent to run
+ * on a single staged file, and therefore belong to the Nx-orchestrated `lint-workspace`
+ * target rather than to `base`.
+ *
+ * `@cspell/spellchecker` costs ~1555 ms per invocation regardless of file count — 62 % of
+ * all rule time — and none of that scales with the amount of code being checked. Running it
+ * once per project under Nx (cached, `affected`-scoped) enforces exactly the same rule for a
+ * fraction of the wall-clock cost. See specs/005-oxlint-lint-performance/research.md §1.
+ *
+ * The rule, its severity and its options are byte-identical to what `base` carried before —
+ * this is a relocation, not a change.
+ *
+ * Usage in a project's eslint.config.mjs:
+ *   import { base, workspaceChecks, withTypeChecking } from '@bluetel-ai/eslint-config-internal'
+ *   export default [...base, ...workspaceChecks, ...withTypeChecking(import.meta.dirname)]
+ */
+export const workspaceChecks = tseslint.config(
   // Spell checking
   {
     files: ['**/*.{js,jsx,mjs,cjs,ts,tsx}'],

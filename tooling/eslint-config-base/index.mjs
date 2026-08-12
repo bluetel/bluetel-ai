@@ -1,4 +1,8 @@
-import { base as internalBase, withTypeChecking } from '@bluetel-ai/eslint-config-internal'
+import {
+  base as internalBase,
+  workspaceChecks,
+  withTypeChecking,
+} from '@bluetel-ai/eslint-config-internal'
 
 import { enforceSafeEnv } from './rules/enforce-safe-env.mjs'
 
@@ -19,4 +23,4 @@ export const base = [
   },
 ]
 
-export { withTypeChecking }
+export { workspaceChecks, withTypeChecking }

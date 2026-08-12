@@ -47,7 +47,7 @@
   },
   "lint-staged": {
     "**/*.{js,jsx,ts,tsx}": [
-      "node --max-old-space-size=8192 ./node_modules/.bin/eslint --flag v10_config_lookup_from_file --fix",
+      "node --max-old-space-size=8192 ./node_modules/.bin/eslint --config eslint.staged.config.mjs --fix",
       "prettier --write"
     ],
     "**/*.{json,yaml,yml,md}": [

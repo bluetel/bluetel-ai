@@ -1,3 +1,3 @@
-import { base, withTypeChecking } from '@bluetel-ai/eslint-config-internal'
+import { base, workspaceChecks, withTypeChecking } from '@bluetel-ai/eslint-config-internal'
 
-export default [...base, ...withTypeChecking(import.meta.dirname)]
+export default [...base, ...workspaceChecks, ...withTypeChecking(import.meta.dirname)]
