@@ -1,10 +1,11 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 
 import { extractRules } from './extract'
-import { ALL_FIXTURES, EXCUSED_RULES } from './fixtures'
+import { ALL_FIXTURES, EXCUSED_RULES, SYNTACTIC_FIXTURES, TYPE_AWARE_FIXTURES } from './fixtures'
 import {
   ESLINT_WORKSPACE_RULES,
   isOxlintOwned,
@@ -154,6 +155,91 @@ describe('rule accounting (SC-005)', () => {
       expect(entry.coveredBy.length).toBeGreaterThan(0)
     }
   })
+
+  /**
+   * The "preset assertion" two `EXCUSED_RULES` entries cite — which did not exist until
+   * re-review went looking for it. Asserting only that the prose is non-empty made the excuse
+   * mechanism look enforced while checking nothing, so a rule could be excused *to* a test that
+   * was never written. These two cannot be planted as a standalone file (one keys off a folder
+   * layout, the other needs a React component), so config presence with the right options is
+   * the strongest available check — and it is at least a check.
+   */
+  it('keeps the excused-to-config rules enabled with their options', () => {
+    const config = readOxlintConfig(repoRoot)
+
+    expect(config.rules['check-file/folder-naming-convention']).toEqual([
+      'error',
+      { 'src/components/**/': 'KEBAB_CASE', 'src/lib/**/': 'KEBAB_CASE' },
+    ])
+    expect(config.rules['react/react-compiler']).toBe('error')
+  })
+})
+
+/**
+ * The committed inventory, checked against the configs it claims to describe.
+ *
+ * `pnpm lint-inventory` reproducing the committed file byte-for-byte is the drift gate for the
+ * ~89 enforced rules that have no fixture — but a gate is only as good as what it can
+ * represent. Two defects found by re-review, both fixed and both pinned here: the generator
+ * used to rewrite a `severity: off` rule as `error`, so a rule could be switched off with the
+ * inventory unchanged and every test green; and nothing tied the fixture corpus to the config,
+ * so deleting a fixture deleted its own test case.
+ */
+describe('the committed inventory matches the configs (SC-005)', () => {
+  const inventory = fs.readFileSync(
+    path.join(repoRoot, 'specs/005-oxlint-lint-performance/rule-inventory.md'),
+    'utf8',
+  )
+
+  /** Rule names from the `## Rules` table: the first cell of each row, inside backticks. */
+  const inventoryRules = [...inventory.matchAll(/^ \| `([^`]+)` \| `/gm)].map((match) => match[1])
+
+  const oxlintConfig = readOxlintConfig(repoRoot)
+  const enabledOxlintKeys = new Set(
+    [oxlintConfig.rules, ...(oxlintConfig.overrides ?? []).map((override) => override.rules)]
+      .flatMap((rules) => Object.entries(rules))
+      .filter(([, entry]) => {
+        const severity = Array.isArray(entry) ? (entry as unknown[])[0] : entry
+        return severity !== 'off' && severity !== 0
+      })
+      .map(([name]) => name),
+  )
+
+  it('lists no rule that either layer has since switched off', () => {
+    const stale = inventoryRules.filter(
+      (rule) => !enabledOxlintKeys.has(rule) && ESLINT_WORKSPACE_RULES[rule] === undefined,
+    )
+    expect(stale).toEqual([])
+  })
+
+  it('lists every rule the oxlint config enables', () => {
+    const missing = [...enabledOxlintKeys].filter((rule) => !inventoryRules.includes(rule))
+    expect(missing).toEqual([])
+  })
+
+  it('records no rule as enforced at severity off', () => {
+    const offRows = [...inventory.matchAll(/^ \| `([^`]+)` \| `[^`]+` \| (\S+) \|/gm)]
+      .filter((match) => match[2] === 'off')
+      .map((match) => match[1])
+    expect(offRows).toEqual([])
+  })
+
+  /**
+   * Every type-aware rule needs a fixture, derived from the config rather than from the
+   * fixture list — the 41 rules that changed typechecker are the migration's real regression
+   * risk, and a corpus that only checks itself cannot notice one of them going missing.
+   */
+  it('has a fixture for every type-aware rule oxlint runs', () => {
+    const typeAware = Object.keys(
+      (oxlintConfig.overrides ?? []).find(
+        (override) => override.files.includes('**/*.ts') && override.files.includes('**/*.tsx'),
+      )?.rules ?? {},
+    )
+    const planted = new Set(ALL_FIXTURES.map((fixture) => bareRuleName(fixture.rule)))
+
+    expect(typeAware.filter((rule) => !planted.has(bareRuleName(rule)))).toEqual([])
+    expect(typeAware).toHaveLength(41)
+  })
 })
 
 describe('fixture corpus', () => {
@@ -165,5 +251,19 @@ describe('fixture corpus', () => {
   it('has a unique rule per fixture', () => {
     const rules = ALL_FIXTURES.map((fixture) => fixture.rule)
     expect(new Set(rules).size).toBe(rules.length)
+  })
+
+  /**
+   * The size is written down on purpose.
+   *
+   * Every parity case is generated from `ALL_FIXTURES`, so deleting a fixture deletes its own
+   * test and the suite stays green with fewer rules checked — the same shape of invisible loss
+   * the harness exists to catch, one level up. The type-aware 41 are pinned against the config
+   * above; this pins the 16 the workspace configures by hand, which no config can derive.
+   */
+  it('is the size it is meant to be', () => {
+    expect(ALL_FIXTURES).toHaveLength(57)
+    expect(SYNTACTIC_FIXTURES).toHaveLength(16)
+    expect(TYPE_AWARE_FIXTURES).toHaveLength(41)
   })
 })

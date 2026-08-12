@@ -7,19 +7,20 @@ import { ESLint } from 'eslint'
 import type { RuleFixture } from './fixtures'
 
 /**
- * A fresh directory outside the repository, holding the materialised fixtures plus the
- * `tsconfig.json` the type-aware layer needs to build a program for them.
+ * A fresh scratch directory outside the repository, for the derived oxlint config the harness
+ * writes per run.
  *
- * Outside the repository deliberately. A fixture tree inside it has to be ignored by the
- * repo's own gates, and both linters take their ignore rules partly from `.gitignore` —
- * which then also hides the fixtures from the harness. `--no-ignore` does not bring them
- * back. Somewhere neither tool has an opinion about is the only place the fixtures are
- * reliably visible to the harness and reliably invisible to `pnpm lint`.
+ * The fixtures themselves are **not** here, though an earlier version of this harness put them
+ * here and this docstring used to argue for it. Both linters scope their `files` patterns to the
+ * tree they are run from, so a fixture in `os.tmpdir()` matches none of them and every rule
+ * reports silent — the exact false negative the harness exists to detect. They live in
+ * `fixtures/generated/` instead, excluded from the repo's gates by config rather than by
+ * location (`parity.test.ts:29-34`).
  *
- * The directory name has no leading dot: `check-file`'s patterns go through micromatch with
- * the default `dot: false`, so a `**` glob never descends into a dot-directory and
- * `check-file/filename-naming-convention` reported nothing at all — a rule looking exactly
- * as silent as one that had stopped working.
+ * Kept for the scratch config, and the naming constraint is kept with it: no leading dot.
+ * `check-file`'s patterns go through micromatch with the default `dot: false`, so a `**` glob
+ * never descends into a dot-directory and `check-file/filename-naming-convention` reported
+ * nothing at all — a rule looking exactly as silent as one that had stopped working.
  */
 export const createFixtureDir = (): string =>
   fs.mkdtempSync(path.join(os.tmpdir(), 'lint-coverage-'))

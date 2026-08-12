@@ -97,5 +97,6 @@ New rules go in the root `.oxlintrc.json`, **with their options** — several ru
 nothing at oxlint's defaults. Never enable an oxlint category: it lights up existing code
 with rules nobody chose.
 
-Every enforced rule has a planted-violation fixture in `tooling/lint-coverage`. Moving a rule
-between layers means updating its fixture in the same change.
+`tooling/lint-coverage` holds planted-violation fixtures for 57 of the 146 rules — the 41
+type-aware ones and the 16 configured by hand, not the presets. Moving a rule between layers means
+updating its fixture in the same change; a green suite is not proof that an arbitrary rule fires.

@@ -8,8 +8,11 @@ from [research.md](./research.md)
 **Revision, 2026-08-11**: scope expanded to include the TypeScript upgrade, per
 [PR #27](https://github.com/bluetel/bluetel-ai/pull/27) review feedback. That work produced
 `research.md` §7, which **retracts** the "oxlint cannot own type-aware rules" finding this plan was
-originally built on. The architecture below is the revised one: oxlint owns 127 of the 129 rules,
-ESLint keeps 2, and TypeScript 7 lands as its own phase afterwards. §7.6 records why that order is
+originally built on. The architecture below is the revised one: oxlint owns 142 of the 146 rules,
+ESLint keeps 4 (`@nx/enforce-module-boundaries`, `@cspell/spellchecker`, `no-octal`,
+`no-dupe-args` — the as-landed figures from generated `rule-inventory.md`; the 127-of-129 this
+document was drafted with predates the final probe), and TypeScript 7 lands as its own phase
+afterwards. §7.6 records why that order is
 forced rather than preferred.
 
 ## Summary

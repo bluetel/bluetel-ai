@@ -408,10 +408,13 @@ its excuse, and every rule count in the repo agrees with generated `rule-invento
       `.cjs`: a legacy octal literal and a duplicate parameter are strict-mode **syntax errors**, so a
       `.ts` or `.mjs` fixture reports `Parsing error` with a null rule ID and the rule never runs.
 - [x] **T055** **Make the contract self-enforcing.** New case in `parity.test.ts`: every key of
-      `ESLINT_WORKSPACE_RULES` must be fixture-covered or excused. Verified by mutation — switching
-      `no-octal` off in the ESLint config turns the suite red — because an assertion nobody has seen fail
-      is the same shape of problem as the rule it was written to catch. `fixtures.ts`'s docstring, which
-      claimed the suite asserted this for _every_ enabled rule, now states what is actually covered.
+      `ESLINT_WORKSPACE_RULES` must be fixture-covered or excused. Two separate mutations, because an
+      assertion nobody has seen fail is the same shape of problem as the rule it was written to catch —
+      and because the first one does **not** exercise the new case: switching `no-octal` off in the ESLint
+      config reddens `no-octal still fires` (proving the new fixture has teeth), while it takes _deleting_
+      the fixture to redden the accounting case, since `ESLINT_WORKSPACE_RULES` is a literal that no
+      config change touches. Both were run. `fixtures.ts`'s docstring, which claimed the suite asserted
+      this for _every_ enabled rule, now states what is actually covered.
 - [x] **T056** **Reconcile the rule counts.** `tooling/eslint-config-internal/index.mjs` said "three
       rules" over a block enforcing four; `.husky/pre-commit` said "143 of the 147"; T034 and the Phase 4
       checkpoint said 2 and 127. All now read 142 of 146 with 4 on ESLint, and name generated
@@ -419,9 +422,41 @@ its excuse, and every rule count in the repo agrees with generated `rule-invento
       Prettier aligns markdown tables and the inventory generator does not, so formatting the generated
       file made every regeneration look like drift and every format look like an edit.
 
+- [x] **T057** **A disabled rule must not render as `error` (FR-006).** `cli.ts` coerced
+      `severityOf(entry) === 'off' ? 'error'` and counted every key in `.oxlintrc.json` regardless of
+      severity, so the inventory was structurally incapable of showing a switched-off rule — in the file
+      that is the _only_ accounting for the 89 enforced rules with no fixture. Setting `no-debugger` to
+      `off` used to leave the inventory byte-identical with all tests green. Disabled entries are now
+      dropped and the severity is reported as written: the same mutation gives
+      `Wrote 145 rules … Total is 145, not the 146 expected` with exit 1, drift in the committed file, and
+      a red `lists no rule that either layer has since switched off`.
+- [x] **T058** **Tie the fixture corpus to the config (SC-006).** Every parity case was generated from
+      `ALL_FIXTURES`, so deleting a fixture deleted its own test: removing the
+      `@typescript-eslint/no-floating-promises` fixture left the suite green at 111 passed with zero
+      inventory drift. Now the 41 type-aware rules are read from `.oxlintrc.json`'s type-aware override and
+      each must have a fixture, and the corpus sizes (57 / 16 / 41) are pinned. The same deletion now
+      reddens two cases. Also added: the committed inventory must list exactly the rules the configs enable,
+      in both directions, so the byte-for-byte check can no longer pass over a rule that has gone quiet.
+- [x] **T059** **Stop excusing rules to a test that does not exist.** Two `EXCUSED_RULES` entries claimed
+      coverage by a "preset assertion in `parity.test.ts`"; there was none, and the only check on the field
+      was `coveredBy.length > 0`, so any string passed. The assertion now exists — both rules must be
+      enabled in `.oxlintrc.json` with their exact options — and the entries say plainly that it is weaker
+      than a planted violation. `react-compiler` additionally records that T016's comparison result appears
+      nowhere in `measurements.md`, so it is enabled-but-unproven rather than quietly assumed good.
+- [x] **T060** **Fix the coverage overclaim and a flaky gate.** `AGENTS.md` and
+      `.claude/rules/typescript-conventions.md` told agents that _every_ enforced rule has a fixture — 57 of
+      146 do, and the disclaimer T054 added to `fixtures.ts` contradicted them. Both now state the corpus
+      and what covers the rest. Separately, `enforce-safe-env.test.mjs`'s `identifierArb` generated JS
+      reserved words, so fast-check eventually built `import { createEnv as in } from …` — a syntax error
+      the rule never sees, failing the property ~1 run in 7. Reserved words are now filtered; 10 consecutive
+      runs green. Two stale docstrings (`parity.ts`'s "outside the repository", `fixtures.ts`'s
+      "gitignored") described the opposite of what the code does and are corrected, and `plan.md:11`'s
+      "127 of the 129" — a fifth stale count T056 had missed — now reads 142 of 146.
+
 **Checkpoint**: `pnpm lint:check`, `pnpm typecheck` and `pnpm test` green from a clean install;
-`pnpm lint-inventory` reproduces the committed inventory byte-for-byte. **T034 remains open** and is the
-only thing still standing between this feature and CI actually enforcing all 146 rules.
+`pnpm lint-inventory` reproduces the committed inventory byte-for-byte; every gate added here has been
+shown to fail when the thing it guards is broken. **T034 remains open** and is the only thing still
+standing between this feature and CI actually enforcing all 146 rules.
 
 ---
 

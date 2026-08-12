@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { pluginOf, severityOf, optionsOf, type RuleEntry } from './classify'
+import { isEnabled, pluginOf, severityOf, optionsOf, type RuleEntry } from './classify'
 import { extractRules, summarise, type ExtractedRule } from './extract'
 import { renderInventory, type RuleAssignment } from './inventory'
 import { ESLINT_WORKSPACE_RULES, readOxlintConfig } from './owners'
@@ -38,6 +38,15 @@ const ESLINT_PROBES = [
  */
 const EXPECTED_TOTAL = 146
 
+/**
+ * Turn one `.oxlintrc.json` entry into an inventory row.
+ *
+ * The severity is reported as written. An earlier version coerced `off` to `error` — which
+ * made the inventory structurally incapable of showing a switched-off rule, in the file whose
+ * whole job is to account for every enforced rule. `oxlintRows` drops disabled entries
+ * instead, so turning a rule off changes the total, breaks `EXPECTED_TOTAL`, and shows up as
+ * drift in the committed file rather than as a row that still claims `error`.
+ */
 const oxlintRow = (
   name: string,
   entry: RuleEntry,
@@ -45,7 +54,7 @@ const oxlintRow = (
 ): ExtractedRule => ({
   name,
   plugin: pluginOf(name),
-  severity: severityOf(entry) === 'off' ? 'error' : severityOf(entry),
+  severity: severityOf(entry),
   options: optionsOf(entry),
   requiresTypeChecking: scope === 'type-aware',
   // oxlint does not expose per-rule fixability from the config, and guessing would put a
@@ -70,16 +79,18 @@ const main = async (): Promise<void> => {
     override.files.includes('**/*.mjs'),
   )
 
+  const oxlintRows = (
+    rules: Record<string, unknown>,
+    scope: 'base' | 'type-aware' | 'module-only',
+  ): ExtractedRule[] =>
+    Object.entries(rules)
+      .filter(([, entry]) => isEnabled(entry as RuleEntry))
+      .map(([name, entry]) => oxlintRow(name, entry as RuleEntry, scope))
+
   const oxlintRules: ExtractedRule[] = [
-    ...Object.entries(oxlintConfig.rules).map(([name, entry]) =>
-      oxlintRow(name, entry as RuleEntry, 'base'),
-    ),
-    ...Object.entries(typeAwareOverride?.rules ?? {}).map(([name, entry]) =>
-      oxlintRow(name, entry as RuleEntry, 'type-aware'),
-    ),
-    ...Object.entries(moduleOverride?.rules ?? {}).map(([name, entry]) =>
-      oxlintRow(name, entry as RuleEntry, 'module-only'),
-    ),
+    ...oxlintRows(oxlintConfig.rules, 'base'),
+    ...oxlintRows(typeAwareOverride?.rules ?? {}, 'type-aware'),
+    ...oxlintRows(moduleOverride?.rules ?? {}, 'module-only'),
   ]
 
   const all = [...eslintRules, ...oxlintRules].sort((a, b) => a.name.localeCompare(b.name))

@@ -6,9 +6,12 @@
  * fixture below is a minimal source file that a specific rule must object to, so the
  * harness can assert that the rule ID still appears in the diagnostics.
  *
- * Fixtures are materialised into a gitignored directory at test time rather than committed
- * as source. They are deliberately full of violations; leaving them on disk inside a linted
- * tree would fail the repo's own gates for exactly the reason the fixtures exist.
+ * Fixtures are committed, and rewritten from this file by `materialiseFixtures` on every run —
+ * that rewrite is what keeps the two from drifting, so editing a file under
+ * `fixtures/generated/` by hand accomplishes nothing. They are deliberately full of violations,
+ * so the linters, Prettier and qlty all exclude that tree (`.oxlintrc.json`'s
+ * `ignorePatterns`, `eslint-config-internal`'s `ignores`, `.prettierignore`, `.qlty/qlty.toml`);
+ * the harness passes `ignore: false` to look past those exclusions.
  *
  * Fixtures are not required to typecheck. Several of them cannot — `no-unsafe-unary-minus`
  * needs a unary minus on a string — and ESLint reports rule violations regardless.
@@ -504,13 +507,13 @@ export const EXCUSED_RULES: readonly ExcusedRule[] = [
     reason:
       'Keys off directory names under `src/components/` and `src/lib/`, so the violation is a folder layout rather than a file.',
     coveredBy:
-      'Preset assertion — the rule and its options are asserted present in the resolved config by `parity.test.ts`.',
+      '`parity.test.ts` — "keeps the excused-to-config rules enabled with their options", which asserts the rule and its exact options are present in `.oxlintrc.json`. Weaker than a planted violation, and named here so nobody mistakes it for one.',
   },
   {
     rule: 'react-compiler/react-compiler',
     reason:
       'Requires a React component that breaks the rules of React; no React dependency exists in this workspace yet.',
     coveredBy:
-      'Preset assertion, plus task T016, which compares oxlint against eslint-plugin-react-compiler on a known violation.',
+      '`parity.test.ts` — "keeps the excused-to-config rules enabled with their options" asserts it is enabled. That is all: T016 was to compare oxlint against eslint-plugin-react-compiler on a known violation, and while the task is ticked, its result is recorded nowhere in `measurements.md`. Treat this rule as enabled-but-unproven until a React dependency exists to plant a violation against.',
   },
 ]

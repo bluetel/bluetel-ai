@@ -30,7 +30,7 @@ exactly one of them.
 | Layer     | Tool                         | Rules | Nx target        | Runs                                             |
 | --------- | ---------------------------- | ----: | ---------------- | ------------------------------------------------ |
 | Per-file  | oxlint (+ `oxlint-tsgolint`) |   142 | `lint`           | `lint-staged` on every commit, CI, and on demand |
-| Workspace | ESLint                       |     4 | `lint-workspace` | pre-commit via `nx affected`, and CI             |
+| Workspace | ESLint                       |     4 | `lint-workspace` | pre-commit via `nx affected` (not CI — see T034) |
 
 **Use `pnpm lint:fast` while editing.** It is `oxlint --type-aware .` over the whole
 repository — about 1.5 s, including every type-aware rule. There is no reason to reach for a
@@ -60,7 +60,13 @@ there needs a reason recorded in `tooling/lint-coverage/src/owners.ts`.
 
 ## Proving a rule still runs
 
-`tooling/lint-coverage` plants a violation of every enforced rule and asserts the rule ID
-appears in the diagnostics. A green lint run is not evidence on its own: a rule that silently
-stopped running looks exactly like clean code. If you move a rule between layers, add or
-update its fixture in `tooling/lint-coverage/src/fixtures.ts` in the same change.
+`tooling/lint-coverage` plants a violation of a rule and asserts the rule ID appears in the
+diagnostics. A green lint run is not evidence on its own: a rule that silently stopped running
+looks exactly like clean code. If you move a rule between layers, add or update its fixture in
+`tooling/lint-coverage/src/fixtures.ts` in the same change.
+
+The corpus is **57 of the 146 rules**, not all of them: the 41 type-aware ones (the migration's
+real regression risk) plus the 16 this workspace configures by hand. Do not read a green suite as
+proof that an arbitrary rule fires. The other 89 are preset rules, accounted for by
+`rule-inventory.md` — which is generated from both configs, asserted to list exactly the enabled
+rules, and must reproduce byte-for-byte via `pnpm lint-inventory`.
