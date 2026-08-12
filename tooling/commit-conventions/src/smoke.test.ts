@@ -35,12 +35,19 @@ describe('Smoke tests: hook script structure', () => {
       expect(pkg['lint-staged']).toBeDefined()
     })
 
-    it('eslint --flag v10_config_lookup_from_file --fix and prettier --write on JS/TS files', () => {
+    it('eslint --config eslint.staged.config.mjs --fix and prettier --write on JS/TS files', () => {
       const jsTsGlob = pkg['lint-staged']['**/*.{js,jsx,ts,tsx}']
       expect(jsTsGlob).toEqual([
-        'node --max-old-space-size=8192 ./node_modules/.bin/eslint --flag v10_config_lookup_from_file --fix',
+        'node --max-old-space-size=8192 ./node_modules/.bin/eslint --config eslint.staged.config.mjs --fix',
         'prettier --write',
       ])
+    })
+
+    // The staged pass deliberately resolves a different config from the per-project one.
+    // Asserting the file exists keeps the two from drifting apart silently: a rename would
+    // otherwise leave lint-staged pointing at nothing and ESLint falling back to lookup.
+    it('points at a staged config that exists', () => {
+      expect(fs.existsSync(path.join(REPO_ROOT, 'eslint.staged.config.mjs'))).toBe(true)
     })
 
     it('runs prettier --write on JSON/YAML/MD files', () => {

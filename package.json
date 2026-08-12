@@ -17,6 +17,7 @@
     "knip:orphans": "SKIP_ENV_VALIDATION=true knip --no-progress --production --include files",
     "qlty": "qlty check --no-formatters",
     "qlty:diff": "tsx tooling/qlty-diff/src/cli.ts",
+    "lint-inventory": "tsx tooling/lint-coverage/src/cli.ts",
     "prepare": "husky"
   },
   "keywords": [],

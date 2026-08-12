@@ -16,3 +16,6 @@ src/routeTree.gen.ts
 # Next
 
 **/next-env.d.ts
+
+# Lint-coverage fixtures — planted rule violations, materialised at test time
+tooling/lint-coverage/fixtures/generated

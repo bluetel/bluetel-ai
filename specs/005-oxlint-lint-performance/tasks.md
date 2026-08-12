@@ -39,12 +39,12 @@ TypeScript 5.9.2 with the option set. Nothing else changes.
 Phase 4's type-aware layer and Phase 6's bump. Landing it separately means that if it _does_ break
 something, the breakage is unambiguous.
 
-- [X] **T046** Add `"types": ["node"]` to `compilerOptions` in `tsconfig.base.json`. Before committing,
+- [x] **T046** Add `"types": ["node"]` to `compilerOptions` in `tsconfig.base.json`. Before committing,
       check gap **G14**: confirm no project relies on ambient types from another `@types` package (Vitest
       globals in particular — this repo imports `describe`/`it`/`expect` explicitly, so it should be
       clear, but verify rather than assume). If any project's needs differ, set `types` per project
       instead of in the base config and record why.
-- [X] **T047** Verify and record: `pnpm typecheck --skip-nx-cache` passes, and per-project
+- [x] **T047** Verify and record: `pnpm typecheck --skip-nx-cache` passes, and per-project
       `tsc --noEmit` passes for `packages/env-validation-errors`, `tooling/commit-conventions`,
       `tooling/qlty-diff` and `tooling/skills`. Append the 5.9.2 per-project timings to
       `measurements.md` — these are the SC-010 / SC-011 baseline, and they must be taken **with** this
@@ -67,23 +67,23 @@ a ~1.5 s drop, with `@cspell/spellchecker` still reporting a planted misspelling
 it validates the two-layer premise before any new tool is adopted. If everything after this phase were
 abandoned, this would still be worth having.
 
-- [X] **T001** Record the "before" numbers into `specs/005-oxlint-lint-performance/measurements.md`
+- [x] **T001** Record the "before" numbers into `specs/005-oxlint-lint-performance/measurements.md`
       using the exact commands in `research.md` §1: single-file ESLint (`/usr/bin/time -f "%e s %M KB"`),
       `pnpm lint:check --skip-nx-cache`, `pnpm typecheck --skip-nx-cache`, and the full `.husky/pre-commit`
       run on a one-file staged diff. This file is the evidence base for every SC.
-- [X] **T002** In `tooling/eslint-config-internal/index.mjs`, move the `@cspell/spellchecker` config
+- [x] **T002** In `tooling/eslint-config-internal/index.mjs`, move the `@cspell/spellchecker` config
       block behind a named export (e.g. `workspaceChecks` — the same export that will hold
       `@nx/enforce-module-boundaries` after Phase 4) that is **not** part of `base`, so the rule is no
       longer in the config `lint-staged` resolves. Keep the rule, its severity and its options
       byte-identical — this is a relocation, not a change.
-- [X] **T003** Add `@cspell/spellchecker` to the project-level lint path only: consume the new export
+- [x] **T003** Add `@cspell/spellchecker` to the project-level lint path only: consume the new export
       from each project's `eslint.config.mjs` alongside `withTypeChecking(...)`. Verify with
       `node ./node_modules/.bin/eslint --print-config <a .ts file>` that the rule is present for the
       project run and absent for the staged-file invocation.
-- [X] **T004** Plant a misspelling in a scratch file, confirm `pnpm nx run env-validation-errors:lint`
+- [x] **T004** Plant a misspelling in a scratch file, confirm `pnpm nx run env-validation-errors:lint`
       still errors on it, then confirm the `lint-staged` command on that same file does not. Delete the
       scratch file.
-- [X] **T005** Re-time the single-file `lint-staged` command and append to `measurements.md`. Expected:
+- [x] **T005** Re-time the single-file `lint-staged` command and append to `measurements.md`. Expected:
       ~5.7 s → ~4.2 s. If the drop is materially smaller, the `TIMING` attribution was misleading —
       stop and re-measure before continuing to Phase 2.
 
@@ -102,33 +102,33 @@ not, the harness is wrong, not the config.
 **⚠️ CRITICAL**: Phase 4 must not begin until this phase is complete and green. A harness written after
 a migration tends to agree with whatever the migration did.
 
-- [ ] **T006** Add `scripts/extract-lint-rules.mjs`: runs
+- [X] **T006** Add `scripts/extract-lint-rules.mjs`: runs
       `eslint --print-config <file>` for a representative `.ts`, `.tsx`, `.mjs` and `.cjs` file, unions
       the enabled rules, and emits JSON — rule name, source plugin, severity, options,
       `requiresTypeChecking` (read from the plugin's own `meta.docs`). Deterministic output so it diffs
       cleanly.
-- [ ] **T007** [P] Colocated `scripts/extract-lint-rules.test.mjs`: asserts the extractor finds the
+- [X] **T007** [P] Colocated `scripts/extract-lint-rules.test.mjs`: asserts the extractor finds the
       expected rule count for a fixture config and correctly classifies a known type-aware rule
       (`no-floating-promises`) and a known syntactic one (`consistent-type-imports`).
-- [ ] **T008** Generate `specs/005-oxlint-lint-performance/rule-inventory.md` from T006's output. One
+- [X] **T008** Generate `specs/005-oxlint-lint-performance/rule-inventory.md` from T006's output. One
       row per rule: name, plugin, severity, options, **Owner** (`oxlint-native` / `oxlint-js-plugin` /
       `oxlint-type-aware` / `eslint-workspace` / `other`), **Status** (`covered` / `relocated` /
       `dropped`), notes. At this
       point every Owner is `eslint` — the column gets filled in during Phase 4. Assert the row count is
       **129** for `.ts`; if it differs, reconcile against `research.md` §2 before proceeding.
-- [ ] **T009** Create `tooling/lint-coverage/` — a workspace member holding the parity harness, with
+- [X] **T009** Create `tooling/lint-coverage/` — a workspace member holding the parity harness, with
       `package.json`, `project.json`, `vitest.config.ts`, and an `index.ts` barrel per Constitution
       principle II.
-- [ ] **T010** Add `tooling/lint-coverage/fixtures/` — one minimal file per previously-enforced rule
+- [X] **T010** Add `tooling/lint-coverage/fixtures/` — one minimal file per previously-enforced rule
       that violates exactly that rule. Fixtures MUST sit outside the linted source tree (add to
       `ignorePatterns` / `.prettierignore` as needed) so they do not fail the repo's own gates. Start
       with the 11 non-`recommended` rules the repo configures by hand plus the 41 type-aware rules —
       these carry the real regression risk. Cover the `recommended` presets by preset assertion rather
       than 88 hand-written fixtures.
-- [ ] **T011** Add `tooling/lint-coverage/src/parity.ts` + colocated `parity.test.ts`: for each fixture,
+- [X] **T011** Add `tooling/lint-coverage/src/parity.ts` + colocated `parity.test.ts`: for each fixture,
       run the owning layer and assert the expected rule ID appears in the diagnostics. Assert on **rule
       ID**, not just non-zero exit code — a different rule firing is not coverage.
-- [ ] **T012** Run the suite against the current setup. It MUST pass. Fix the harness until it does, and
+- [X] **T012** Run the suite against the current setup. It MUST pass. Fix the harness until it does, and
       commit it green.
 
 **Checkpoint**: a test that fails loudly the moment any rule stops being enforced.
