@@ -95,15 +95,15 @@ Method: oxlint **fails config parsing on an unknown rule name**, so "the config 
 direct proof that a rule exists. All 129 rules enabled for a `.ts` file were probed by writing
 a one-rule config and checking whether it parsed. No documentation was taken on trust.
 
-| Question | Answer |
-| --- | --- |
-| **G1** — native rule coverage | **120 / 129**. The 9 without a native rule: `no-octal`, `@nx/enforce-module-boundaries`, `@cspell/spellchecker`, `unused-imports/no-unused-imports`, `import-x/order`, `prefer-arrow-functions/prefer-arrow-functions`, both `check-file` rules, `@bluetel-ai/enforce-safe-env` |
-| **G1b** — the 18 core rules only enabled for `.js`/`.mjs` | 17 native; `no-dupe-args` absent |
-| **G2** — JS plugin loading | All four ESLint plugins load unchanged through `jsPlugins`. `import-x` and `unused-imports` collide with built-in oxlint namespaces and must be **aliased** — oxlint refuses the collision rather than silently shadowing |
-| **G5 / SC-001** — cost with every JS plugin loaded | **0.78 s** for one file including type-aware rules, against a 1 s target and a 5.58 s baseline |
-| **T048** — do the type-aware rules fire? | **41 / 41**, and 39 of them report nothing without `--type-aware`, so the flag is demonstrably doing the work |
-| **G10** — the 5 `no-unnecessary-type-assertion` divergences | **oxlint is right.** `tsc --noEmit` passes with all six `issues as readonly StandardSchemaV1.Issue[]` assertions removed, so they were unnecessary and ESLint was missing them. Removed in the migration commit |
-| **G10b** — the divergence in the other direction | ESLint reports one assertion oxlint does not (`(await importOriginal()) as Record<string, unknown>`). It was already suppressed, so nothing changes in enforcement — but it is a real gap in oxlint's implementation and is recorded rather than assumed away |
+| Question                                                    | Answer                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **G1** — native rule coverage                               | **120 / 129**. The 9 without a native rule: `no-octal`, `@nx/enforce-module-boundaries`, `@cspell/spellchecker`, `unused-imports/no-unused-imports`, `import-x/order`, `prefer-arrow-functions/prefer-arrow-functions`, both `check-file` rules, `@bluetel-ai/enforce-safe-env` |
+| **G1b** — the 18 core rules only enabled for `.js`/`.mjs`   | 17 native; `no-dupe-args` absent                                                                                                                                                                                                                                                |
+| **G2** — JS plugin loading                                  | All four ESLint plugins load unchanged through `jsPlugins`. `import-x` and `unused-imports` collide with built-in oxlint namespaces and must be **aliased** — oxlint refuses the collision rather than silently shadowing                                                       |
+| **G5 / SC-001** — cost with every JS plugin loaded          | **0.78 s** for one file including type-aware rules, against a 1 s target and a 5.58 s baseline                                                                                                                                                                                  |
+| **T048** — do the type-aware rules fire?                    | **41 / 41**, and 39 of them report nothing without `--type-aware`, so the flag is demonstrably doing the work                                                                                                                                                                   |
+| **G10** — the 5 `no-unnecessary-type-assertion` divergences | **oxlint is right.** `tsc --noEmit` passes with all six `issues as readonly StandardSchemaV1.Issue[]` assertions removed, so they were unnecessary and ESLint was missing them. Removed in the migration commit                                                                 |
+| **G10b** — the divergence in the other direction            | ESLint reports one assertion oxlint does not (`(await importOriginal()) as Record<string, unknown>`). It was already suppressed, so nothing changes in enforcement — but it is a real gap in oxlint's implementation and is recorded rather than assumed away                   |
 
 ### Two findings that would have silently weakened the rule set
 
@@ -128,11 +128,11 @@ plugins. Checked with `oxlint --print-config`, which is the only way to see it.
 
 ## 5. Phase 5 — success criteria (T036–T038)
 
-| SC | Target | Before | After | Verdict |
-| --- | --- | ---: | ---: | --- |
-| **SC-001** | staged-file lint < 1 s | 5.58 s | **0.78 s** | **met** (7.2× faster) |
-| **SC-004** | staged-file peak RSS well below 780 MB | 825 512 KB | **119 208 KB** | **met** (−86 %); `--max-old-space-size=8192` dropped |
-| **SC-003** | cold full lint ≤ 15 s combined | 31.86 s | **33.1 s** (9.96 s oxlint + 23.1 s ESLint) | **missed** — see below |
+| SC         | Target                                 |     Before |                                      After | Verdict                                              |
+| ---------- | -------------------------------------- | ---------: | -----------------------------------------: | ---------------------------------------------------- |
+| **SC-001** | staged-file lint < 1 s                 |     5.58 s |                                 **0.78 s** | **met** (7.2× faster)                                |
+| **SC-004** | staged-file peak RSS well below 780 MB | 825 512 KB |                             **119 208 KB** | **met** (−86 %); `--max-old-space-size=8192` dropped |
+| **SC-003** | cold full lint ≤ 15 s combined         |    31.86 s | **33.1 s** (9.96 s oxlint + 23.1 s ESLint) | **missed** — see below                               |
 
 **SC-003 is missed, and the reason is not oxlint.** The oxlint layer does all 142 rules across
 the workspace in **9.96 s** cold, or **1.52 s** as a single invocation over the whole repo. The
@@ -150,6 +150,26 @@ is a separate change with its own dependency, and it is queued rather than smugg
 
 ---
 
-## 6. Phase 6 — TypeScript 7.0.2 (T052)
+## 6. Phase 6 — the TypeScript upgrade (T050–T053)
 
-_Pending._
+**Landed at 6.0.3, not 7.0.2.** Full evidence in [typescript-upgrade.md](./typescript-upgrade.md).
+
+TypeScript 7.0.2 typechecks this repository clean and **5.4× faster** (4.72 s → 0.87 s summed,
+peak RSS 290 MB → 94 MB on the largest project; `pnpm typecheck --skip-nx-cache` 7.38 s →
+2.19 s). It then breaks Nx outright: `@nx/js/typescript` and `@nx/eslint` call
+`ts.readConfigFile`, `ts.ScriptKind.Ts` and `ts.TypeFlags.Intrinsic`, none of which TypeScript 7
+ships, so `pnpm nx show projects` fails and every `nx run` with it.
+
+SC-010 and SC-011 are therefore **missed**: 6.0.3 is the same JavaScript compiler as 5.9.2 and
+measures the same (4.64 s vs 4.72 s). The ~6× belongs entirely to the Go port.
+
+| Version | `tsc` total, 4 projects | Nx graph | All gates |
+| --- | ---: | --- | --- |
+| 5.9.2 | 4.72 s | builds | pass |
+| **6.0.3** (landed) | **4.64 s** | builds | **pass** |
+| 7.0.2 | **0.87 s** | **fails** | unreachable |
+
+The one thing standing between this workspace and the 5.4× is Nx's use of the JavaScript
+compiler API. Notably it is **not** typescript-eslint any more: Phase 4 took it off the rule
+set, so the 41 type-aware rules will not shrink to zero on the day the compiler moves. That
+was the point of doing the lint migration first.

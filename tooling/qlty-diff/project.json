@@ -16,11 +16,7 @@
         "command": "tsc --noEmit",
         "cwd": "tooling/qlty-diff"
       },
-      "inputs": [
-        "default",
-        "^default",
-        "{projectRoot}/tsconfig.json"
-      ],
+      "inputs": ["default", "^default", "{projectRoot}/tsconfig.json"],
       "cache": true
     },
     "test": {

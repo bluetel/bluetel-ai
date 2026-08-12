@@ -13,13 +13,7 @@
     "node": true,
     "es2024": true
   },
-  "plugins": [
-    "typescript",
-    "unicorn",
-    "oxc",
-    "import",
-    "react"
-  ],
+  "plugins": ["typescript", "unicorn", "oxc", "import", "react"],
   "jsPlugins": [
     {
       "name": "import-x-js",
@@ -54,10 +48,7 @@
         "minimumDescriptionLength": 10
       }
     ],
-    "@typescript-eslint/consistent-type-definitions": [
-      "error",
-      "interface"
-    ],
+    "@typescript-eslint/consistent-type-definitions": ["error", "interface"],
     "@typescript-eslint/consistent-type-imports": [
       "error",
       {
@@ -97,10 +88,7 @@
     "@typescript-eslint/prefer-namespace-keyword": "error",
     "@typescript-eslint/triple-slash-reference": "error",
     "@typescript-eslint/unified-signatures": "error",
-    "arrow-body-style": [
-      "error",
-      "as-needed"
-    ],
+    "arrow-body-style": ["error", "as-needed"],
     "bluetel-ai/enforce-safe-env": "error",
     "check-file/filename-naming-convention": [
       "error",
@@ -132,14 +120,7 @@
     "import-x-js/order": [
       "error",
       {
-        "groups": [
-          "builtin",
-          "external",
-          "internal",
-          "parent",
-          "sibling",
-          "index"
-        ],
+        "groups": ["builtin", "external", "internal", "parent", "sibling", "index"],
         "newlines-between": "always",
         "alphabetize": {
           "order": "asc",
@@ -155,10 +136,7 @@
     "no-async-promise-executor": "error",
     "no-case-declarations": "error",
     "no-compare-neg-zero": "error",
-    "no-cond-assign": [
-      "error",
-      "except-parens"
-    ],
+    "no-cond-assign": ["error", "except-parens"],
     "no-constant-binary-expression": "error",
     "no-constant-condition": [
       "error",
@@ -186,10 +164,7 @@
     ],
     "no-empty-static-block": "error",
     "no-ex-assign": "error",
-    "no-extra-boolean-cast": [
-      "error",
-      {}
-    ],
+    "no-extra-boolean-cast": ["error", {}],
     "no-fallthrough": [
       "error",
       {
@@ -203,10 +178,7 @@
         "exceptions": []
       }
     ],
-    "no-invalid-regexp": [
-      "error",
-      {}
-    ],
+    "no-invalid-regexp": ["error", {}],
     "no-irregular-whitespace": [
       "error",
       {
@@ -294,12 +266,7 @@
   },
   "overrides": [
     {
-      "files": [
-        "**/*.js",
-        "**/*.jsx",
-        "**/*.mjs",
-        "**/*.cjs"
-      ],
+      "files": ["**/*.js", "**/*.jsx", "**/*.mjs", "**/*.cjs"],
       "rules": {
         "constructor-super": "error",
         "getter-return": [
@@ -341,10 +308,7 @@
       }
     },
     {
-      "files": [
-        "**/*.ts",
-        "**/*.tsx"
-      ],
+      "files": ["**/*.ts", "**/*.tsx"],
       "rules": {
         "@typescript-eslint/await-thenable": "error",
         "@typescript-eslint/no-array-delete": "error",
@@ -414,21 +378,13 @@
             "allowRegExp": true
           }
         ],
-        "@typescript-eslint/return-await": [
-          "error",
-          "error-handling-correctness-only"
-        ],
+        "@typescript-eslint/return-await": ["error", "error-handling-correctness-only"],
         "@typescript-eslint/unbound-method": "error",
         "@typescript-eslint/use-unknown-in-catch-callback-variable": "error"
       }
     },
     {
-      "files": [
-        "**/*.d.ts",
-        "**/*.config.ts",
-        "**/*.config.mts",
-        "**/*.config.cts"
-      ],
+      "files": ["**/*.d.ts", "**/*.config.ts", "**/*.config.mts", "**/*.config.cts"],
       "rules": {
         "@typescript-eslint/await-thenable": "off",
         "@typescript-eslint/no-array-delete": "off",
