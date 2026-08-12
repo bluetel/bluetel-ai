@@ -7,7 +7,7 @@ export NVM_DIR="$HOME/.nvm"
 # qlty lives in ~/.qlty/bin, which GUI git clients don't have on PATH
 export PATH="$HOME/.qlty/bin:$PATH"
 
-# oxlint owns 143 of the 147 lint rules, including all 41 type-aware ones. Its type-aware
+# oxlint owns 142 of the 146 lint rules, including all 41 type-aware ones. Its type-aware
 # mode needs the `oxlint-tsgolint` binary; without it oxlint aborts rather than quietly
 # skipping those rules, but the hook still has to treat a missing binary as a failure and
 # not let the commit through.
@@ -90,8 +90,8 @@ fi
 
 pnpm typecheck
 
-# The three rules oxlint cannot own: @nx/enforce-module-boundaries (needs the project
-# graph), @cspell/spellchecker (no oxlint equivalent, ~1555 ms) and no-octal. Run under Nx
+# The four rules oxlint cannot own: @nx/enforce-module-boundaries (needs the project graph),
+# @cspell/spellchecker (no oxlint equivalent, ~1555 ms), no-octal and no-dupe-args. Run under Nx
 # so they are cached and affected-scoped — and so the module-boundary rule actually fires,
 # which it never did on the old per-file path.
 pnpm nx --no-tui affected -t lint-workspace

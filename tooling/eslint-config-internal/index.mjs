@@ -4,11 +4,13 @@ import * as typescriptParser from '@typescript-eslint/parser'
 import prettierConfig from 'eslint-config-prettier'
 
 /**
- * The ESLint layer, reduced to the three rules oxlint cannot own.
+ * The ESLint layer, reduced to the four rules oxlint cannot own.
  *
- * Everything else moved to `@bluetel-ai/oxlint-config`, which runs the other 126 rules —
- * including all 41 type-aware ones — in a fraction of the time. What is left here is only
- * what has nowhere else to go:
+ * Everything else moved to `@bluetel-ai/oxlint-config`, which runs the other 142 of the 146
+ * enforced rules — including all 41 type-aware ones — in a fraction of the time. The counts
+ * come from `specs/005-oxlint-lint-performance/rule-inventory.md`, which is generated from
+ * both layers' real configs by `pnpm lint-inventory`; if they disagree with this comment,
+ * the generated file is right. What is left here is only what has nowhere else to go:
  *
  * - `@nx/enforce-module-boundaries` needs the Nx project graph, which exists only inside an
  *   Nx invocation. (It was silently skipped on the old staged-file path for exactly that
@@ -16,15 +18,19 @@ import prettierConfig from 'eslint-config-prettier'
  *   an Nx target is what finally makes it fire.)
  * - `@cspell/spellchecker` has no oxlint equivalent and costs ~1555 ms per invocation, none
  *   of which scales with the number of files being checked.
- * - `no-octal` is the one core ESLint rule in this workspace's set that oxlint does not
- *   implement. Established by probing, not assumed: oxlint fails config parsing on an
- *   unknown rule name, so every rule was tested by writing a config that enables it.
+ * - `no-octal` and `no-dupe-args` are the two core ESLint rules in this workspace's set that
+ *   oxlint does not implement. Established by probing, not assumed: oxlint fails config
+ *   parsing on an unknown rule name, so every rule was tested by writing a config that
+ *   enables it. Both only ever fire on sloppy-mode scripts — a legacy octal literal and a
+ *   duplicate parameter name are strict-mode syntax errors — which is why `no-dupe-args` is
+ *   one of the rules typescript-eslint switches off for TypeScript, and why both fixtures in
+ *   `tooling/lint-coverage` are `.cjs`.
  *
  * This config is run once per project by the Nx `lint-workspace` target — cached,
  * `affected`-scoped, and never per-file.
  *
- * It still needs `@typescript-eslint/parser` to read `.ts` files at all — the two remaining
- * rules that apply to TypeScript have to see an AST. That is *parsing*, not type-checking:
+ * It still needs `@typescript-eslint/parser` to read `.ts` files at all — the rules that still
+ * apply to TypeScript files have to see an AST. That is *parsing*, not type-checking:
  * no `parserOptions.project`, no program construction, no `strictTypeChecked`. It does still
  * mean this layer imports `typescript`, so FR-021 is met in substance but not to the letter,
  * and the TypeScript 7 phase will need either a parser that does not (`eslint-parser-oxc`)

@@ -127,6 +127,27 @@ describe('rule accounting (SC-005)', () => {
     expect(unowned).toEqual([])
   })
 
+  /**
+   * The harness's own contract, asserted rather than trusted.
+   *
+   * `fixtures.ts` claims one planted violation per rule that stayed with ESLint, or an
+   * `EXCUSED_RULES` entry saying why not. Nothing enforced that claim, and two rules
+   * (`no-octal`, `no-dupe-args`) had drifted out of both lists — leaving exactly the blind
+   * spot this package exists to remove, in the one layer where it is least visible: a rule
+   * that silently stops firing on the ESLint side cannot be caught by diffing the oxlint
+   * config either.
+   */
+  it('gives every rule left on ESLint a fixture or a recorded excuse', () => {
+    const planted = new Set(ALL_FIXTURES.map((fixture) => fixture.rule))
+    const excused = new Set(EXCUSED_RULES.map((entry) => entry.rule))
+
+    const unchecked = Object.keys(ESLINT_WORKSPACE_RULES).filter(
+      (rule) => !planted.has(rule) && !excused.has(rule),
+    )
+
+    expect(unchecked).toEqual([])
+  })
+
   it('gives every excused rule a reason and a place it is covered instead', () => {
     for (const entry of EXCUSED_RULES) {
       expect(entry.reason.length).toBeGreaterThan(0)

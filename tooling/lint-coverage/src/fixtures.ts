@@ -130,6 +130,27 @@ export const both = [fc, path]`,
 
 export const env = createEnv`,
   ),
+  // The two rules that stayed with ESLint because oxlint does not implement them. Both
+  // plant as `.cjs`, and they have to: a legacy octal literal and a duplicate parameter
+  // name are *syntax errors* in strict mode, so in a `.ts` or `.mjs` fixture the parser
+  // fails before either rule is consulted and the file reports `Parsing error` with a null
+  // rule ID — which the harness reads, correctly, as the rule not firing. Sloppy-mode
+  // script is the only place a violation of either is expressible at all, which is also
+  // why typescript-eslint switches `no-dupe-args` off for TypeScript.
+  ts(
+    'no-octal',
+    'no-octal.cjs',
+    `const mode = 0755
+module.exports = { mode }`,
+  ),
+  ts(
+    'no-dupe-args',
+    'no-dupe-args.cjs',
+    `function dupe(a, a) {
+  return a
+}
+module.exports = { dupe }`,
+  ),
 ]
 
 /**
@@ -459,9 +480,16 @@ export const ALL_FIXTURES: readonly RuleFixture[] = [...SYNTACTIC_FIXTURES, ...T
 
 /**
  * Rules a standalone fixture file cannot express, each with the check that covers it
- * instead. Nothing is allowed to be merely absent: an excused rule is still accounted for
- * by `parity.test.ts`, which asserts that every enabled rule is fixture-covered,
- * preset-asserted or listed here.
+ * instead. Nothing is allowed to be merely absent: `parity.test.ts` asserts that every rule
+ * left on the ESLint layer is either fixture-covered above or listed here with a reason —
+ * the set where a silent rule would otherwise be invisible, since those rules no longer run
+ * anywhere the oxlint config can be diffed against.
+ *
+ * The claim this comment does *not* make: fixture coverage is not universal across all 146
+ * enabled rules. The corpus is the 41 type-aware rules, the rules this workspace configures
+ * by hand, and everything left on ESLint. The remaining preset rules are accounted for by
+ * `rule-inventory.md` having an owner for every one of them, and by oxlint hard-failing on an
+ * unknown rule name rather than skipping it.
  */
 export const EXCUSED_RULES: readonly ExcusedRule[] = [
   {

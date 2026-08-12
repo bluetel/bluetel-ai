@@ -244,7 +244,7 @@ parity suite passes, and the staged-file pass is under 1 s.
       `eslint-plugin-unused-imports`, and `eslint-plugin-react-compiler` if T016 confirmed native
       parity). Run `pnpm knip` to confirm nothing is left orphaned. **Do not** expect `typescript` itself
       to leave the tree: `@nx/eslint` hard-depends on `~5.9.2` (plan **C4**).
-- [X] **T027** Apply `eslint-plugin-oxlint` **last** in the flat config, after `prettierConfig`, to
+- [x] **T027** Apply `eslint-plugin-oxlint` **last** in the flat config, after `prettierConfig`, to
       disable every ESLint rule oxlint now owns. Then verify SC-008: run both layers over the workspace
       and assert no diagnostic appears twice.
 
@@ -260,10 +260,10 @@ parity suite passes, and the staged-file pass is under 1 s.
 - [x] **T029** Add an explicit `lint` target to all 7 `project.json` files, following the existing
       `typecheck`/`test` shape (`nx:run-commands` + `cwd`). Verify `pnpm nx show project <name>` lists
       both `lint` and `lint-workspace`.
-- [X] **T030** Verify **gap G9** empirically: change one rule's severity in the oxlint config, re-run
+- [x] **T030** Verify **gap G9** empirically: change one rule's severity in the oxlint config, re-run
       `pnpm lint:check`, and confirm a cache **miss**. A cache hit here means a rule change silently
       does nothing — fix the inputs before continuing.
-- [X] **T031** Verify **gap G7**: plant a module-boundary violation and confirm
+- [x] **T031** Verify **gap G7**: plant a module-boundary violation and confirm
       `pnpm nx run <project>:lint-workspace` reports `@nx/enforce-module-boundaries`. This closes the
       pre-existing silent-skip gap found in `research.md` §1.
 - [x] **T032** Update `package.json`: replace the `lint-staged` ESLint entry with
@@ -276,9 +276,12 @@ parity suite passes, and the staged-file pass is under 1 s.
       existing `qlty` treatment (FR-018). Confirm a staged-deletion-only commit still succeeds (FR-019).
 - [ ] **T034** Update `.github/workflows/ci.yml` to run `lint-workspace` alongside the existing targets:
       `pnpm exec nx affected -t lint lint-workspace test typecheck design-lint --parallel=$(nproc)`.
-      Without this, CI stops enforcing the 2 workspace-scoped rules — an FR-011 violation and the worst possible outcome of this
-      feature. **Note**: the GitHub App cannot modify `.github/workflows/`, so this task must be applied
-      by a human or in a separate human-authored commit.
+      Without this, CI stops enforcing the 4 workspace-scoped rules — `@nx/enforce-module-boundaries`,
+      `@cspell/spellchecker`, `no-octal`, `no-dupe-args` — an FR-011 violation and the worst possible
+      outcome of this feature. **Note**: the GitHub App cannot modify `.github/workflows/`, so this task
+      must be applied by a human or in a separate human-authored commit. Until it is, the only place those
+      4 rules run is the pre-commit hook, which `--no-verify` skips — so this is the one open task that
+      decides whether the migration's coverage claim holds in CI.
 - [x] **T035** Convert the two existing inline suppressions (**gap G8**):
       `packages/env-validation-errors/src/index.ts:3` disables `@bluetel-ai/enforce-safe-env`, which now
       lives in oxlint, so it needs the `oxlint-disable-next-line` form;
@@ -287,8 +290,8 @@ parity suite passes, and the staged-file pass is under 1 s.
       design, so it needs converting too — the original plan wrongly assumed it stayed with ESLint.
       Confirm both still suppress, and that neither file reports an error.
 
-**Checkpoint**: oxlint enforces 127 rules including all 41 type-aware ones, ESLint enforces the
-remaining 2, the parity suite is green, no duplicate diagnostics, and **nothing on the lint path loads
+**Checkpoint**: oxlint enforces 142 of the 146 rules including all 41 type-aware ones, ESLint enforces
+the remaining 4, the parity suite is green, no duplicate diagnostics, and **nothing on the lint path loads
 the TypeScript compiler API any more** — which is the precondition Phase 6 needs.
 
 ---
@@ -305,27 +308,27 @@ discoverable.
       `/usr/bin/time -f "%e s %M KB"`. Record wall time (target < 1 s, from 5.68 s) and peak RSS (target
       far below 798 648 KB). If SC-001 is missed, apply the T017 fallback and re-measure before
       declaring done.
-- [X] **T037** **SC-002**: time the full `.husky/pre-commit` run on the same one-file staged diff used
+- [x] **T037** **SC-002**: time the full `.husky/pre-commit` run on the same one-file staged diff used
       in T001. Target ≥ 40 % reduction. Note that step 4 is Nx-cached, so record both a warm and a cold
       figure — quoting only the warm one would overstate the result.
 - [x] **T038** **SC-003**: `time pnpm lint:check --skip-nx-cache` and the `lint-workspace` equivalent.
       Target ≤ 15 s combined, from 30.7 s.
-- [X] **T039** **SC-005**: complete `rule-inventory.md` — every one of the 129 rows has an Owner and a
+- [x] **T039** **SC-005**: complete `rule-inventory.md` — every one of the 129 rows has an Owner and a
       Status. Any `dropped` row needs a reason, a compensating check, and explicit sign-off in the PR
       body. Ideally there are none.
-- [X] **T040** **SC-006**: full parity suite run. Every previously-enforced rule fires on its planted
+- [x] **T040** **SC-006**: full parity suite run. Every previously-enforced rule fires on its planted
       violation.
-- [X] **T041** **SC-007**: `pnpm nx run-many -t lint lint-workspace` exits zero across the workspace, and
+- [x] **T041** **SC-007**: `pnpm nx run-many -t lint lint-workspace` exits zero across the workspace, and
       `git diff origin/main` contains no `eslint-disable`/`oxlint-disable` added to a pre-existing file
       (the two conversions in T035 are edits to existing comments, not new suppressions).
-- [X] **T042** [P] Update `AGENTS.md` and `.claude/rules/typescript-conventions.md` (FR-020): the two
+- [x] **T042** [P] Update `AGENTS.md` and `.claude/rules/typescript-conventions.md` (FR-020): the two
       lint layers, when each runs, the fast standalone command agents should use mid-edit (US3), and how
       to add a rule to the right layer (US5). Must not contradict the Constitution.
-- [X] **T043** [P] Amend `.specify/memory/constitution.md` — principle IV names "ESLint (with `--fix`)
+- [x] **T043** [P] Amend `.specify/memory/constitution.md` — principle IV names "ESLint (with `--fix`)
       … via lint-staged" and the Development Workflow section lists the pre-commit step order. Both are
       now inaccurate. Per the Governance section, a tool/document disagreement is a defect that must be
       fixed in the same change that discovers it. PATCH or MINOR bump with a Sync Impact Report.
-- [X] **T044** Run `/speckit-analyze` across `spec.md`, `plan.md` and `tasks.md` to catch drift, then
+- [x] **T044** Run `/speckit-analyze` across `spec.md`, `plan.md` and `tasks.md` to catch drift, then
       run the full gate set: `pnpm nx affected -t lint lint-workspace test typecheck`, `pnpm knip`,
       `pnpm qlty:diff`.
 - [ ] **T045** Open follow-up issues for the deliberately-deferred items, so they are not lost:
@@ -357,7 +360,7 @@ start this phase until T041 is green.**
 **6.0.3** — still inside typescript-eslint's peer range, so it is safe even if Phase 4 were also reverted
 — with the blocker written down (FR-026). It is not a partial upgrade, and it is never a dropped rule.
 
-- [X] **T050** **Compatibility matrix first (FR-025, gap G13).** On a scratch branch with
+- [x] **T050** **Compatibility matrix first (FR-025, gap G13).** On a scratch branch with
       `typescript@7.0.2` installed, exercise every tool that consumes TypeScript and record the result in
       `specs/005-oxlint-lint-performance/typescript-upgrade.md`: `tsc --noEmit` per project;
       `pnpm nx show projects` and `pnpm nx show project <name>` (does `@nx/js/typescript` still infer
@@ -365,20 +368,20 @@ start this phase until T041 is green.**
       and the editor story (TypeScript 7 ships `tsc` only — 6.0.3 also shipped a `tsserver` bin — so note
       what contributors' editors will need). **A tool that skips work rather than failing is a blocker,
       not a pass**; check output, not just exit codes.
-- [X] **T051** Bump the pins: `typescript` to `7.0.2` in `packages/env-validation-errors/package.json` and
+- [x] **T051** Bump the pins: `typescript` to `7.0.2` in `packages/env-validation-errors/package.json` and
       anywhere else it is declared, and add an explicit root `typescript` devDependency so resolution is
       deliberate rather than hoisting-dependent (**FR-024**, plan **C4**). Then assert both of these agree
       and record them: `node ./node_modules/.bin/tsc --version` and
       `node -e "console.log(require('typescript/package.json').version)"`. Note `@nx/eslint` still
       hard-depends on `~5.9.2`, so a second copy will remain in the tree — record it and its consumer
       rather than trying to remove it.
-- [X] **T052** **SC-010 / SC-011**: re-run the T047 measurements with
+- [x] **T052** **SC-010 / SC-011**: re-run the T047 measurements with
       `/usr/bin/time -f "%e s %M KB"` — per-project `tsc --noEmit` and
       `pnpm typecheck --skip-nx-cache`. Targets: ≥ 50 % wall-clock reduction (baseline 5.09 s summed) and
       ≥ 50 % peak-RSS reduction (baseline 286 872 KB on the largest project). Append to
       `measurements.md`. No `tsconfig` option may be relaxed to get there (**FR-023**) — no widened
       `skipLibCheck`, no reduced `strict`, no new `@ts-expect-error`.
-- [X] **T053** **SC-012 / SC-013**: re-run the Phase 2 parity suite and re-check `rule-inventory.md` — all
+- [x] **T053** **SC-012 / SC-013**: re-run the Phase 2 parity suite and re-check `rule-inventory.md` — all
       129 rules still accounted for, still zero dropped. Then re-run the type-aware layer and diff its
       diagnostics against the pre-bump run: any change is a **semantics** change from moving the compiler
       onto TypeScript 7, and each difference must be explained in `typescript-upgrade.md`, not merely
@@ -387,6 +390,38 @@ start this phase until T041 is green.**
 
 **Checkpoint**: `tsc` is ~6× faster, all 129 rules still enforced, and the linter and the compiler are on
 the same TypeScript.
+
+---
+
+## Phase 7: Review remediation
+
+**Goal**: Close the gaps the PR #27 review found in the landed work. Not new scope — each item is a place
+the implementation and its own stated contract had come apart.
+
+**Independent Test**: the parity suite fails if any rule on the ESLint layer loses both its fixture and
+its excuse, and every rule count in the repo agrees with generated `rule-inventory.md`.
+
+- [x] **T054** **Close the fixture hole (FR-005 / SC-006).** `no-octal` and `no-dupe-args` were in
+      `ESLINT_WORKSPACE_RULES` with neither a fixture nor an `EXCUSED_RULES` entry, so two of the four
+      rules ESLint still owns had no silent-failure detection at all — in the layer where a silent rule is
+      hardest to spot, since it cannot be caught by diffing the oxlint config either. Both now plant as
+      `.cjs`: a legacy octal literal and a duplicate parameter are strict-mode **syntax errors**, so a
+      `.ts` or `.mjs` fixture reports `Parsing error` with a null rule ID and the rule never runs.
+- [x] **T055** **Make the contract self-enforcing.** New case in `parity.test.ts`: every key of
+      `ESLINT_WORKSPACE_RULES` must be fixture-covered or excused. Verified by mutation — switching
+      `no-octal` off in the ESLint config turns the suite red — because an assertion nobody has seen fail
+      is the same shape of problem as the rule it was written to catch. `fixtures.ts`'s docstring, which
+      claimed the suite asserted this for _every_ enabled rule, now states what is actually covered.
+- [x] **T056** **Reconcile the rule counts.** `tooling/eslint-config-internal/index.mjs` said "three
+      rules" over a block enforcing four; `.husky/pre-commit` said "143 of the 147"; T034 and the Phase 4
+      checkpoint said 2 and 127. All now read 142 of 146 with 4 on ESLint, and name generated
+      `rule-inventory.md` as the source of truth rather than restating it. Also `.prettierignore`:
+      Prettier aligns markdown tables and the inventory generator does not, so formatting the generated
+      file made every regeneration look like drift and every format look like an edit.
+
+**Checkpoint**: `pnpm lint:check`, `pnpm typecheck` and `pnpm test` green from a clean install;
+`pnpm lint-inventory` reproduces the committed inventory byte-for-byte. **T034 remains open** and is the
+only thing still standing between this feature and CI actually enforcing all 146 rules.
 
 ---
 

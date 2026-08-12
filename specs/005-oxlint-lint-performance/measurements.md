@@ -163,11 +163,11 @@ ships, so `pnpm nx show projects` fails and every `nx run` with it.
 SC-010 and SC-011 are therefore **missed**: 6.0.3 is the same JavaScript compiler as 5.9.2 and
 measures the same (4.64 s vs 4.72 s). The ~6× belongs entirely to the Go port.
 
-| Version | `tsc` total, 4 projects | Nx graph | All gates |
-| --- | ---: | --- | --- |
-| 5.9.2 | 4.72 s | builds | pass |
-| **6.0.3** (landed) | **4.64 s** | builds | **pass** |
-| 7.0.2 | **0.87 s** | **fails** | unreachable |
+| Version            | `tsc` total, 4 projects | Nx graph  | All gates   |
+| ------------------ | ----------------------: | --------- | ----------- |
+| 5.9.2              |                  4.72 s | builds    | pass        |
+| **6.0.3** (landed) |              **4.64 s** | builds    | **pass**    |
+| 7.0.2              |              **0.87 s** | **fails** | unreachable |
 
 The one thing standing between this workspace and the 5.4× is Nx's use of the JavaScript
 compiler API. Notably it is **not** typescript-eslint any more: Phase 4 took it off the rule
