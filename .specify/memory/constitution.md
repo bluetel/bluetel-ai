@@ -32,6 +32,25 @@ Templates requiring updates:
   - ✅ README.md / AGENTS.md — reviewed; no principle references to correct
 
 Deferred TODOs: none
+
+SYNC IMPACT REPORT — 1.0.0 → 1.1.0
+==================================
+Bump rationale: MINOR. Principle IV's lint gate is materially expanded — it now describes two
+layers rather than one, and adds a new requirement (a rule belongs to exactly one layer, and
+moving one requires a planted-violation fixture). No principle removed or redefined.
+
+Trigger: spec 005 replaced ESLint with oxlint on the per-file path. Per the Governance section,
+a tool/document disagreement is a defect to be fixed in the change that creates it.
+
+Modified sections:
+  - Core Principles IV — lint gate now names oxlint and the ESLint `lint-workspace` layer
+  - Development Workflow & Quality Gates — pre-commit order gains the `lint-workspace` step
+    and the oxlint/tsgolint fail-closed requirement; CI command gains `lint-workspace`
+
+Templates requiring updates:
+  - ✅ AGENTS.md — new "Linting" section describing both layers and how to add a rule
+  - ✅ .claude/rules/typescript-conventions.md — same, in brief
+  - ✅ .specify/templates/*.md — reviewed; no lint-tool references, no change required
 -->
 
 # bluetel-ai Constitution
@@ -78,7 +97,14 @@ fast enough to never be worth skipping.
 Quality signals are gates, not advice. The following MUST pass and MUST NOT be weakened to make
 a change land:
 
-- ESLint (with `--fix`) and Prettier over all staged files, via lint-staged.
+- oxlint (with `--type-aware --fix`) and Prettier over all staged files, via lint-staged.
+  oxlint enforces the great majority of the rule set, including every rule that needs type
+  information. The handful it cannot run — currently `@nx/enforce-module-boundaries`,
+  `@cspell/spellchecker`, `no-octal` and `no-dupe-args` — are enforced by ESLint as the Nx
+  `lint-workspace` target, which the pre-commit hook runs `affected`-scoped. A rule MUST
+  belong to exactly one layer, and moving one between layers MUST come with a
+  planted-violation fixture in `tooling/lint-coverage` proving it still fires. A green lint
+  run is not evidence that a rule ran.
 - `pnpm typecheck` across the workspace — TypeScript runs in `strict` mode.
 - The qlty code-health gate on the branch diff (`pnpm qlty:diff`): zero lint or security issues
   at `medium` severity or above, and at most 10% duplicated lines in the changed files.
@@ -128,13 +154,15 @@ Unused exports and dependencies MUST be removed rather than suppressed, unless a
 ## Development Workflow & Quality Gates
 
 **Local loop.** Work happens on a `feature/<name>` branch. The pre-commit hook runs, in order:
-lint-staged (ESLint + Prettier), the affected Vitest suites, `pnpm typecheck`, and
-`pnpm qlty:diff` against `origin/main`. qlty MUST be installed locally; the hook fails closed
-when it is absent.
+lint-staged (oxlint + Prettier), the affected Vitest suites, `pnpm typecheck`,
+`nx affected -t lint-workspace` (the ESLint layer), and `pnpm qlty:diff` against `origin/main`.
+qlty MUST be installed locally, and `oxlint` and `oxlint-tsgolint` MUST both be resolvable; the
+hook fails closed when any of them is absent.
 
 **Continuous integration.** Pull requests run two independent jobs. The `qlty` job re-runs the
 code-health gate against the PR base ref. The `main` job runs
-`nx affected -t lint test typecheck`. Both MUST be green before merge.
+`nx affected -t lint lint-workspace test typecheck`. Both MUST be green before merge — a run
+that omits `lint-workspace` is not enforcing the whole rule set.
 
 **Review.** Every pull request MUST be reviewed against these principles. A reviewer who finds a
 principle violated MUST either request a change or require it be recorded in the plan's
@@ -173,4 +201,4 @@ described above, and those MUST remain the source of truth for anything mechanic
 `AGENTS.md` and `.claude/rules/`. Those documents elaborate on this constitution and MUST NOT
 contradict it.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-05 | **Last Amended**: 2026-08-05
+**Version**: 1.1.0 | **Ratified**: 2026-08-05 | **Last Amended**: 2026-08-12

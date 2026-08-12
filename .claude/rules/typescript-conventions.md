@@ -86,3 +86,16 @@ import { bar } from '../utils/helper'
 import { foo } from './module.js'
 import { bar } from '../utils/helper.js'
 ```
+
+## Linting
+
+`oxlint` enforces 142 of the 146 rules, including every type-aware one; ESLint enforces the
+remaining 4 as the Nx `lint-workspace` target. Run `pnpm lint:fast` (≈1.5 s for the whole
+repo) while editing rather than a narrower command.
+
+New rules go in the root `.oxlintrc.json`, **with their options** — several rules fire on
+nothing at oxlint's defaults. Never enable an oxlint category: it lights up existing code
+with rules nobody chose.
+
+Every enforced rule has a planted-violation fixture in `tooling/lint-coverage`. Moving a rule
+between layers means updating its fixture in the same change.
