@@ -156,6 +156,13 @@ entry in Complexity Tracking below.
 `claude/issue-15-…`, not `feature/<name>`; and the external dependency is Sustainable-Use-licensed, which is
 within its grant for internal use but needs a human sign-off before anything client-facing is built on it.
 
+> **Update 2026-08-17 — the licence gate now passes outright for internal use.** The sign-off T060 was waiting
+> for was granted; see [T060](#t060--licence-sign-off-granted). The `PASS*` on _Dependency Standards —
+> external_ becomes `PASS` for this repository's own CI and pre-commit gate. It stays conditional only for
+> client-facing use, which nothing here does. The branch deviation was also resolved for the implementation
+> work, which sits on `feature/prompt-quality-validator`; the constitution amendment T089 raises is still
+> outstanding for the `claude/*` branches the GitHub Action creates.
+
 **Notes on the gates that required a judgement rather than an observation:**
 
 - **I (Nx).** `tooling/prompt-lint` owns `project.json`, `tsconfig.json`, `vitest.config.ts` and
@@ -451,6 +458,200 @@ be wired speculatively.
 | A Python tool in a pnpm/Nx workspace, required by CI and the hook             | Instructed: _"we were hoping to use this tool as a dependency dont re-write it"._ And correct on the merits — the alternative is hand-writing shingle clustering, a token approximation and a bespoke score, then owning their determinism forever.                | Reimplementing `contextops` in TypeScript is the thing the review rejected. `qlty` is already a non-Node binary that CI and `.husky/pre-commit` both require, so the shape is precedented rather than new.                                                                                  |
 | A Sustainable-Use-licensed dependency (not OSI-approved)                      | It is the tool named in the issue and the one the review asked for. Internal CI use falls inside its grant — _"your own internal business operations"_ — and it is never shipped, vendored or installed onto anyone else's machine.                                | Vendoring the source would be redistribution under terms a client deliverable cannot meet. An MIT alternative measuring the same thing was not found, and writing one is the rejected option above. Human sign-off is still required before any client-facing use — [R8](./research.md#r8). |
 | A blocking gate that depends on a third party's scoring engine                | The score is the half with an external referent; a number only we compute is comparable with nothing.                                                                                                                                                              | Mitigated rather than avoided: the version is pinned and asserted, the five delegated rules ship non-blocking, everything the dependency touches sits behind one adapter directory, and `--rules-only` runs the correctness half alone.                                                     |
+
+### Divergences found while implementing (recorded 2026-08-17)
+
+Two are corrections to this design, found by running it rather than by reading it. Both are in
+`refs/dangling-path` and `skill/section-missing` — the two rules whose measured behaviour disagreed with
+what the design predicted.
+
+| Divergence                                                                                                                                                                                                 | Why the design was wrong                                                                                                                                                                                                                                                                                                                                                                         | What shipped instead                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **[R2](./research.md#r2)'s four rules do not produce R2's claimed result.** Implemented exactly as written they gave **80 findings, 70 of them `.specify/extensions.yml`** — against a claim of exactly 1. | R2 lists "runtime-created" as one of its four noise classes and names that very path as the example, but rules 1–4 cannot filter it: `.specify/` **is** a real directory, so rule 3 passes. The same gap admits `.specify/feature.json` ("Persist the resolved path to…"), `specs/003-user-auth` ("for example, …") and `.github/agents/` ("e.g. in …") — three more of R2's own stated classes. | A fifth rule: the reference is not reported when the line does not claim present-tense existence — an existence check, a creational verb, or an illustrative marker. **Lexical, not semantic**, the same bound `conventions/config-mismatch` works under. Result: **2 findings, both the one real defect** (catalog + installed copy), zero false positives. |
+| **`skill/section-missing` fired on 8 installed reference documents.**                                                                                                                                      | The catalogue applies it to `IS`, and [data-model](./data-model.md#artifactkind) defines `installed-skill` as the whole installed tree — so the kind conflates a skill _body_ with the reference files it reads. A reference is prose to be consulted, not a procedure with a completion condition.                                                                                              | The rule requires the artifact to be a `SKILL.md`. The alternative — splitting `installed-skill` into body and reference kinds — is the better model and is left as a follow-up, because it changes `appliesTo` for every rule.                                                                                                                              |
+
+A third divergence blocks Phase 6 and is **not** resolved here, because resolving it needs decisions this
+run cannot make — see [the Phase 6 note](#phase-6-is-blocked-recorded-2026-08-17).
+
+### Phase 4 divergences (recorded 2026-08-17)
+
+Four came out of building US2. The first is a defect in the fix recorded above, which is the more
+interesting kind of finding: the correction to R2 had its own bug, and only running the design's own
+acceptance scenario surfaced it.
+
+| Divergence                                                                                                                                                                                                                                               | Why                                                                                                                                                                                                                                                                                                                                              | What shipped                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rule 5 silenced itself on the paths it most needed to report.** It tested the whole line, so `docs/does-not-exist.md` matched `exist` **inside its own filename**. Found by running quickstart Scenario 4, whose fixture is named `does-not-exist.md`. | Rule 5 asks what the surrounding _sentence_ claims, so the reference must not be part of the text it reads. The words at risk — exist, missing, absent, optional, created — are exactly the ones a placeholder filename uses. Masking _every_ path token then broke the `e.g.` exemption, because the scanner emits `e.g` as a token of its own. | Rule 5 reads the line with **candidate references only** blanked out. Regression tests for four such filenames, plus the case that the prose's own existence check still exempts a reference named `does-not-exist.md`. |
+| **A malformed `baseline.json` has no exit code in [contracts/cli.md](./contracts/cli.md#exit-codes).**                                                                                                                                                   | A baseline that fails to load downgrades nothing, which over a red surface is indistinguishable from a clean pass. It is configuration, not a prompt defect.                                                                                                                                                                                     | Exit `3`, decided **before scope resolution**, so FR-036's "no artifact evaluated" holds. A missing file stays legitimate — an empty baseline is the state the file is working towards.                                 |
+| **A baseline entry naming a bookkeeping rule is reported stale, not refused at load.**                                                                                                                                                                   | Such an entry exempts nothing, which _is_ the stale condition. Refusing the load would be exit `3` with no artifact evaluated — a report saying nothing about the prompts, over an entry that was already inert. Symmetric with how `applySuppressions` treats an unknown rule id.                                                               | A third stale message, alongside "reported nothing" and "not a registered rule".                                                                                                                                        |
+| **[R9](./research.md#r9)'s premise is stale.** It cites the qlty pre-commit block as installing on demand, and contrasts `prompt-lint` with it.                                                                                                          | That variant is not on this branch. It lives on `feature/oxlint-vscode-settings` and was reverted; what landed requires qlty preinstalled. Verified with `git merge-base --is-ancestor` against all four candidate commits.                                                                                                                      | Both gates now behave identically — report, never install. The hook comment claims only that `prompt-lint` installs nothing, which is true either way.                                                                  |
+
+Three smaller notes, none of which changed a decision:
+
+- **`nx affected -t prompt-lint` is inert today.** T046 asked for the target to be appended to the
+  affected list, and it was, but `nx show projects --with-target prompt-lint` returns `[]` until T056
+  adds the target in Phase 5. The CI comment describing it as the push-event coverage is therefore
+  forward-looking rather than currently true.
+- **[data-model](./data-model.md) calls the stale-baseline finding `stale-baseline`.** No such rule id
+  exists. `suppression/stale`'s registry statement already names baseline entries, and that is what the
+  code reuses — the data-model wording is the loose one.
+- **The hook uses `prompt-lint:diff`, not `--staged`,** per T047 and
+  [contracts/cli.md](./contracts/cli.md)'s integration table, though FR-043's prose says "staged".
+  Behaviourally equivalent here, because `listChangedFiles` folds in the index and untracked files. The
+  cost is that the hook needs `origin/main` resolvable — exactly as the `qlty:diff` line beside it
+  already does.
+
+### Phase 5 divergences and the T058 measurement (recorded 2026-08-17)
+
+The measured surface, all 17 rules, `pnpm prompt-lint --all --no-baseline`, over 93 artifacts:
+
+| Rule                           | Measured  | [Adoption table](#adoption-how-this-lands-without-breaking-every-open-pr) predicted | Encoded as                                 |
+| ------------------------------ | --------- | ----------------------------------------------------------------------------------- | ------------------------------------------ |
+| `template/placeholder-residue` | 47 errors | not measured                                                                        | 17 baseline entries                        |
+| `skill/section-missing`        | 23 errors | not measured                                                                        | 23 baseline entries                        |
+| `skill/use-when-trigger`       | 20 warns  | 10                                                                                  | ships `warn`, under the 50 threshold       |
+| `conventions/config-mismatch`  | 3 warns   | 1                                                                                   | ships `warn`, under the 50 threshold       |
+| `refs/dangling-path`           | 2 errors  | 1                                                                                   | **not baselined** — fixed by T086          |
+| `meta/*` (5 rules)             | 0         | 0                                                                                   | —                                          |
+| `install/*` (3 rules)          | 0         | 0 (drift verified)                                                                  | `version-bump` not evaluated under `--all` |
+
+**Three predictions were low, and each for the same structural reason: the installed tree doubles a
+finding.** `skill/use-when-trigger` applies to `catalog-meta` **and** `agent-pointer`, and the pointer
+descriptions are byte-identical copies, so ten offending descriptions produce twenty findings.
+`refs/dangling-path`'s single defect has its installed copy, which is the design's own point about
+publication. `conventions/config-mismatch`'s "1 pre-existing violation" is one _file_ but three
+(line, value) pairs. None of these is a rule behaving wrongly; the counting unit in the adoption table
+was files, and the gate counts findings.
+
+[contracts/rules.md](./contracts/rules.md) says `skill/use-when-trigger` has "10 pre-existing
+violations" while its own `Applies to` line lists CM **and** AP. Those two statements cannot both hold.
+`appliesTo` was followed, because narrowing the rule to `catalog-meta` would leave the pointer —
+the file an agent reads first when deciding whether a skill applies — unchecked, which is the rule's
+entire purpose.
+
+**One defect found by measuring, in a Phase 3 rule.** `template/placeholder-residue` reported
+`$ARGUMENTS` in six `speckit-*` skill bodies. The contract says the rule covers "`$ARGUMENTS` **outside
+the one slot where it is meaningful**" and the qualifier had not been implemented — so the rule was
+asking six skills to delete the mechanism by which they receive their arguments. The slot is now
+recognised structurally: `$ARGUMENTS` as the last token on its line, preceded by nothing or a `label:`.
+Used mid-sentence it is still reported, because there it genuinely is ambiguous with prose. 53 → 47.
+
+**Why the two large counts are baselined and the two `warn` rules are not.** The plan's own division
+holds: severity handles "this rule is not ready to block anywhere", the baseline handles "this rule
+blocks, except for these named files". `use-when-trigger` and `config-mismatch` already ship `warn` by
+`defaultSeverity`, and 23 warnings sit under the threshold of 50 — so T058's instruction to add them to
+`severities` would have written a no-op, and baselining them would make their later promotion to `error`
+a two-step edit instead of one. They stay visible and non-blocking, which is what "ships as `warn`"
+means. The 40 baseline entries cover only the two rules that ship `error` with a pre-existing surface.
+
+`refs/dangling-path` is deliberately **not** baselined: the adoption table says "promoted to `error`
+immediately — fix the one defect in its own change", and that is T086. Until it lands, a whole-surface
+run is red with exactly those two findings, which is the intended state rather than an oversight.
+
+**One defect found by running the gate the way CI runs it.** With the baseline populated, a
+diff-scoped run reported all 40 entries as `suppression/stale`. Staleness is a claim about a
+file, and it can only be made about a file that was read — under `--diff` and `--staged` the
+targets are the changed artifacts, so every entry protecting an untouched file matched nothing
+and was reported stale. That is on the exact code path CI and the pre-commit hook take, and it
+told contributors to delete entries protecting files their branch never touched. `applyBaseline`
+now takes the evaluated paths: an out-of-scope entry is neither applied nor stale, because
+nothing was learned about it. An entry naming an unregistered rule is still reported at any
+scope, since that is not a claim about a file. Found only because T086 made the surface clean
+enough to read the footer.
+
+Two smaller notes:
+
+- **T058 asked for `severities` entries that would be inert.** Recorded above rather than written.
+- **The gate's default baseline is this package's own file**, resolved from the module. Once populated,
+  every gate test driving a temporary repository saw all 40 entries as stale. The suite now points its
+  fixtures at a path that does not exist, which `loadBaseline` treats as an empty baseline. Worth knowing
+  before FR-045's deferred target-project adoption: a baseline resolved from the tool rather than from the
+  repository under evaluation is the wrong default for any repository but this one.
+
+## Phase 6: the two blockers and how they were resolved (recorded 2026-08-17)
+
+### T060 — licence sign-off: **GRANTED**
+
+Harry Twigg (ht@bluetel.co.uk), who holds the authority to make it, signed off the
+[R8](./research.md#r8) reading on 2026-08-17: `contextops` may be used under the Sustainable Use License
+for this repository's own CI and pre-commit gate. This resolves the `PASS*` on the
+_Dependency Standards — external_ gate for internal use.
+
+The stance R8 records is unchanged and is what keeps the grant sufficient: **`prompt-lint` never installs,
+vendors or ships `contextops` anywhere.** It invokes one that is already present and says so when it is not.
+A target project that wants the context-economy half installs the dependency under its own terms — which is
+route (4) in R8, and the only one that keeps the question where it belongs. Anything client-facing built on
+it is a separate decision, not covered by this one.
+
+### FR-050's version assertion — **revised, because the tool cannot satisfy it**
+
+The design says: assert `contextops --version` equals the pin, exit `6` on mismatch. Measured, **no route
+reports the pinned version** — `--version` answers `0.1.0` for every distribution and the JSON report's
+`metadata.version` answers `0.3.0`. Implemented literally, the assertion fails 100% of correctly-installed
+runs.
+
+**Decision (directed 2026-08-17): trust the pin, not the self-report.** The pin moves into the _invocation_
+rather than into a post-hoc check:
+
+- Resolution pins the distribution — `uvx --from contextops==0.3.3 contextops`, `pipx run
+contextops==0.3.3` — so the resolver guarantees which code runs. That is a **stronger** guarantee than
+  asking the binary, because it constrains what executes rather than believing what it says afterwards.
+- `--version` is still called, but treated as **advisory**: it proves the binary is executable and is
+  recorded in the report as `selfReported` beside the pin. It never fails the run.
+- `analyser.version` in the report is the pin — the version that was requested and resolved — with the
+  self-reported string carried alongside so the discrepancy is visible rather than smoothed over.
+- Exit `6` still fires for the failures that are real: the binary cannot be found, cannot be executed, or a
+  payload run fails.
+- The `PROMPT_LINT_CONTEXTOPS_BIN` route cannot pin anything, since it names an arbitrary executable. It is
+  documented as the one route where the operator owns the version, and the report names it as the resolver.
+
+What is lost is honest to state: a `PATH`-resolved `contextops` of the wrong version can no longer be
+detected. What FR-050 actually protects — "the score stops being comparable between machines" — is preserved
+for the `uvx`/`pipx` routes CI uses, and CI uses those.
+
+`0.3.4` is also published. The pin stays `0.3.3` because every document here names it; moving it is a
+one-line edit to `src/config.ts` plus a re-measurement, per the same rule as any other threshold.
+
+### The remaining divergence — the report shape
+
+Measured on 2026-08-17 with
+`uvx --from contextops==0.3.3`. The CLI surface [R9](./research.md#r9) and [R10](./research.md#r10) assume is
+real — `inspect --json-output --model --config --profile agent`, plus `check`, `stability`, `diff`. What
+differs:
+
+| The design expects                          | `0.3.3` emits                                                                                                                | Consequence                                                                                                                                                                               |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--version` equal to the pin (FR-050, T061) | `contextops, version 0.1.0` for **every** distribution — 0.3.3 and 0.3.4 alike. `metadata.version` says `0.3.0`              | **No route reports `0.3.3`.** "Assert `--version` equals the pin, else exit 6" fails 100% of correctly-installed runs, and report-schema invariant 9 is unsatisfiable as written          |
+| `dimensions: Record<dim, {penalty, max}>`   | `score_breakdown: {redundancy_penalty, …}` — floats, **no maxima in the response**                                           | Asserting maxima 30/30/20/20 can only compare against a constant we hold, so it cannot detect the engine changing them                                                                    |
+| `tokenBreakdown.byItem`                     | `token_breakdown.by_type` only — **no per-item counts**                                                                      | `contextops/concentration` cannot name the artifact that dominates a bundle — the design's own worked example. `tokenBudgets.artifact` (FR-024) and `Artifact.tokens` are unimplementable |
+| `findings[].items` naming payload items     | `findings` keyed by dimension, entries carry `{issue, type, actual_ratio, threshold, severity, confidence}` — **no `items`** | T065's "translate `findings[].items` back to artifact paths" has no input                                                                                                                 |
+
+Also `density_effect: "shadow"` in 0.3.3, so the density penalty may not reach the score at all.
+
+**Decision (directed 2026-08-17): build it against what the tool returns, and never attribute our own
+measurement to it.** The mapping is adjusted rather than the requirement dropped, one rule at a time:
+
+| Rule                             | What ships                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contextops/redundancy`          | Driven by `findings.redundancy[]` verbatim. Reported at bundle level.                                                                                                                                                                                                                                                        |
+| `contextops/density`             | Driven by `findings.density[]` plus `token_breakdown.wasted_tokens`. **`density_effect: "shadow"` is stated in the report**, because a rule whose penalty may not reach the score must not look like one that does.                                                                                                          |
+| `contextops/structure-imbalance` | Driven by `findings.structure[]`, which carries `actual_ratio` and `threshold` — enough to say "the system prefix is 100% of this bundle against a 40% threshold", which is exactly the intended finding.                                                                                                                    |
+| `contextops/token-budget`        | **Per bundle** from `token_breakdown.total_tokens`, as designed. The **per-artifact** half (FR-024, `tokenBudgets.artifact`) cannot come from the analyser and is **not faked**: it is reported as `notEvaluated` with that reason, and `tokenBudgets.artifact` is dropped from `config.ts` until the tool can populate it.  |
+| `contextops/concentration`       | Fires from the analyser's `concentration_penalty`. It **cannot name the dominating artifact from the analyser**, so where it needs a location it reports the bundle and, as a clearly-labelled aid, that artifact's share of the bundle's **characters** — our measurement, named as ours, never presented as a token count. |
+
+Two invariants are kept exactly: the **score passes through verbatim** (no re-weighting, no blend), and the
+dimension maxima are asserted against the 30/30/20/20 constants we hold — with a comment recording that the
+response publishes no maxima, so the assertion cannot detect the engine changing them. `Artifact.tokens` stays
+`null` and is documented as such rather than being filled with an approximation, which is the decision
+[R5](./research.md#r5) already made once.
+
+The through-line: where the tool can answer, it answers and we pass it through; where it cannot, we say so in
+`notEvaluated` rather than substituting a number of our own and letting the report imply the analyser produced
+it. That is the failure [R10](./research.md#r10) is most concerned about, and it is avoided by labelling rather
+than by omission.
+
+The adapter boundary did its job: nothing in Phases 1–5 imports or invokes the analyser, so all of this was
+contained in work not yet started.
 
 ## Post-Design Constitution Re-check
 

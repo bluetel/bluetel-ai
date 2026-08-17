@@ -17,6 +17,8 @@
     "knip:orphans": "SKIP_ENV_VALIDATION=true knip --no-progress --production --include files",
     "qlty": "qlty check --no-formatters",
     "qlty:diff": "tsx tooling/qlty-diff/src/cli.ts",
+    "prompt-lint": "tsx tooling/prompt-lint/src/cli.ts --all",
+    "prompt-lint:diff": "tsx tooling/prompt-lint/src/cli.ts",
     "prepare": "husky"
   },
   "keywords": [],
@@ -27,6 +29,7 @@
     "@bluetel-ai/commit-conventions": "workspace:*",
     "@bluetel-ai/eslint-config-base": "workspace:*",
     "@bluetel-ai/prettier-config": "workspace:*",
+    "@bluetel-ai/prompt-lint": "workspace:*",
     "@bluetel-ai/qlty-diff": "workspace:*",
     "@nx/eslint": "22.6.1",
     "@nx/next": "22.6.1",

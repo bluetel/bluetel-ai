@@ -1,0 +1,223 @@
+{
+  "$comment": [
+    "The measured adoption baseline (FR-035). Every entry names a rule and a path that",
+    "was already violating when that rule landed, and downgrades it to `note`.",
+    "",
+    "THIS FILE MUST DRAIN. An entry that stops matching anything is reported as",
+    "`suppression/stale` at `warn`, so a baseline cannot quietly become the status quo.",
+    "Delete an entry as soon as its defect is fixed; the gate will tell you when.",
+    "",
+    "Entries are keyed on `rule` + `path` only. A line number would churn on every",
+    "unrelated edit above the defect, and a content hash would make this file unreadable",
+    "to the reviewer who has to approve each addition. One entry therefore covers every",
+    "occurrence of one rule in one file.",
+    "",
+    "`reason` is required and non-empty: an entry nobody had to justify is how a",
+    "baseline becomes permanent.",
+    "",
+    "Run `pnpm prompt-lint --no-baseline` to see the true state of the surface.",
+    "Populated by T058 from a measured run; not guessed."
+  ],
+  "entries": [
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/copywriting/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/jira-ticket/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/merging/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/pr-creation/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/review/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/skills-install/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/speckit-analyze/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/speckit-checklist/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/speckit-constitution/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/speckit-converge/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": ".agents/skills/speckit-taskstoissues/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/copywriting/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/frontend-design/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/jira-ticket/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/merging/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/pr-creation/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/review/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/skills-install/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/speckit-analyze/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/speckit-checklist/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/speckit-constitution/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/speckit-converge/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "skill/section-missing",
+      "path": "tooling/skills/catalog/speckit-taskstoissues/SKILL.md",
+      "reason": "Pre-existing at adoption. This body predates the completion-criteria convention. Adding a Done When section is a content edit to each skill, staged separately from landing the rule that requires it."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".agents/copywriting-context.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".agents/skills/copywriting/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".agents/skills/speckit-analyze/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".agents/skills/speckit-checklist/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".agents/skills/speckit-clarify/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".agents/skills/speckit-constitution/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".agents/skills/speckit-plan/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".agents/skills/speckit-specify/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".specify/templates/checklist-template.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": ".specify/templates/tasks-template.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": "tooling/skills/catalog/copywriting/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": "tooling/skills/catalog/speckit-analyze/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": "tooling/skills/catalog/speckit-checklist/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": "tooling/skills/catalog/speckit-clarify/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": "tooling/skills/catalog/speckit-constitution/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": "tooling/skills/catalog/speckit-plan/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    },
+    {
+      "rule": "template/placeholder-residue",
+      "path": "tooling/skills/catalog/speckit-specify/SKILL.md",
+      "reason": "Pre-existing at adoption. The unbackticked authoring tokens in this file are the subject of its own instructions rather than residue left behind; backticking them is a content edit to the skill catalogue, not to the validator, so it is staged separately from landing the rule."
+    }
+  ]
+}

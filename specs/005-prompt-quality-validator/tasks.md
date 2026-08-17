@@ -60,31 +60,31 @@ Foundational phase is the thing that must be finished before any story can start
 is a copy-with-renames of its `tooling/qlty-diff/` counterpart; deviating from that shape is a finding, not a
 choice ([plan.md](./plan.md#summary)).
 
-- [ ] T001 Create `tooling/prompt-lint/package.json` — `@bluetel-ai/prompt-lint`, `"private": true`,
+- [x] T001 Create `tooling/prompt-lint/package.json` — `@bluetel-ai/prompt-lint`, `"private": true`,
       `"type": "module"`, `"main": "./src/index.ts"`, `"exports": { ".": "./src/index.ts" }`, devDependencies
       `@bluetel-ai/eslint-config-internal: workspace:*` and `vitest: ^3.2.4`. Copy the field order of
       `tooling/qlty-diff/package.json`.
-- [ ] T002 [P] Create `tooling/prompt-lint/project.json` — `"name": "prompt-lint"`,
+- [x] T002 [P] Create `tooling/prompt-lint/project.json` — `"name": "prompt-lint"`,
       `"projectType": "library"`, and the two targets from `tooling/qlty-diff/project.json` verbatim except for
       `cwd`: `typecheck` (`tsc --noEmit`, `inputs` including `{projectRoot}/tsconfig.json`, `cache: true`) and
       `test` (`vitest run`, `cache: true`).
-- [ ] T003 [P] Create `tooling/prompt-lint/tsconfig.json` extending `../../tsconfig.base.json`. Do not relax
+- [x] T003 [P] Create `tooling/prompt-lint/tsconfig.json` extending `../../tsconfig.base.json`. Do not relax
       `strict`, `isolatedModules`, ESM or `bundler` module resolution (Constitution, Technology Standards).
-- [ ] T004 [P] Create `tooling/prompt-lint/vitest.config.ts` mirroring `tooling/qlty-diff/vitest.config.ts`.
-- [ ] T005 [P] Create `tooling/prompt-lint/eslint.config.mjs` — the shared base plus `withTypeChecking`, as every
+- [x] T004 [P] Create `tooling/prompt-lint/vitest.config.ts` mirroring `tooling/qlty-diff/vitest.config.ts`.
+- [x] T005 [P] Create `tooling/prompt-lint/eslint.config.mjs` — the shared base plus `withTypeChecking`, as every
       `tooling/*` project does.
-- [ ] T006 Add to root `package.json`: `"@bluetel-ai/prompt-lint": "workspace:*"` in `devDependencies`, and the
+- [x] T006 Add to root `package.json`: `"@bluetel-ai/prompt-lint": "workspace:*"` in `devDependencies`, and the
       two scripts `"prompt-lint": "tsx tooling/prompt-lint/src/cli.ts --all"` and
       `"prompt-lint:diff": "tsx tooling/prompt-lint/src/cli.ts"` — placed beside `qlty` / `qlty:diff` so the pair
       reads as the two gates it is. Then `pnpm install` and commit the lockfile change.
-- [ ] T007 [P] Update `knip.json`: add `"@bluetel-ai/prompt-lint"` to the root `ignoreDependencies` array (a root
+- [x] T007 [P] Update `knip.json`: add `"@bluetel-ai/prompt-lint"` to the root `ignoreDependencies` array (a root
       devDependency consumed only by a script otherwise reads as unused and `knip:orphans` is a blocking CI step),
       and add a `"tooling/prompt-lint"` workspace entry declaring `src/cli.ts` and `src/test-helpers.ts` as
       entries — `cli.ts` is deliberately not exported from the barrel, and the test helpers are imported only by
       suites, which is the same shape `tooling/skills`' `lib/test-helpers.ts` entry already handles.
-- [ ] T008 [P] Update `cspell.json` with the identifiers this feature introduces — `contextops`, `tiktoken`,
+- [x] T008 [P] Update `cspell.json` with the identifiers this feature introduces — `contextops`, `tiktoken`,
       `uvx`, `pipx`, `frontmatter`, `semver`, `prompt-lint` — then confirm with `pnpm audit:cspell`.
-- [ ] T009 Verify the skeleton before writing behaviour: `pnpm nx run prompt-lint:typecheck` and
+- [x] T009 Verify the skeleton before writing behaviour: `pnpm nx run prompt-lint:typecheck` and
       `pnpm nx run prompt-lint:test` both resolve the project, and `pnpm exec tsc --noEmit` succeeds from
       `tooling/prompt-lint/` (Constitution I — runnable in isolation). An empty suite is acceptable at this task;
       an unresolvable project is not.
@@ -100,70 +100,70 @@ is a pure function over their output, which is what makes the rule suites fixtur
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T010 Implement `tooling/prompt-lint/src/rules/define.ts` + `define.test.ts` — the `Severity`, `RuleId`,
+- [x] T010 Implement `tooling/prompt-lint/src/rules/define.ts` + `define.test.ts` — the `Severity`, `RuleId`,
       `Dimension`, `Rule`, `RuleInput` and `Finding` types from
       [data-model.md](./data-model.md#rules-and-findings), and the `defineRule` helper. `defineRule` is the
       anti-duplication seam Constitution IV forces (15+ rule modules of identical skeleton is how a diff crosses
       the 10% duplication limit — [plan.md](./plan.md#constitution-check)), so it lands first, not as a later
       cleanup. The `source: 'prompt-lint' | 'contextops'` discriminant is part of the type from the start, even
       though nothing sets `'contextops'` until Phase 6.
-- [ ] T011 Implement `tooling/prompt-lint/src/config.ts` + `config.test.ts` — the `Config` type and the default
+- [x] T011 Implement `tooling/prompt-lint/src/config.ts` + `config.test.ts` — the `Config` type and the default
       object, one exported constant, with the `[PROMPT_LINT_*]` comment convention copied from
       `tooling/qlty-diff/src/config.ts`. Ships `maxErrors: 0`, `maxWarnings: 50`, `minScore: 0` (inert),
       `severities`, `exclude` (each entry with a non-empty `reason`) and `defaultBaseRef: 'origin/main'`. The
       `contextops` block and `tokenBudgets` are added in Phase 6 (T070). Also implement `validateConfig` covering
       every row of the FR-036 table in [data-model.md](./data-model.md#config) that is expressible now, and its
       test: an invalid config exits before any artifact is read.
-- [ ] T012 [P] Implement `tooling/prompt-lint/src/test-helpers.ts` — the shared fixture builders every rule suite
+- [x] T012 [P] Implement `tooling/prompt-lint/src/test-helpers.ts` — the shared fixture builders every rule suite
       uses (`artifactFixture()`, `metaFixture()`, `expectFires()`, `expectDoesNotFire()`). Shared helpers rather
       than per-suite copy-paste, for the same duplication reason as `defineRule`; and they are what make SC-004's
       fires/does-not-fire pair two lines per rule instead of twenty.
-- [ ] T013 [P] Implement `tooling/prompt-lint/src/artifact/load.ts` + `load.test.ts` — the `Artifact` type and the
+- [x] T013 [P] Implement `tooling/prompt-lint/src/artifact/load.ts` + `load.test.ts` — the `Artifact` type and the
       loader. Covers each `readError` case explicitly: `not-utf8`, `symlink`, `empty`, `unreadable`. A
       `readError` artifact keeps its place in the model and is never dropped, because the rules that need
       `content` must be recorded as **not evaluated** rather than passing (spec Edge Cases).
-- [ ] T014 [P] Implement `tooling/prompt-lint/src/artifact/markdown.ts` + `markdown.test.ts` — the hand-written
+- [x] T014 [P] Implement `tooling/prompt-lint/src/artifact/markdown.ts` + `markdown.test.ts` — the hand-written
       positional scanner producing `MarkdownView` and `PathToken` ([research.md](./research.md#r3)): lines,
       headings, fenced ranges, HTML comment ranges, per-line code spans, links, and path-shaped tokens with their
       `inCodeSpan` / `inFence` / `inHtmlComment` / `literal` flags. It holds no judgement — every rule that reads
       it decides what the position means.
-- [ ] T015 [P] Implement `tooling/prompt-lint/src/artifact/meta.ts` + `meta.test.ts` — `skill.meta` `key=value`
+- [x] T015 [P] Implement `tooling/prompt-lint/src/artifact/meta.ts` + `meta.test.ts` — `skill.meta` `key=value`
       parsing into `MetaBlock`, preserving order, keeping every value of a repeatable key (`next_step` is the only
       one), and recording `duplicates` and `strayLines` ([research.md](./research.md#r4)).
-- [ ] T016 [P] Implement `tooling/prompt-lint/src/artifact/frontmatter.ts` + `frontmatter.test.ts` — the flat
+- [x] T016 [P] Implement `tooling/prompt-lint/src/artifact/frontmatter.ts` + `frontmatter.test.ts` — the flat
       `key: value` block of a `.claude/` pointer, into the same `MetaBlock` shape with
       `format: 'frontmatter'`. No YAML dependency: the decision and its boundary are
       [research.md](./research.md#r4).
-- [ ] T017 Implement `tooling/prompt-lint/src/artifact/suppress.ts` + `suppress.test.ts` — parse
+- [x] T017 Implement `tooling/prompt-lint/src/artifact/suppress.ts` + `suppress.test.ts` — parse
       `<!-- prompt-lint-disable-next-line <rule> — <reason> -->` and the `#` form for `skill.meta` into
       `Suppression`, next-line scope only. A suppression with no reason is surfaced for the
       `suppression/unreasoned` finding (T029), and `used` is left for the evaluator to set so
       `suppression/stale` can be reported (FR-009, FR-010).
-- [ ] T018 Create `tooling/prompt-lint/src/artifact/index.ts` — the barrel for `load`, `markdown`, `meta`,
+- [x] T018 Create `tooling/prompt-lint/src/artifact/index.ts` — the barrel for `load`, `markdown`, `meta`,
       `frontmatter`, `suppress`. Cross-directory imports go through it and never reach into a module path
       (Constitution II).
-- [ ] T019 [P] Implement `tooling/prompt-lint/src/scope/patterns.ts` + `patterns.test.ts` — the single declared
+- [x] T019 [P] Implement `tooling/prompt-lint/src/scope/patterns.ts` + `patterns.test.ts` — the single declared
       table of artifact locations (FR-001, FR-002) covering the skill catalog, `.agents/skills/*/**`,
       `.claude/skills/*/SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/rules/*.md`, `.agents/*.md`,
       `.specify/templates/*.md` and `.specify/memory/constitution.md`, plus the four named subsets `--scope=`
       accepts (`catalog`, `installed`, `guidance`, `speckit`). The test asserts `specs/**` is **not** in the set
       ([research.md](./research.md#r1)) and that every subset name resolves.
-- [ ] T020 [P] Implement `tooling/prompt-lint/src/scope/classify.ts` + `classify.test.ts` — path → `ArtifactKind`
+- [x] T020 [P] Implement `tooling/prompt-lint/src/scope/classify.ts` + `classify.test.ts` — path → `ArtifactKind`
       per the table in [data-model.md](./data-model.md#artifactkind). A file that matches a declared location but
       fits no kind classifies as `unclassified` and is reported, never skipped (FR-004).
-- [ ] T021 [P] Implement `tooling/prompt-lint/src/scope/git.ts` + `git.test.ts` — changed-vs-base, staged, and
+- [x] T021 [P] Implement `tooling/prompt-lint/src/scope/git.ts` + `git.test.ts` — changed-vs-base, staged, and
       all-files enumeration via `node:child_process`, plus deletion detection (the diff's deleted paths, which
       T055 needs to widen `refs/dangling-path` to `universe`). An unresolvable base ref or a non-repository is a
       typed failure carrying the ref name, which `cli.ts` turns into exit `4` (FR-032, US2 §5) — never an empty
       changed-file list.
-- [ ] T022 Implement `tooling/prompt-lint/src/scope/resolve.ts` + `resolve.test.ts` — assemble the `Scope`:
+- [x] T022 Implement `tooling/prompt-lint/src/scope/resolve.ts` + `resolve.test.ts` — assemble the `Scope`:
       `targets` (what per-artifact rules run over), `universe` (the whole declared set, which set-scoped rules run
       over), the `PathIndex` built once, and `exclusions` with a reason for each (FR-005). The `targets` versus
       `universe` distinction is the model's load-bearing one; the suite asserts it directly, because US1 §4 is
       exactly the case where the referring artifact is in `universe` and not in `targets`.
-- [ ] T023 Create `tooling/prompt-lint/src/scope/index.ts` — the barrel for `patterns`, `classify`, `git`,
+- [x] T023 Create `tooling/prompt-lint/src/scope/index.ts` — the barrel for `patterns`, `classify`, `git`,
       `resolve`.
-- [ ] T024 Implement `tooling/prompt-lint/src/report/order.ts` + `order.test.ts` — the one deterministic ordering
+- [x] T024 Implement `tooling/prompt-lint/src/report/order.ts` + `order.test.ts` — the one deterministic ordering
       used everywhere: severity descending, then `path`, then `line`, then `rule`. Total and stable, so SC-005
       holds structurally rather than by discipline (FR-029). The suite asserts a shuffled input produces an
       identical output.
@@ -185,13 +185,13 @@ with a `→` remediation, and nothing about the hundreds of artifacts the branch
 exit `0`. Then delete a referenced file and confirm the finding lands on the surviving artifact that references
 it. Full script: [quickstart.md](./quickstart.md) Scenario 4.
 
-- [ ] T025 [P] [US1] Implement `tooling/prompt-lint/src/rules/metadata.ts` + `metadata.test.ts` — four rules via
+- [x] T025 [P] [US1] Implement `tooling/prompt-lint/src/rules/metadata.ts` + `metadata.test.ts` — four rules via
       `defineRule`: `meta/required-field` (`name`, `version`, `description` for `catalog-meta`; `name`,
       `description` for `agent-pointer`), `meta/duplicate-key` (only `next_step` repeatable),
       `meta/version-semver`, `meta/stray-line`. Each gets the SC-004 pair. Statements, rationales and fixes come
       verbatim from [contracts/rules.md](./contracts/rules.md#meta--metadata-integrity) — the catalogue is the
       contract, not a summary written afterwards.
-- [ ] T026 [P] [US1] Implement `tooling/prompt-lint/src/rules/references.ts` + `references.test.ts` —
+- [x] T026 [P] [US1] Implement `tooling/prompt-lint/src/rules/references.ts` + `references.test.ts` —
       `refs/dangling-path`, implementing the three-root resolution algorithm of
       [research.md](./research.md#r2): resolve against the artifact's directory, then its `skillRoot`, then the
       repository root; report only a token that is `literal`, path-shaped, and whose first segment is a real
@@ -202,48 +202,48 @@ it. Full script: [quickstart.md](./quickstart.md) Scenario 4.
       no `/`, tokens carrying variable syntax, paths inside fenced blocks and code spans, paths whose first
       segment is not a real directory, and paths in HTML comments. The naive rule produced 40+ hits and one true
       positive; a suite that only proves the true positive would not have caught that.
-- [ ] T027 [P] [US1] Implement `tooling/prompt-lint/src/rules/sections.ts` + `sections.test.ts` —
+- [x] T027 [P] [US1] Implement `tooling/prompt-lint/src/rules/sections.ts` + `sections.test.ts` —
       `skill/section-missing`: a `catalog-skill` or `installed-skill` body carries a completion-criteria section
       (`## Done When` or equivalent). Fires on a body with no such section; does not fire on the `speckit-*`
       bodies that already model it.
-- [ ] T028 [P] [US1] Implement `tooling/prompt-lint/src/rules/placeholders.ts` + `placeholders.test.ts` —
+- [x] T028 [P] [US1] Implement `tooling/prompt-lint/src/rules/placeholders.ts` + `placeholders.test.ts` —
       `template/placeholder-residue`: bracketed template slots, clarification markers, `TODO`, and `$ARGUMENTS`
       outside its intended slot, **ignored inside code spans, fenced blocks and HTML comments** (which is what
       lets this repository's own rule catalogue quote the tokens it detects — spec Edge Cases). The rule is
       **inverted** for `speckit-template`: there the tokens must be _present_, so a template cannot be filled in
       place and shipped. Both directions get the pair.
-- [ ] T029 [US1] Wire the four bookkeeping rules — `artifact/unclassified` (from `scope/classify.ts`),
+- [x] T029 [US1] Wire the four bookkeeping rules — `artifact/unclassified` (from `scope/classify.ts`),
       `artifact/unreadable` (from `artifact/load.ts`), `suppression/unreasoned` and `suppression/stale` (from
       `artifact/suppress.ts`). Their declarations live in `tooling/prompt-lint/src/rules/registry.ts` and their
       findings are emitted by `tooling/prompt-lint/src/gate.ts`, because they describe the run rather than an
       artifact's content ([contracts/rules.md](./contracts/rules.md#bookkeeping-rules)). They have no
       configurable severity and cannot be baselined: a report that cannot say "I could not read this file" is
       worse than a red one. Tests land in `registry.test.ts` and `gate.test.ts`.
-- [ ] T030 [US1] Implement `tooling/prompt-lint/src/rules/registry.ts` + `registry.test.ts` — the array of every
+- [x] T030 [US1] Implement `tooling/prompt-lint/src/rules/registry.ts` + `registry.test.ts` — the array of every
       rule, and the registry invariants that make the rule set self-describing (FR-006): ids unique and
       `family/name`-shaped, `statement` and `rationale` non-empty, `appliesTo` non-empty for artifact-scoped
       rules, and **every rule able to produce a non-empty `remediation`** — SC-006 enforced by a test rather than
       by review. The catalogue cross-check against `docs/rules.md` is a separate task (T045), because that file
       does not exist yet.
-- [ ] T031 [US1] Create `tooling/prompt-lint/src/rules/index.ts` — the barrel exporting `defineRule`, the
+- [x] T031 [US1] Create `tooling/prompt-lint/src/rules/index.ts` — the barrel exporting `defineRule`, the
       registry and the rule modules.
-- [ ] T032 [US1] Implement `tooling/prompt-lint/src/report/human.ts` + `human.test.ts` — the output shape in
+- [x] T032 [US1] Implement `tooling/prompt-lint/src/report/human.ts` + `human.test.ts` — the output shape in
       [contracts/cli.md](./contracts/cli.md#human-output-shape): verdict line first **and** last, counts by
       severity, findings ordered by `order.ts`, every finding printing what is wrong and a `→` fix, the list
       capped at `--max-findings` with the omitted count always stated (FR-037), and the empty-scope case replaced
       by the single explicit line `no AI-authored artifacts in scope` (FR-040). The suite asserts the negative
       properties too, because they are the ones that rot silently: no absolute path, no timestamp, no duration
       (FR-039).
-- [ ] T033 [US1] Create `tooling/prompt-lint/src/report/index.ts` — the barrel for `human` and `order`.
-- [ ] T034 [US1] Implement `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` — the orchestration, one direction
+- [x] T033 [US1] Create `tooling/prompt-lint/src/report/index.ts` — the barrel for `human` and `order`.
+- [x] T034 [US1] Implement `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` — the orchestration, one direction
       only: validate config → resolve scope → load artifacts → run per-artifact rules over `targets` → apply
       suppressions → order → render. Emits the bookkeeping findings from T029, records **not evaluated** for
       every rule skipped because an artifact failed to parse or read, and returns a `Report` plus the verdict.
       The exit-code contract itself is T041; this task returns the verdict and lets the caller map it.
-- [ ] T035 [US1] Create `tooling/prompt-lint/src/index.ts` — the barrel exporting `runPromptLintGate` and the
+- [x] T035 [US1] Create `tooling/prompt-lint/src/index.ts` — the barrel exporting `runPromptLintGate` and the
       public types only. `cli.ts` is deliberately **not** exported (it is an executable), which is why T007 gives
       knip an explicit entry for it.
-- [ ] T036 [US1] Implement `tooling/prompt-lint/src/cli.ts` + `cli.test.ts` — argv per
+- [x] T036 [US1] Implement `tooling/prompt-lint/src/cli.ts` + `cli.test.ts` — argv per
       [contracts/cli.md](./contracts/cli.md#arguments-and-flags): the positional base ref, `--all`, `--staged`,
       `--max-findings=<n>`. Mutually exclusive scopes and unknown flags are usage errors (exit `2`), never
       silently resolved or ignored. `cli.test.ts` was absent from the module tree in
@@ -275,58 +275,58 @@ to lint, typecheck, tests or `qlty`. Remove the defect; the step passes.
 [quickstart.md](./quickstart.md#scenario-5--the-gate-blocks-a-pull-request-and-only-for-the-right-reason-us2-sc-008)
 provokes each exit code in turn.
 
-- [ ] T038 [US2] Implement `tooling/prompt-lint/src/baseline.ts` + `baseline.test.ts` — read
+- [x] T038 [US2] Implement `tooling/prompt-lint/src/baseline.ts` + `baseline.test.ts` — read
       `tooling/prompt-lint/baseline.json`, downgrade a matched finding to `note` and set `baselined: true`, and
       report an entry that matches nothing as `suppression/stale` at `warn` (FR-010's mechanism, reused) so the
       file drains and cannot quietly become permanent. Entries are keyed on `rule` + `path` only — not on line
       number, which would churn on every unrelated edit, and not on a content hash, which would make the file
       unreadable.
-- [ ] T039 [P] [US2] Create `tooling/prompt-lint/baseline.json` as an empty entry list with a header comment
+- [x] T039 [P] [US2] Create `tooling/prompt-lint/baseline.json` as an empty entry list with a header comment
       naming what it is for. It is populated from a measured run in T058, not guessed now.
-- [ ] T040 [US2] Extend `tooling/prompt-lint/src/config.ts` + `config.test.ts` with the per-rule `severities`
+- [x] T040 [US2] Extend `tooling/prompt-lint/src/config.ts` + `config.test.ts` with the per-rule `severities`
       override applied at evaluation time — the staged-adoption lever
       ([plan.md](./plan.md#adoption-how-this-lands-without-breaking-every-open-pr)). The test asserts a
       `severities` key naming a rule that does not exist is a config error (FR-036), which is also what catches a
       rule rename, and that **no environment variable can change a per-rule severity or the exclusion list**
       (FR-034, SC-009 — those change _what_ is checked, so they must appear in a diff).
-- [ ] T041 [US2] Extend `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` with the threshold comparison and the
+- [x] T041 [US2] Extend `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` with the threshold comparison and the
       full exit-code contract from [contracts/cli.md](./contracts/cli.md#exit-codes): `0` within thresholds
       (including the explicit nothing-in-scope case), `1` threshold breached, `2` usage, `3` config invalid with
       **no artifact evaluated**, `4` scope not establishable, `5` a rule threw — named, never swallowed into a
       clean pass. The suite asserts each code independently, because the whole value of the contract is that a
       red step is attributable to "the prompts are wrong" versus "the tool could not run".
-- [ ] T042 [US2] Extend `tooling/prompt-lint/src/cli.ts` + `cli.test.ts` with `--list-rules`, `--explain=<ruleId>`
+- [x] T042 [US2] Extend `tooling/prompt-lint/src/cli.ts` + `cli.test.ts` with `--list-rules`, `--explain=<ruleId>`
       (both exit `0`, evaluating no artifacts) and `--no-baseline`. An unknown `--explain` target is exit `2`.
-- [ ] T043 [US2] Extend `tooling/prompt-lint/src/report/human.ts` + `human.test.ts` with the header line naming
+- [x] T043 [US2] Extend `tooling/prompt-lint/src/report/human.ts` + `human.test.ts` with the header line naming
       every `PROMPT_LINT_*` override in effect and the footer line reporting
       `suppressions: N used, M stale   baseline: N applied, M stale`. FR-034's point is that a passing CI log must
       never be able to conceal a relaxed threshold, so the test asserts the header from the environment, not from
       a parameter.
-- [ ] T044 [US2] Write `tooling/prompt-lint/docs/rules.md` — the FR-047 catalogue, mirrored from
+- [x] T044 [US2] Write `tooling/prompt-lint/docs/rules.md` — the FR-047 catalogue, mirrored from
       [contracts/rules.md](./contracts/rules.md) for every rule that exists at this phase, each entry carrying
       id, ships-as severity, statement, rationale and fix. This is the copy the cross-check reads; the spec
       directory's copy stays the design record.
-- [ ] T045 [US2] Extend `tooling/prompt-lint/src/rules/registry.test.ts` with the catalogue cross-check (FR-047,
+- [x] T045 [US2] Extend `tooling/prompt-lint/src/rules/registry.test.ts` with the catalogue cross-check (FR-047,
       SC-010): every registered rule has an entry in `docs/rules.md` and every entry names a registered rule.
       This is the test that makes an undocumented rule impossible and a documented-but-deleted rule impossible in
       the same assertion.
-- [ ] T046 [US2] Add the gate to `.github/workflows/ci.yml` — a step in the `main` job running
+- [x] T046 [US2] Add the gate to `.github/workflows/ci.yml` — a step in the `main` job running
       `pnpm prompt-lint:diff "origin/$BASE_REF"` with `BASE_REF: ${{ github.base_ref }}`, and `prompt-lint`
       appended to the `nx affected -t lint test typecheck design-lint` target list. The `contextops` setup step is
       Phase 6 (T077): at this phase the delegated half does not exist, so the gate is the correctness half and
       needs no Python. **`.github/workflows/` cannot be modified by the GitHub App this repository's agent runs
       as**, so this task requires a human commit or a token with `workflows` scope — flagged here rather than
       discovered at push time.
-- [ ] T047 [US2] Add `pnpm prompt-lint:diff` to `.husky/pre-commit`, after `pnpm typecheck` and before the qlty
+- [x] T047 [US2] Add `pnpm prompt-lint:diff` to `.husky/pre-commit`, after `pnpm typecheck` and before the qlty
       block. It does **not** install anything, unlike the qlty block below it
       ([research.md](./research.md#r9)). Note the working-tree state: `.husky/pre-commit` currently carries an
       uncommitted modification that makes the qlty block install on demand; reconcile with whatever has landed
       rather than reverting it blind.
-- [ ] T048 [P] [US2] Write `tooling/prompt-lint/README.md` — what it gates, how to run it, the exit codes, how to
+- [x] T048 [P] [US2] Write `tooling/prompt-lint/README.md` — what it gates, how to run it, the exit codes, how to
       add a rule (one `defineRule` module + its suite + its catalogue entry), and how to add a baseline entry.
-- [ ] T049 [P] [US2] Add the prerequisite section to the root `README.md`: what `prompt-lint` needs available and
+- [x] T049 [P] [US2] Add the prerequisite section to the root `README.md`: what `prompt-lint` needs available and
       the routes to providing it. The `contextops` specifics are appended in T079 when that half exists.
-- [ ] T050 [US2] Run [quickstart.md](./quickstart.md#scenario-5--the-gate-blocks-a-pull-request-and-only-for-the-right-reason-us2-sc-008)
+- [x] T050 [US2] Run [quickstart.md](./quickstart.md#scenario-5--the-gate-blocks-a-pull-request-and-only-for-the-right-reason-us2-sc-008)
       Scenario 5 for exit codes `0`–`4` (exit `6` is Phase 6), and
       [Scenario 9](./quickstart.md#scenario-9--pre-commit-path-fr-043) for the hook. Time the hook step: FR-043
       requires it be fast enough that skipping it is never worth it, and a hook slow enough to skip is a hook that
@@ -348,19 +348,19 @@ rule fires and no other. Then confirm a clean catalog produces no findings.
 [quickstart.md](./quickstart.md#scenario-6--a-skill-cannot-be-published-broken-us3-fr-044) has the break/expect
 table.
 
-- [ ] T051 [P] [US3] Implement `tooling/prompt-lint/src/rules/declared.ts` + `declared.test.ts` —
+- [x] T051 [P] [US3] Implement `tooling/prompt-lint/src/rules/declared.ts` + `declared.test.ts` —
       `meta/declared-dependency-missing`: `requires=` names catalog skills that exist, `assets=` names an existing
       bundle directory, and each `next_step=` line carries its two mandatory `|`-separated fields (`action`,
       `why`) with an optional third (`when`). A `next_step` missing its `why` renders as a bare instruction with
       no rationale, which is exactly what that field exists to prevent, so it fires.
-- [ ] T052 [P] [US3] Implement `tooling/prompt-lint/src/rules/conventions.ts` + `conventions.test.ts` —
+- [x] T052 [P] [US3] Implement `tooling/prompt-lint/src/rules/conventions.ts` + `conventions.test.ts` —
       `conventions/config-mismatch`: an artifact must not assert a convention contradicting
       `.agents/skills.config` — a recognisable `owner/repo` slug that is not the configured one, a
       `PREFIX-<digits>` ticket token that is not the configured prefix, or a base/staging branch name that is not
       the configured branch. Mechanical comparisons only; it does not read the meaning of a sentence. The
       fires-case fixture is the live defect: `.agents/remote-workflow-instructions.md` naming `URM` and
       `harrytwigg/universal-react-monorepo` while the config says `bluetel/bluetel-ai`.
-- [ ] T053 [P] [US3] Implement `tooling/prompt-lint/src/rules/trigger.ts` + `trigger.test.ts` —
+- [x] T053 [P] [US3] Implement `tooling/prompt-lint/src/rules/trigger.ts` + `trigger.test.ts` —
       `skill/use-when-trigger` (FR-014): a `catalog-meta` or `agent-pointer` `description` carries a `Use when:`
       clause naming the situations the skill applies to, because the description is the only thing an agent sees
       when deciding whether to invoke a skill. Fires on the ten `speckit-*` descriptions, which describe what they
@@ -372,7 +372,7 @@ table.
       [data-model.md](./data-model.md#the-25-rules-by-family) both require it. It belongs here, with the rest of
       the catalog-publishing invariants US3 §2 names; phase C of that table was corrected in the same change that
       added this task.
-- [ ] T054 [US3] Implement `tooling/prompt-lint/src/rules/install.ts` + `install.test.ts` — the three
+- [x] T054 [US3] Implement `tooling/prompt-lint/src/rules/install.ts` + `install.test.ts` — the three
       `scope: 'set'` rules: `install/catalog-drift` (`.agents/skills/<name>/` matches
       `tooling/skills/catalog/<name>/` byte for byte, **excluding** the files the installer's model deliberately
       leaves per-project — `.skill`, `.agents/skills.config`, asset bundles), `install/version-bump` (content
@@ -380,26 +380,26 @@ table.
       `name`/`description` agrees with `skill.meta`, and its body still names the shared
       `.agents/skills/<name>/SKILL.md` file). Each finding names **both** paths via `related`. `install/version-bump`
       is diff-scoped by nature: under `--all` it is reported as **not evaluated**, never as passing.
-- [ ] T055 [US3] Extend `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` to run set-scoped rules over
+- [x] T055 [US3] Extend `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` to run set-scoped rules over
       `universe` while per-artifact rules run over `targets`, and to widen `refs/dangling-path` to `universe`
       when the diff deletes any artifact. Stated as one rule in
       [data-model.md](./data-model.md#scope-and-configuration) and asserted here, because getting it wrong makes
       US1 §4 silently pass.
-- [ ] T056 [US3] Add a `prompt-lint` target to `tooling/skills/project.json` running the validator with
+- [x] T056 [US3] Add a `prompt-lint` target to `tooling/skills/project.json` running the validator with
       `--scope=catalog`, so `nx affected -t … prompt-lint` runs the catalog rules whenever a skill changes.
       Division of labour, stated in the spec's Assumptions and worth restating in the target's comment: **the
       shell tests own the installer's behaviour, `prompt-lint` owns the artifact's content.** Confirm
       `pnpm nx test skills` still passes unchanged (FR-044).
-- [ ] T057 [US3] Extend `tooling/prompt-lint/docs/rules.md` with the entries for T051–T054 and re-run the
+- [x] T057 [US3] Extend `tooling/prompt-lint/docs/rules.md` with the entries for T051–T054 and re-run the
       cross-check from T045. A rule cannot land without its entry — that is what the cross-check is for.
-- [ ] T058 [US3] Measure the surface and set the adoption state: run `pnpm prompt-lint --all --no-baseline`,
+- [x] T058 [US3] Measure the surface and set the adoption state: run `pnpm prompt-lint --all --no-baseline`,
       compare against the table in
       [plan.md](./plan.md#adoption-how-this-lands-without-breaking-every-open-pr), then encode it — `warn` for
       `skill/use-when-trigger` and `conventions/config-mismatch` in `src/config.ts` `severities`, and one
       `baseline.json` entry per known pre-existing violation with a reason. Record any divergence from the
       predicted counts in the pull request; a measurement that disagrees with the plan is information, not a
       number to bend.
-- [ ] T059 [US3] Run [quickstart.md](./quickstart.md#scenario-6--a-skill-cannot-be-published-broken-us3-fr-044)
+- [x] T059 [US3] Run [quickstart.md](./quickstart.md#scenario-6--a-skill-cannot-be-published-broken-us3-fr-044)
       Scenario 6 (one rule per break, both paths named for the set-scoped ones) and
       [Scenario 7](./quickstart.md#scenario-7--suppressions-and-the-baseline-behave-fr-009-fr-010-fr-035)
       (an unreasoned suppression is itself a finding and exempts nothing; a fixed violation with a surviving
@@ -423,7 +423,7 @@ human output showed; two runs over an unchanged tree are byte-identical; and poi
 [quickstart.md](./quickstart.md#scenario-2--whole-repository-run-over-the-real-surface-us4-sc-002-sc-003)
 Scenarios 2 and 3.
 
-- [ ] T060 [US4] Obtain the human licence sign-off this phase is gated on, and record it in
+- [x] T060 [US4] Obtain the human licence sign-off this phase is gated on, and record it in
       [plan.md](./plan.md#constitution-check) beside the `PASS*` it resolves. `contextops` is Sustainable-Use
       licensed: the grant covers _"your own internal business operations"_, which this repository's CI is inside,
       and it restricts _providing_ the software to third parties as part of a commercial offering — which is why
@@ -578,7 +578,7 @@ gate covers both halves.
       Complexity Tracking any rule whose shipped behaviour diverged from its catalogue entry. The catalogue is
       the contract; a divergence is a defect in one of the two, and Governance requires the discovering change to
       fix it.
-- [ ] T086 Fix the live `refs/dangling-path` defect **in its own commit**:
+- [x] T086 Fix the live `refs/dangling-path` defect **in its own commit**:
       `tooling/skills/catalog/copywriting/references/natural-transitions.md:276` references a `seo-audit` skill
       that does not exist in this catalog. Correct or remove the reference, bump `version` in
       `tooling/skills/catalog/copywriting/skill.meta` (`install/version-bump` will require it), and re-run the

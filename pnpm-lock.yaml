@@ -58,6 +58,9 @@ importers:
       '@bluetel-ai/prettier-config':
         specifier: workspace:*
         version: link:tooling/prettier-config
+      '@bluetel-ai/prompt-lint':
+        specifier: workspace:*
+        version: link:tooling/prompt-lint
       '@bluetel-ai/qlty-diff':
         specifier: workspace:*
         version: link:tooling/qlty-diff
@@ -213,6 +216,15 @@ importers:
       prettier-plugin-tailwindcss:
         specifier: ^0.6.0
         version: 0.6.14(prettier@3.6.2)
+
+  tooling/prompt-lint:
+    devDependencies:
+      '@bluetel-ai/eslint-config-internal':
+        specifier: workspace:*
+        version: link:../eslint-config-internal
+      vitest:
+        specifier: '>=4.1.0'
+        version: 4.1.7(@types/node@22.19.17)(vite@8.0.14(@types/node@22.19.17)(esbuild@0.27.2)(jiti@2.6.1)(less@4.5.1)(sass-embedded@1.98.0)(sass@1.98.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
 
   tooling/qlty-diff:
     devDependencies:

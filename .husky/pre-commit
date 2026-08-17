@@ -79,6 +79,11 @@ fi
 
 pnpm typecheck
 
+# Prompt-quality gate for this branch's diff vs origin/main: the AI-authored artifacts
+# (skill catalog, installed skill trees, agent guidance, Spec Kit templates, constitution).
+# Installs nothing — unlike the qlty block below, it only ever reports what it needs.
+pnpm prompt-lint:diff
+
 # Code-health gate for this branch's diff vs origin/main: lint, security,
 # duplication and complexity via qlty. Requires qlty to be installed.
 if command -v qlty >/dev/null 2>&1; then

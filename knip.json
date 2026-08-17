@@ -55,6 +55,10 @@
     "tooling/skills": {
       "entry": ["lib/test-helpers.ts", "lib/**/*.test.ts"],
       "project": ["lib/**/*.{ts,js,mjs}", "*.{ts,js,mjs}"]
+    },
+    "tooling/prompt-lint": {
+      "entry": ["src/index.ts", "src/cli.ts", "src/test-helpers.ts"],
+      "project": ["src/**/*.{ts,js,mjs}", "*.{ts,js,mjs}"]
     }
   },
   "ignore": ["**/assets/images/converted-svg/**", "**/*.d.ts"],
@@ -65,6 +69,7 @@
     "@bluetel-ai/prettier-config",
     "@bluetel-ai/commit-conventions",
     "@bluetel-ai/image-indexer",
+    "@bluetel-ai/prompt-lint",
     "@bluetel-ai/qlty-diff"
   ]
 }

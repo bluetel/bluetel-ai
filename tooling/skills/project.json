@@ -18,6 +18,22 @@
         "cwd": "tooling/skills"
       },
       "cache": true
+    },
+    "prompt-lint": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Catalog-scoped prompt-quality gate (FR-044). Division of labour: the shell tests above own the installer's behaviour, prompt-lint owns the artifact's content."
+      },
+      "options": {
+        "command": "tsx tooling/prompt-lint/src/cli.ts --all --scope=catalog"
+      },
+      "inputs": [
+        "default",
+        "{workspaceRoot}/tooling/prompt-lint/src/**/*.ts",
+        "{workspaceRoot}/tooling/prompt-lint/baseline.json",
+        "{workspaceRoot}/.agents/skills.config"
+      ],
+      "cache": true
     }
   }
 }
