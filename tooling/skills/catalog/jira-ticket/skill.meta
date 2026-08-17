@@ -1,6 +1,6 @@
 name=jira-ticket
 version=1.2.0
-description=Create and manage Jira tickets (bugs/tasks) with correctly formatted descriptions, linking to the configured epic and active sprint. Use when: creating a Jira ticket, raising a bug, logging a task, or moving an issue to a sprint.
+description=Create and manage Jira tickets (stories/tasks/bugs) with correctly formatted descriptions, following the team's templates and linking to the configured epic. Use when: creating a Jira ticket, raising a bug, logging a task, writing a user story, or moving an issue to a sprint.
 argument_hint=Optional: the issue type and summary, e.g. "Bug login button does nothing"
 requires=
 next_step=acli jira auth|Authenticate the Atlassian CLI and export JIRA_EMAIL in your shell profile, with the API token in the OS keychain. Transitions and assignment go through `acli`; creating and re-describing issues goes through the REST API with the keychain token. Setup notes are in the header of jira-sprint.sh.|`acli jira auth status` fails, or JIRA_EMAIL is unset

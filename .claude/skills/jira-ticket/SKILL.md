@@ -1,6 +1,6 @@
 ---
 name: jira-ticket
-description: 'Create and manage Jira tickets (bugs/tasks) with correctly formatted descriptions, linking to the configured epic and active sprint. Use when: creating a Jira ticket, raising a bug, logging a task, or moving an issue to a sprint.'
+description: "Create and manage Jira tickets (stories/tasks/bugs) with correctly formatted descriptions, following the team's templates and linking to the configured epic. Use when: creating a Jira ticket, raising a bug, logging a task, writing a user story, or moving an issue to a sprint."
 argument-hint: 'Optional: the issue type and summary, e.g. "Bug login button does nothing"'
 ---
 

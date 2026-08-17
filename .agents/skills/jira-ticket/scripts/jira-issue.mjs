@@ -21,8 +21,12 @@
 //   # see the ADF without touching Jira
 //   jira-issue.mjs create --type Bug --summary "…" --dry-run < body.md
 //
+//   # set project-specific custom fields (ids differ per project — check Jira)
+//   jira-issue.mjs create --type Bug --summary "…" \
+//     --field customfield_12042="Client" --field customfield_11718=2 < body.md
+//
 // Options:
-//   --type <Bug|Task>       issue type                     (create, required)
+//   --type <Story|Task|Bug>  issue type                     (create, required)
 //   --summary <text>        short title, max ~80 chars      (create, required)
 //   --key <KEY>             issue to update                 (update, required)
 //   --description-file <f>  read markdown from a file       (default: stdin)
@@ -30,7 +34,11 @@
 //   --parent <KEY>          epic; defaults to config jira_epic_key
 //   --assignee <who>        @me, an email, or a display name
 //   --label <a,b>           comma-separated labels
-//   --no-sprint             skip the move into the active sprint (create only)
+//   --field <id>=<value>    set any other field; repeatable. A value that parses
+//                           as JSON is sent as JSON, otherwise as a string
+//   --sprint                move into the board's active sprint after creating
+//   --no-sprint             leave it in the backlog
+//                           (default comes from config jira_create_into)
 //   --dry-run               print the request payload and exit
 //   --json                  print the raw API response
 
@@ -44,8 +52,10 @@ import { api, configValue, resolveAccountId, setting } from './jira-api.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
+const ISSUE_TYPES = ['Story', 'Task', 'Bug']
+
 function parseArgs(argv) {
-  const flags = { _: [] }
+  const flags = { _: [], field: [] }
   const valued = new Set([
     'type',
     'summary',
@@ -56,6 +66,7 @@ function parseArgs(argv) {
     'parent',
     'assignee',
     'label',
+    'field',
   ])
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -67,12 +78,35 @@ function parseArgs(argv) {
     if (valued.has(name)) {
       const value = argv[++i]
       if (value === undefined) throw new Error(`--${name} needs a value`)
-      flags[name] = value
+      // --field is repeatable; everything else takes the last value given.
+      if (name === 'field') flags.field.push(value)
+      else flags[name] = value
     } else {
       flags[name] = true
     }
   }
   return flags
+}
+
+/**
+ * Turn repeated `--field id=value` into a fields object. A value that parses as
+ * JSON is sent as JSON (so numbers, `{"value":"x"}` and arrays work); anything
+ * else is sent as a plain string.
+ */
+function parseExtraFields(entries) {
+  const fields = {}
+  for (const entry of entries) {
+    const split = entry.indexOf('=')
+    if (split < 1) throw new Error(`--field expects <id>=<value>, got '${entry}'`)
+    const id = entry.slice(0, split).trim()
+    const raw = entry.slice(split + 1)
+    try {
+      fields[id] = JSON.parse(raw)
+    } catch {
+      fields[id] = raw
+    }
+  }
+  return fields
 }
 
 /** Print this file's own header comment as the help text. */
@@ -100,53 +134,95 @@ function readDescription(flags) {
   return stdin.trim() === '' ? null : stdin
 }
 
-async function buildFields(flags, { forCreate }) {
-  const fields = {}
-
-  if (forCreate) {
-    // ticket_prefix is the fallback, but some repos park a placeholder like
-    // "{no jira board}" in it to mean "this project does not use Jira".
-    const project =
-      flags.project ||
-      setting('JIRA_PROJECT_KEY', 'jira_project_key') ||
-      configValue('ticket_prefix')
-    if (!project || project.startsWith('{')) {
-      throw new Error(
-        'no Jira project key configured. Set it for this repo:\n' +
-          "  sh lib/skills.sh config set 'jira_project_key=ABC'\n" +
-          '…or pass --project.',
-      )
-    }
-    if (!flags.type) throw new Error('--type is required (Bug or Task)')
-    if (!flags.summary) throw new Error('--summary is required')
-    fields.project = { key: project }
-    fields.issuetype = { name: flags.type }
-    fields.summary = flags.summary
-
-    const parent = flags.parent || setting('JIRA_EPIC_KEY', 'jira_epic_key')
-    if (parent) fields.parent = { key: parent }
-  } else if (flags.summary) {
-    fields.summary = flags.summary
+/** Resolve the project key, rejecting the "this repo has no Jira" placeholder. */
+function resolveProject(flags) {
+  // ticket_prefix is the fallback, but some repos park a placeholder like
+  // "{no jira board}" in it to mean "this project does not use Jira".
+  const project =
+    flags.project || setting('JIRA_PROJECT_KEY', 'jira_project_key') || configValue('ticket_prefix')
+  if (!project || project.startsWith('{')) {
+    throw new Error(
+      'no Jira project key configured. Set it for this repo:\n' +
+        "  sh lib/skills.sh config set 'jira_project_key=ABC'\n" +
+        '…or pass --project.',
+    )
   }
+  return project
+}
 
+/** Normalise `--type` to the canonical name Jira expects. */
+function resolveIssueType(given) {
+  if (!given) throw new Error(`--type is required (${ISSUE_TYPES.join(', ')})`)
+  const type = ISSUE_TYPES.find((t) => t.toLowerCase() === given.toLowerCase())
+  if (!type) {
+    throw new Error(
+      `unknown --type '${given}'. Expected one of: ${ISSUE_TYPES.join(', ')}.\n` +
+        'If this project genuinely uses another type, confirm with the user first.',
+    )
+  }
+  return type
+}
+
+/** The fields that only apply when creating: project, type, summary, epic. */
+function creationFields(flags) {
+  const project = resolveProject(flags)
+  const issuetype = resolveIssueType(flags.type)
+  if (!flags.summary) throw new Error('--summary is required')
+
+  const fields = {
+    project: { key: project },
+    issuetype: { name: issuetype },
+    summary: flags.summary,
+  }
+  const parent = flags.parent || setting('JIRA_EPIC_KEY', 'jira_epic_key')
+  if (parent) fields.parent = { key: parent }
+  return fields
+}
+
+/**
+ * Convert the description to ADF, or return null when none was given. On update,
+ * changing only the summary, labels or assignee is legitimate.
+ */
+async function descriptionField(flags, { forCreate }) {
   const description = readDescription(flags)
-  if (description === null) {
-    // On update, changing only the summary or labels is legitimate.
-    if (forCreate || !(flags.summary || flags.label || flags.assignee)) {
-      throw new Error('no description given — pipe markdown on stdin, or pass --description-file')
-    }
-  } else {
-    fields.description = await markdownToAdfDocument(description)
-  }
+  if (description !== null) return await markdownToAdfDocument(description)
 
-  if (flags.label)
+  const otherEdits = flags.summary || flags.label || flags.assignee || flags.field.length > 0
+  if (forCreate || !otherEdits) {
+    throw new Error('no description given — pipe markdown on stdin, or pass --description-file')
+  }
+  return null
+}
+
+async function buildFields(flags, { forCreate }) {
+  const fields = forCreate ? creationFields(flags) : flags.summary ? { summary: flags.summary } : {}
+
+  const description = await descriptionField(flags, { forCreate })
+  if (description) fields.description = description
+
+  if (flags.label) {
     fields.labels = flags.label
       .split(',')
       .map((l) => l.trim())
       .filter(Boolean)
+  }
   if (flags.assignee) fields.assignee = { accountId: await resolveAccountId(flags.assignee) }
 
+  // Project-specific fields last, so an explicit --field can override anything above.
+  Object.assign(fields, parseExtraFields(flags.field))
+
   return fields
+}
+
+/**
+ * Should the new issue go into the active sprint? Explicit flags win, then the
+ * `jira_create_into` config key. The documented default is the backlog: new
+ * tickets sit there until the team refines them.
+ */
+function wantsSprint(flags) {
+  if (flags.sprint) return true
+  if (flags['no-sprint']) return false
+  return setting('JIRA_CREATE_INTO', 'jira_create_into', 'backlog').toLowerCase() === 'sprint'
 }
 
 async function create(flags) {
@@ -165,7 +241,7 @@ async function create(flags) {
     console.log('No epic configured (jira_epic_key is unset), so the issue is unparented.')
   }
 
-  if (!flags['no-sprint']) {
+  if (wantsSprint(flags)) {
     const sprintScript = join(HERE, 'jira-sprint.sh')
     try {
       execFileSync(sprintScript, [created.key], { stdio: 'inherit' })
@@ -174,6 +250,8 @@ async function create(flags) {
         `Created ${created.key}, but the sprint move failed — run: ${sprintScript} ${created.key}`,
       )
     }
+  } else {
+    console.log('Left in the backlog. Notify the team so it can be refined and put on the board.')
   }
 
   if (flags.json) console.log(JSON.stringify(created, null, 2))
