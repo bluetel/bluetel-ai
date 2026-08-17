@@ -156,6 +156,13 @@ entry in Complexity Tracking below.
 `claude/issue-15-…`, not `feature/<name>`; and the external dependency is Sustainable-Use-licensed, which is
 within its grant for internal use but needs a human sign-off before anything client-facing is built on it.
 
+> **Update 2026-08-17 — the licence gate now passes outright for internal use.** The sign-off T060 was waiting
+> for was granted; see [T060](#t060--licence-sign-off-granted). The `PASS*` on _Dependency Standards —
+> external_ becomes `PASS` for this repository's own CI and pre-commit gate. It stays conditional only for
+> client-facing use, which nothing here does. The branch deviation was also resolved for the implementation
+> work, which sits on `feature/prompt-quality-validator`; the constitution amendment T089 raises is still
+> outstanding for the `claude/*` branches the GitHub Action creates.
+
 **Notes on the gates that required a judgement rather than an observation:**
 
 - **I (Nx).** `tooling/prompt-lint` owns `project.json`, `tsconfig.json`, `vitest.config.ts` and
@@ -466,15 +473,53 @@ what the design predicted.
 A third divergence blocks Phase 6 and is **not** resolved here, because resolving it needs decisions this
 run cannot make — see [the Phase 6 note](#phase-6-is-blocked-recorded-2026-08-17).
 
-## Phase 6 is blocked (recorded 2026-08-17)
+## Phase 6: the two blockers and how they were resolved (recorded 2026-08-17)
 
-Phase 6 (US4, T060–T079) cannot be built as specified. Two blockers, one procedural and one factual.
+### T060 — licence sign-off: **GRANTED**
 
-**1. T060 is a human decision and has not been made.** The `contextops` licence reading in
-[R8](./research.md#r8) is an agent's, and the spec records that a human must sign it off before the
-repository takes the dependency. Nothing built so far depends on it, which is what that sequencing was for.
+Harry Twigg (ht@bluetel.co.uk), who holds the authority to make it, signed off the
+[R8](./research.md#r8) reading on 2026-08-17: `contextops` may be used under the Sustainable Use License
+for this repository's own CI and pre-commit gate. This resolves the `PASS*` on the
+_Dependency Standards — external_ gate for internal use.
 
-**2. The pinned tool's actual API differs from `AnalyserReport`.** Measured on 2026-08-17 with
+The stance R8 records is unchanged and is what keeps the grant sufficient: **`prompt-lint` never installs,
+vendors or ships `contextops` anywhere.** It invokes one that is already present and says so when it is not.
+A target project that wants the context-economy half installs the dependency under its own terms — which is
+route (4) in R8, and the only one that keeps the question where it belongs. Anything client-facing built on
+it is a separate decision, not covered by this one.
+
+### FR-050's version assertion — **revised, because the tool cannot satisfy it**
+
+The design says: assert `contextops --version` equals the pin, exit `6` on mismatch. Measured, **no route
+reports the pinned version** — `--version` answers `0.1.0` for every distribution and the JSON report's
+`metadata.version` answers `0.3.0`. Implemented literally, the assertion fails 100% of correctly-installed
+runs.
+
+**Decision (directed 2026-08-17): trust the pin, not the self-report.** The pin moves into the _invocation_
+rather than into a post-hoc check:
+
+- Resolution pins the distribution — `uvx --from contextops==0.3.3 contextops`, `pipx run
+contextops==0.3.3` — so the resolver guarantees which code runs. That is a **stronger** guarantee than
+  asking the binary, because it constrains what executes rather than believing what it says afterwards.
+- `--version` is still called, but treated as **advisory**: it proves the binary is executable and is
+  recorded in the report as `selfReported` beside the pin. It never fails the run.
+- `analyser.version` in the report is the pin — the version that was requested and resolved — with the
+  self-reported string carried alongside so the discrepancy is visible rather than smoothed over.
+- Exit `6` still fires for the failures that are real: the binary cannot be found, cannot be executed, or a
+  payload run fails.
+- The `PROMPT_LINT_CONTEXTOPS_BIN` route cannot pin anything, since it names an arbitrary executable. It is
+  documented as the one route where the operator owns the version, and the report names it as the resolver.
+
+What is lost is honest to state: a `PATH`-resolved `contextops` of the wrong version can no longer be
+detected. What FR-050 actually protects — "the score stops being comparable between machines" — is preserved
+for the `uvx`/`pipx` routes CI uses, and CI uses those.
+
+`0.3.4` is also published. The pin stays `0.3.3` because every document here names it; moving it is a
+one-line edit to `src/config.ts` plus a re-measurement, per the same rule as any other threshold.
+
+### The remaining divergence — the report shape
+
+Measured on 2026-08-17 with
 `uvx --from contextops==0.3.3`. The CLI surface [R9](./research.md#r9) and [R10](./research.md#r10) assume is
 real — `inspect --json-output --model --config --profile agent`, plus `check`, `stability`, `diff`. What
 differs:
@@ -488,12 +533,29 @@ differs:
 
 Also `density_effect: "shadow"` in 0.3.3, so the density penalty may not reach the score at all.
 
-Resolving this is a design decision, not an implementation one: it changes what two of the five delegated
-rules can say, and it needs a different answer to "how is the analyser identified" than FR-050 gives. It is
-recorded rather than worked around, because guessing here would produce a confident measurement of nothing —
-the failure [R10](./research.md#r10) is most concerned about.
+**Decision (directed 2026-08-17): build it against what the tool returns, and never attribute our own
+measurement to it.** The mapping is adjusted rather than the requirement dropped, one rule at a time:
 
-The adapter boundary did its job: nothing in Phases 1–5 imports or invokes the analyser, so all of this is
+| Rule                             | What ships                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contextops/redundancy`          | Driven by `findings.redundancy[]` verbatim. Reported at bundle level.                                                                                                                                                                                                                                                        |
+| `contextops/density`             | Driven by `findings.density[]` plus `token_breakdown.wasted_tokens`. **`density_effect: "shadow"` is stated in the report**, because a rule whose penalty may not reach the score must not look like one that does.                                                                                                          |
+| `contextops/structure-imbalance` | Driven by `findings.structure[]`, which carries `actual_ratio` and `threshold` — enough to say "the system prefix is 100% of this bundle against a 40% threshold", which is exactly the intended finding.                                                                                                                    |
+| `contextops/token-budget`        | **Per bundle** from `token_breakdown.total_tokens`, as designed. The **per-artifact** half (FR-024, `tokenBudgets.artifact`) cannot come from the analyser and is **not faked**: it is reported as `notEvaluated` with that reason, and `tokenBudgets.artifact` is dropped from `config.ts` until the tool can populate it.  |
+| `contextops/concentration`       | Fires from the analyser's `concentration_penalty`. It **cannot name the dominating artifact from the analyser**, so where it needs a location it reports the bundle and, as a clearly-labelled aid, that artifact's share of the bundle's **characters** — our measurement, named as ours, never presented as a token count. |
+
+Two invariants are kept exactly: the **score passes through verbatim** (no re-weighting, no blend), and the
+dimension maxima are asserted against the 30/30/20/20 constants we hold — with a comment recording that the
+response publishes no maxima, so the assertion cannot detect the engine changing them. `Artifact.tokens` stays
+`null` and is documented as such rather than being filled with an approximation, which is the decision
+[R5](./research.md#r5) already made once.
+
+The through-line: where the tool can answer, it answers and we pass it through; where it cannot, we say so in
+`notEvaluated` rather than substituting a number of our own and letting the report imply the analyser produced
+it. That is the failure [R10](./research.md#r10) is most concerned about, and it is avoided by labelling rather
+than by omission.
+
+The adapter boundary did its job: nothing in Phases 1–5 imports or invokes the analyser, so all of this was
 contained in work not yet started.
 
 ## Post-Design Constitution Re-check

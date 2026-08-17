@@ -423,7 +423,7 @@ human output showed; two runs over an unchanged tree are byte-identical; and poi
 [quickstart.md](./quickstart.md#scenario-2--whole-repository-run-over-the-real-surface-us4-sc-002-sc-003)
 Scenarios 2 and 3.
 
-- [ ] T060 [US4] Obtain the human licence sign-off this phase is gated on, and record it in
+- [x] T060 [US4] Obtain the human licence sign-off this phase is gated on, and record it in
       [plan.md](./plan.md#constitution-check) beside the `PASS*` it resolves. `contextops` is Sustainable-Use
       licensed: the grant covers _"your own internal business operations"_, which this repository's CI is inside,
       and it restricts _providing_ the software to third parties as part of a commercial offering — which is why
