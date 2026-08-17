@@ -578,7 +578,7 @@ gate covers both halves.
       Complexity Tracking any rule whose shipped behaviour diverged from its catalogue entry. The catalogue is
       the contract; a divergence is a defect in one of the two, and Governance requires the discovering change to
       fix it.
-- [ ] T086 Fix the live `refs/dangling-path` defect **in its own commit**:
+- [x] T086 Fix the live `refs/dangling-path` defect **in its own commit**:
       `tooling/skills/catalog/copywriting/references/natural-transitions.md:276` references a `seo-audit` skill
       that does not exist in this catalog. Correct or remove the reference, bump `version` in
       `tooling/skills/catalog/copywriting/skill.meta` (`install/version-bump` will require it), and re-run the
