@@ -1,7 +1,7 @@
 name=skills-install
-version=1.4.0
-installed_hash=98badbd0cc08e61528796ea402739ea3012d539d0c1ecd5d84c9ee90dcdd5cac
-source_repo=https://github.com/bluetel/bluetel-ai.git
-source_ref=main
+version=1.4.1
+installed_hash=c08229fac8143a865dc801e4f28656715f79d934a5ddb840c21c7e2b2cf4fee5
+source_repo=
+source_ref=
 assets=
-installed_at=2026-08-05T13:09:53Z
+installed_at=2026-08-17T13:22:40Z

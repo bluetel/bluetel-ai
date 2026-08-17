@@ -79,6 +79,7 @@ sh lib/skills.sh config set 'ticket_prefix=ACME' 'repo_owner=acme' --target /pat
 | `jira_project_key` | _derived from_ `ticket_prefix` | `jira-ticket`                |
 | `jira_board_id`    | _(empty)_                      | `jira-ticket` (sprint moves) |
 | `jira_epic_key`    | _(empty)_                      | `jira-ticket` (`--parent`)   |
+| `jira_create_into` | `backlog`                      | `jira-ticket` (new tickets)  |
 
 Only explicitly-set keys are written to the file; anything absent resolves to the default, so
 derived values (`jira_project_key`) keep tracking their source. Keys with an empty default have no
