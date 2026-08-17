@@ -2,11 +2,41 @@
 {
   "editor.formatOnPaste": true,
   "editor.formatOnSave": true,
+  // Prettier still owns Markdown, YAML and TOML: oxfmt formats those too, but not
+  // byte-identically to Prettier, so it is scoped per-language below instead.
   "editor.defaultFormatter": "esbenp.prettier-vscode",
-  "editor.codeActionsOnSave": {
-    "source.fixAll.eslint": "always"
-  },
 
+  // oxlint owns 142 of the 146 enforced rules (see AGENTS.md). Fix-on-save has to go through
+  // it, not ESLint: the four rules left on the ESLint layer are @nx/enforce-module-boundaries,
+  // @cspell/spellchecker, no-octal and no-dupe-args, and none of them is auto-fixable — so
+  // `source.fixAll.eslint` paid the full ~5.7 s ESLint invocation on every save and could not
+  // fix anything the linter actually flags.
+  "editor.codeActionsOnSave": {
+    "source.fixAll.oxc": "always"
+  },
+  "oxc.enable.oxlint": true,
+  // Matches the `--type-aware` flag every command-line path uses; without it the editor
+  // silently runs 41 fewer rules than `pnpm lint:fast` does.
+  "oxc.typeAware": true,
+
+  // oxfmt formats the languages where its output matches the Prettier config it was migrated
+  // from (`oxfmt --migrate prettier` → .oxfmtrc.json; verified with `oxfmt --list-different`,
+  // zero JS/TS/JSON files differ). Editor and commit hook therefore agree even though
+  // `lint-staged` still runs `prettier --write`. The extension registers itself for 21
+  // languages including Markdown, TOML and YAML, which is why this is scoped per-language
+  // rather than set as the default formatter.
+  "oxc.enable.oxfmt": true,
+  "[javascript]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[javascriptreact]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[typescript]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[typescriptreact]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[json]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+  "[jsonc]": { "editor.defaultFormatter": "oxc.oxc-vscode" },
+
+  // ESLint stays enabled for editor feedback on the four rules above — @cspell/spellchecker is
+  // the only one of them that reports in-editor, as @nx/enforce-module-boundaries needs the Nx
+  // project graph and the other two only fire on sloppy-mode .cjs. It is not the fix-on-save
+  // provider, and CI enforces it through the `lint-workspace` target either way.
   "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
   // "eslint.format.enable": false,
 

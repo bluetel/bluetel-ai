@@ -60,6 +60,9 @@
   "ignore": ["**/assets/images/converted-svg/**", "**/*.d.ts"],
   "ignoreFiles": ["**/scripts/index-images.ts"],
   "ignoreDependencies": [
+    // No script or import reaches it: the oxc VS Code extension shells out to `oxfmt --lsp`
+    // from node_modules, so the editor is the only consumer.
+    "oxfmt",
     "@bluetel-ai/eslint-config-base",
     "@bluetel-ai/eslint-config-react-native",
     "@bluetel-ai/prettier-config",

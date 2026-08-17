@@ -161,7 +161,16 @@
     "sarif",
     "speckit",
     "assertable",
-    "libpq"
+    "libpq",
+    // 005's vocabulary: the linter being migrated to, its type-aware checker, its config file,
+    // and the matching formatter the editor uses.
+    "oxlint",
+    "oxlintrc",
+    "oxfmt",
+    "oxfmtrc",
+    "tsgolint",
+    "fixability",
+    "unnamespaced"
   ],
   "ignorePaths": [
     "node_modules",

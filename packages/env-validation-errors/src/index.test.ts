@@ -50,7 +50,7 @@ describe('Feature: env-validation-errors, Property 1: Formatted message contains
   it('formatted message contains every issue path and message', () => {
     fc.assert(
       fc.property(zodIssuesArb, (issues) => {
-        const result = formatEnvErrors(issues as readonly StandardSchemaV1.Issue[])
+        const result = formatEnvErrors(issues)
 
         for (const issue of issues) {
           const envVarName = issue.path[0]
@@ -82,11 +82,11 @@ describe('Feature: env-validation-errors, Property 2: Handler logs and throws wi
       fc.assert(
         fc.property(zodIssuesArb, (issues) => {
           errorSpy.mockClear()
-          const expected = formatEnvErrors(issues as readonly StandardSchemaV1.Issue[])
+          const expected = formatEnvErrors(issues)
 
           let thrownError: Error | undefined
           try {
-            onValidationError(issues as readonly StandardSchemaV1.Issue[])
+            onValidationError(issues)
           } catch (e) {
             thrownError = e as Error
           }
@@ -126,11 +126,11 @@ describe('Feature: env-validation-errors, Property 3: Formatting function consis
       fc.assert(
         fc.property(zodIssuesArb, (issues) => {
           errorSpy.mockClear()
-          const formatted = formatEnvErrors(issues as readonly StandardSchemaV1.Issue[])
+          const formatted = formatEnvErrors(issues)
 
           let thrownMessage: string | undefined
           try {
-            onValidationError(issues as readonly StandardSchemaV1.Issue[])
+            onValidationError(issues)
           } catch (e) {
             thrownMessage = (e as Error).message
           }
@@ -164,7 +164,7 @@ describe('Feature: env-validation-errors, Property 4: Formatting function has no
         fc.property(zodIssuesArb, (issues) => {
           errorSpy.mockClear()
 
-          expect(() => formatEnvErrors(issues as readonly StandardSchemaV1.Issue[])).not.toThrow()
+          expect(() => formatEnvErrors(issues)).not.toThrow()
 
           expect(errorSpy).not.toHaveBeenCalled()
         }),
@@ -250,12 +250,10 @@ describe('Feature: env-validation-errors, Property 6: createSafeEnv applies all 
         // Use vi.doMock (not hoisted) to mock createEnv for this iteration
         const mockCreateEnv = vi.fn(() => ({}))
 
-        /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
         vi.doMock('@t3-oss/env-core', async (importOriginal) => {
           const actual = (await importOriginal()) as Record<string, unknown>
           return { ...actual, createEnv: mockCreateEnv }
         })
-        /* eslint-enable @typescript-eslint/no-unnecessary-type-assertion */
 
         const mod: {
           createSafeEnv: (opts: Record<string, unknown>) => unknown

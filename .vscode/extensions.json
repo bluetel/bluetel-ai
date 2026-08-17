@@ -2,9 +2,11 @@
   "recommendations": [
     // Nx
     "nrwl.angular-console",
-    // Prettier
+    // oxlint + oxfmt — the linter that owns 142 of the 146 rules, and the matching formatter
+    "oxc.oxc-vscode",
+    // Prettier — Markdown, YAML and TOML only; oxfmt owns JS/TS/JSON
     "esbenp.prettier-vscode",
-    // Eslint
+    // Eslint — the four rules oxlint cannot run
     "dbaeumer.vscode-eslint"
   ]
 }
