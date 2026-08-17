@@ -1,0 +1,32 @@
+{
+  "semi": false,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "bracketSpacing": true,
+  "bracketSameLine": false,
+  "arrowParens": "always",
+  "sortPackageJson": false,
+  "sortTailwindcss": {},
+  "ignorePatterns": [
+    "dist",
+    ".next",
+    "out",
+    "build",
+    "node_modules",
+    "pnpm-lock.yaml",
+    "src/routeTree.gen.ts",
+    "**/generated/",
+    "**/sst-env.d.ts",
+    "**/next-env.d.ts",
+    "tooling/lint-coverage/fixtures/generated",
+    "specs/005-oxlint-lint-performance/rule-inventory.md",
+    "**/*.md",
+    "**/*.mdx",
+    "**/*.yaml",
+    "**/*.yml",
+    "**/*.toml"
+  ]
+}
