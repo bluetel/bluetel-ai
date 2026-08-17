@@ -112,34 +112,14 @@ show what changed. Put both in a two-column table so the diff is visible at a gl
 | ![before](BEFORE_URL) | ![after](AFTER_URL) |
 ```
 
-**Do not know how to get this project running in a browser? Activate the `visual-testing` skill.**
-It covers which command starts the app, which port it lands on, what auth or seed data a page needs,
-and how to drive it headlessly. Do not guess at a dev command or a URL: a
-screenshot of an error page or of the wrong route is worse than no screenshot, because it looks like
-evidence. If that skill is not installed and the project's own docs do not tell you, ask the user
-rather than improvising.
+**To capture the shots, activate the `visual-testing` skill.** Serving the app, reaching a route in a
+usable state, and driving a browser headlessly are its job, not this skill's — it knows which command
+starts the project, which port it lands on, and what auth or seed data a page needs. Do not improvise
+a dev command or a URL: a screenshot of an error page or of the wrong route is worse than no
+screenshot, because it still looks like evidence. If that skill is not installed and the project's
+own docs are silent, ask the user.
 
-Capturing the pair with Playwright, once you know how to serve the app:
-
-```bash
-mkdir -p /tmp/pr-shots
-
-# After — your branch, dev server running on :3000
-npx playwright screenshot --viewport-size=1280,800 --wait-for-timeout=1000 \
-  http://localhost:3000/settings /tmp/pr-shots/after.png
-
-# Before — the same page from <base>, in a throwaway worktree on another port
-git worktree add /tmp/pr-before <base>
-# …install deps and start the dev server there on :3001…
-npx playwright screenshot --viewport-size=1280,800 --wait-for-timeout=1000 \
-  http://localhost:3001/settings /tmp/pr-shots/before.png
-git worktree remove /tmp/pr-before --force
-```
-
-If the project already has a Playwright suite, prefer a `page.screenshot()` inside its harness —
-it already carries the auth, fixtures, and seed data you would otherwise have to recreate.
-
-Keep the pair honest:
+What this skill cares about is the result. Keep the pair honest:
 
 - **Identical viewport, URL, theme, and data.** The only difference between the two frames should be
   your change. A different window size or a different seed makes the comparison worthless.
@@ -147,8 +127,8 @@ Keep the pair honest:
   has light and dark modes.
 - **Record video for anything with motion or interaction** — a transition, a drag, a multi-step flow.
   A still cannot show it.
-- Capture "before" _before you start_, or from a base-branch worktree. Reconstructing it after the
-  fact from memory is how misleading comparisons get made.
+- **Capture "before" from the base branch**, either before you start or from a base-branch checkout.
+  Reconstructing it after the fact from memory is how misleading comparisons get made.
 
 Upload the files and embed the returned URLs — see
 [Attaching images and video](#attaching-images-and-video).
