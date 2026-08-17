@@ -458,6 +458,26 @@ describe('runPromptLintGate', () => {
       expect(outcome.report?.baseline).toEqual({ applied: 0, stale: 1 })
     })
 
+    it('does not call the baseline stale for files a diff-scoped run never read', () => {
+      // The failure this guards was live: with 40 entries and a diff touching one artifact,
+      // every entry matched nothing and every one was reported stale — telling a contributor
+      // to delete entries protecting files their branch had not touched, on the code path CI
+      // and the pre-commit hook both take.
+      const root = makeRepo()
+      const baselinePath = writeBaseline(root, [
+        { rule: 'meta/version-semver', path: META_PATH, reason: 'pre-existing at adoption' },
+      ])
+      git(root, ['checkout', '-b', 'feature'])
+      write(root, 'AGENTS.md', '# Agents\n\nEdited, and nothing to do with the skill.\n')
+
+      const outcome = runPromptLintGate(
+        options(root, { mode: 'diff', baseRef: 'main', baselinePath }),
+      )
+      expect(outcome.report?.scope.artifactCount).toBe(1)
+      expect(outcome.report?.baseline).toEqual({ applied: 0, stale: 0 })
+      expect(outcome.report?.findings.map((f) => f.rule)).not.toContain('suppression/stale')
+    })
+
     it('exits 3 with no artifact evaluated when the baseline cannot be parsed', () => {
       // A baseline that fails to load downgrades nothing, which over a red surface is
       // indistinguishable from a clean pass. It is configuration, so it is exit 3, and it

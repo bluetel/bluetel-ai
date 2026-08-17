@@ -548,6 +548,17 @@ means. The 40 baseline entries cover only the two rules that ship `error` with a
 immediately — fix the one defect in its own change", and that is T086. Until it lands, a whole-surface
 run is red with exactly those two findings, which is the intended state rather than an oversight.
 
+**One defect found by running the gate the way CI runs it.** With the baseline populated, a
+diff-scoped run reported all 40 entries as `suppression/stale`. Staleness is a claim about a
+file, and it can only be made about a file that was read — under `--diff` and `--staged` the
+targets are the changed artifacts, so every entry protecting an untouched file matched nothing
+and was reported stale. That is on the exact code path CI and the pre-commit hook take, and it
+told contributors to delete entries protecting files their branch never touched. `applyBaseline`
+now takes the evaluated paths: an out-of-scope entry is neither applied nor stale, because
+nothing was learned about it. An entry naming an unregistered rule is still reported at any
+scope, since that is not a claim about a file. Found only because T086 made the surface clean
+enough to read the footer.
+
 Two smaller notes:
 
 - **T058 asked for `severities` entries that would be inert.** Recorded above rather than written.

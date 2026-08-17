@@ -254,6 +254,33 @@ describe('applyBaseline', () => {
       expect(applyBaseline([finding()], baseline(entry())).stale).toEqual([])
     })
 
+    describe('under a narrowed scope', () => {
+      // Staleness is a claim about a file, and it can only be made about a file that was
+      // read. Judged against the whole baseline, a diff-scoped run reported every entry
+      // stale — in exactly the two modes CI and the pre-commit hook use.
+      it('says nothing about an entry whose path was not evaluated', () => {
+        const result = applyBaseline([], baseline(entry()), new Set(['some/other/file.md']))
+        expect(result.stale).toEqual([])
+        expect(result.applied).toBe(0)
+      })
+
+      it('still reports an entry whose path *was* evaluated and reported nothing', () => {
+        const result = applyBaseline([], baseline(entry()), new Set([PATH]))
+        expect(result.stale).toHaveLength(1)
+        expect(result.stale[0].message).toContain(PATH)
+      })
+
+      it('reports an unregistered rule id regardless of scope, because that is not about a file', () => {
+        const { stale } = applyBaseline(
+          [],
+          baseline(entry({ rule: 'refs/dangling-paths' })),
+          new Set(['some/other/file.md']),
+        )
+        expect(stale).toHaveLength(1)
+        expect(stale[0].message).toContain('not a registered rule')
+      })
+    })
+
     it('reports each stale entry once, and only the stale ones', () => {
       const result = applyBaseline(
         [finding()],

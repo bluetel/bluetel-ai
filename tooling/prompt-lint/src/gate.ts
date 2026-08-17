@@ -398,6 +398,10 @@ export const runPromptLintGate = (options: GateOptions): GateOutcome => {
   const based = applyBaseline(
     applySeverities(config, [...suppressed.kept, ...suppressed.stale]),
     baseline,
+    // Only the artifacts this run actually evaluated. Under `--diff` and `--staged` that is
+    // a handful of files, and an entry protecting one of the others has not gone stale just
+    // because this run did not look at it.
+    new Set(scope.targets.map((artifact) => artifact.path)),
   )
   const findings = orderFindings([...based.findings, ...based.stale])
   const counts = countBySeverity(findings)

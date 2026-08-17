@@ -245,10 +245,18 @@ const keyOf = (rule: string, path: string): string => `${rule} ${path}`
  * This must run **after** the per-rule severity override, not before: the override maps a
  * rule to its configured severity unconditionally, so applying it second would put back
  * the severity this function just took away.
+ *
+ * `evaluatedPaths` is what keeps the stale report honest under a narrowed scope. An entry
+ * that matched nothing is only *known* to be stale if its file was actually looked at: in
+ * diff mode the targets are the changed artifacts, so judging staleness against the whole
+ * baseline reported every entry stale on every run — in exactly the two modes CI and the
+ * pre-commit hook use. Entries whose path was out of scope are neither applied nor stale;
+ * nothing was learned about them. Pass `null` to mean "everything was in scope".
  */
 export const applyBaseline = (
   findings: readonly Finding[],
   baseline: Baseline,
+  evaluatedPaths: ReadonlySet<string> | null = null,
 ): AppliedBaseline => {
   const usable = new Map<string, { entry: BaselineEntry; matched: boolean }>()
   const stale: Finding[] = []
@@ -273,6 +281,9 @@ export const applyBaseline = (
 
   for (const tracked of usable.values()) {
     if (tracked.matched) continue
+    // Out of scope, so the entry is unproven rather than stale. Reporting it here would tell
+    // a contributor to delete an entry protecting a file their branch never touched.
+    if (evaluatedPaths !== null && !evaluatedPaths.has(tracked.entry.path)) continue
     stale.push(
       staleFinding(tracked.entry, {
         message: `Baselines \`${tracked.entry.rule}\` in ${tracked.entry.path}, which reported nothing.`,
