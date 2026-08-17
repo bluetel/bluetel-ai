@@ -112,7 +112,14 @@ show what changed. Put both in a two-column table so the diff is visible at a gl
 | ![before](BEFORE_URL) | ![after](AFTER_URL) |
 ```
 
-Capturing the pair with Playwright:
+**Do not know how to get this project running in a browser? Activate the `visual-testing` skill.**
+It covers which command starts the app, which port it lands on, what auth or seed data a page needs,
+and how to drive it headlessly. Do not guess at a dev command or a URL: a
+screenshot of an error page or of the wrong route is worse than no screenshot, because it looks like
+evidence. If that skill is not installed and the project's own docs do not tell you, ask the user
+rather than improvising.
+
+Capturing the pair with Playwright, once you know how to serve the app:
 
 ```bash
 mkdir -p /tmp/pr-shots
