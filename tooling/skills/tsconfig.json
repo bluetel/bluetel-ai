@@ -8,7 +8,12 @@
     // tests import them and have their types inferred; checkJs stays off so the
     // scripts themselves are not held to the TS config's strictness.
     "allowJs": true,
-    "checkJs": false
+    "checkJs": false,
+    // Stated here rather than left to the `tsc --noEmit` flag: allowJs puts the .mjs
+    // files in the program, so any tool that builds a program straight from this
+    // config (oxlint's type-aware checker does) otherwise reports them as outputs
+    // that would overwrite their own inputs.
+    "noEmit": true
   },
   "include": ["lib"]
 }

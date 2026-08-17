@@ -162,11 +162,24 @@
     "speckit",
     "assertable",
     "libpq",
+    // 005's vocabulary: the linter being migrated to, its type-aware checker, its config file,
+    // and the matching formatter the editor uses.
+    "oxlint",
+    "oxlintrc",
+    "oxfmt",
+    "oxfmtrc",
+    "tsgolint",
+    "fixability",
+    "unnamespaced",
     // jira-ticket skill vocabulary. "SonarQube" is one of the standard acceptance criteria the
     // team's ticket templates require verbatim, and marklassian is the markdown-to-ADF library
-    // the skill converts descriptions with.
+    // the skill converts descriptions with. `acli` is the Atlassian CLI, `workitem` its noun for
+    // an issue, and `customfield` the prefix Jira gives every custom field id.
     "SonarQube",
-    "marklassian"
+    "marklassian",
+    "acli",
+    "workitem",
+    "customfield"
   ],
   "ignorePaths": [
     "node_modules",

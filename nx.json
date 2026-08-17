@@ -4,7 +4,7 @@
     {
       "plugin": "@nx/eslint/plugin",
       "options": {
-        "targetName": "lint"
+        "targetName": "lint-workspace"
       }
     },
     {
@@ -25,7 +25,10 @@
     "sharedGlobals": [
       "{workspaceRoot}/tsconfig.base.json",
       "{workspaceRoot}/tsconfig.json",
-      "{workspaceRoot}/.env*"
+      "{workspaceRoot}/.env*",
+      "{workspaceRoot}/.oxlintrc.json",
+      "{workspaceRoot}/tooling/oxlint-config/**/*",
+      "{workspaceRoot}/cspell.json"
     ],
     "production": ["default", "!{projectRoot}/**/*.spec.*", "!{projectRoot}/**/*.test.*"]
   },
@@ -42,9 +45,12 @@
       "cache": true,
       "configurations": {
         "fix": {
-          "command": "eslint . --fix"
+          "command": "oxlint --type-aware --fix ."
         }
       }
+    },
+    "lint-workspace": {
+      "cache": true
     },
     "dev": {
       "cache": false
