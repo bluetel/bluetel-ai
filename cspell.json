@@ -161,7 +161,23 @@
     "sarif",
     "speckit",
     "assertable",
-    "libpq"
+    "libpq",
+    // prompt-lint's vocabulary. `contextops` is the pinned external analyser it shells out to and
+    // `tiktoken` is that tool's tokenizer, both named verbatim in the exit-6 message and the report
+    // header — spelling them differently would make the report describe a tool that does not exist.
+    // `uvx` and `pipx` are the two ephemeral-environment routes that resolve it.
+    "contextops",
+    "tiktoken",
+    "uvx",
+    "pipx",
+    "frontmatter",
+    "semver",
+    // `baselined` and `inspectable` are the words the spec and the rule catalogue use for
+    // the two mechanisms — a finding downgraded by `baseline.json`, and the requirement
+    // that the artifact set be readable rather than heuristic. Renaming them to please a
+    // dictionary would put the code and the specification into disagreement.
+    "baselined",
+    "inspectable"
   ],
   "ignorePaths": [
     "node_modules",

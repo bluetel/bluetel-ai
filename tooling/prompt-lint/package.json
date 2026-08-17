@@ -1,0 +1,14 @@
+{
+  "name": "@bluetel-ai/prompt-lint",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "devDependencies": {
+    "@bluetel-ai/eslint-config-internal": "workspace:*",
+    "vitest": "^3.2.4"
+  }
+}

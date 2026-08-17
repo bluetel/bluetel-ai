@@ -452,6 +452,50 @@ be wired speculatively.
 | A Sustainable-Use-licensed dependency (not OSI-approved)                      | It is the tool named in the issue and the one the review asked for. Internal CI use falls inside its grant — _"your own internal business operations"_ — and it is never shipped, vendored or installed onto anyone else's machine.                                | Vendoring the source would be redistribution under terms a client deliverable cannot meet. An MIT alternative measuring the same thing was not found, and writing one is the rejected option above. Human sign-off is still required before any client-facing use — [R8](./research.md#r8). |
 | A blocking gate that depends on a third party's scoring engine                | The score is the half with an external referent; a number only we compute is comparable with nothing.                                                                                                                                                              | Mitigated rather than avoided: the version is pinned and asserted, the five delegated rules ship non-blocking, everything the dependency touches sits behind one adapter directory, and `--rules-only` runs the correctness half alone.                                                     |
 
+### Divergences found while implementing (recorded 2026-08-17)
+
+Two are corrections to this design, found by running it rather than by reading it. Both are in
+`refs/dangling-path` and `skill/section-missing` — the two rules whose measured behaviour disagreed with
+what the design predicted.
+
+| Divergence                                                                                                                                                                                                 | Why the design was wrong                                                                                                                                                                                                                                                                                                                                                                         | What shipped instead                                                                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **[R2](./research.md#r2)'s four rules do not produce R2's claimed result.** Implemented exactly as written they gave **80 findings, 70 of them `.specify/extensions.yml`** — against a claim of exactly 1. | R2 lists "runtime-created" as one of its four noise classes and names that very path as the example, but rules 1–4 cannot filter it: `.specify/` **is** a real directory, so rule 3 passes. The same gap admits `.specify/feature.json` ("Persist the resolved path to…"), `specs/003-user-auth` ("for example, …") and `.github/agents/` ("e.g. in …") — three more of R2's own stated classes. | A fifth rule: the reference is not reported when the line does not claim present-tense existence — an existence check, a creational verb, or an illustrative marker. **Lexical, not semantic**, the same bound `conventions/config-mismatch` works under. Result: **2 findings, both the one real defect** (catalog + installed copy), zero false positives. |
+| **`skill/section-missing` fired on 8 installed reference documents.**                                                                                                                                      | The catalogue applies it to `IS`, and [data-model](./data-model.md#artifactkind) defines `installed-skill` as the whole installed tree — so the kind conflates a skill _body_ with the reference files it reads. A reference is prose to be consulted, not a procedure with a completion condition.                                                                                              | The rule requires the artifact to be a `SKILL.md`. The alternative — splitting `installed-skill` into body and reference kinds — is the better model and is left as a follow-up, because it changes `appliesTo` for every rule.                                                                                                                              |
+
+A third divergence blocks Phase 6 and is **not** resolved here, because resolving it needs decisions this
+run cannot make — see [the Phase 6 note](#phase-6-is-blocked-recorded-2026-08-17).
+
+## Phase 6 is blocked (recorded 2026-08-17)
+
+Phase 6 (US4, T060–T079) cannot be built as specified. Two blockers, one procedural and one factual.
+
+**1. T060 is a human decision and has not been made.** The `contextops` licence reading in
+[R8](./research.md#r8) is an agent's, and the spec records that a human must sign it off before the
+repository takes the dependency. Nothing built so far depends on it, which is what that sequencing was for.
+
+**2. The pinned tool's actual API differs from `AnalyserReport`.** Measured on 2026-08-17 with
+`uvx --from contextops==0.3.3`. The CLI surface [R9](./research.md#r9) and [R10](./research.md#r10) assume is
+real — `inspect --json-output --model --config --profile agent`, plus `check`, `stability`, `diff`. What
+differs:
+
+| The design expects                          | `0.3.3` emits                                                                                                                | Consequence                                                                                                                                                                               |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--version` equal to the pin (FR-050, T061) | `contextops, version 0.1.0` for **every** distribution — 0.3.3 and 0.3.4 alike. `metadata.version` says `0.3.0`              | **No route reports `0.3.3`.** "Assert `--version` equals the pin, else exit 6" fails 100% of correctly-installed runs, and report-schema invariant 9 is unsatisfiable as written          |
+| `dimensions: Record<dim, {penalty, max}>`   | `score_breakdown: {redundancy_penalty, …}` — floats, **no maxima in the response**                                           | Asserting maxima 30/30/20/20 can only compare against a constant we hold, so it cannot detect the engine changing them                                                                    |
+| `tokenBreakdown.byItem`                     | `token_breakdown.by_type` only — **no per-item counts**                                                                      | `contextops/concentration` cannot name the artifact that dominates a bundle — the design's own worked example. `tokenBudgets.artifact` (FR-024) and `Artifact.tokens` are unimplementable |
+| `findings[].items` naming payload items     | `findings` keyed by dimension, entries carry `{issue, type, actual_ratio, threshold, severity, confidence}` — **no `items`** | T065's "translate `findings[].items` back to artifact paths" has no input                                                                                                                 |
+
+Also `density_effect: "shadow"` in 0.3.3, so the density penalty may not reach the score at all.
+
+Resolving this is a design decision, not an implementation one: it changes what two of the five delegated
+rules can say, and it needs a different answer to "how is the analyser identified" than FR-050 gives. It is
+recorded rather than worked around, because guessing here would produce a confident measurement of nothing —
+the failure [R10](./research.md#r10) is most concerned about.
+
+The adapter boundary did its job: nothing in Phases 1–5 imports or invokes the analyser, so all of this is
+contained in work not yet started.
+
 ## Post-Design Constitution Re-check
 
 Re-evaluated after Phase 1 ([data-model.md](./data-model.md), [contracts/](./contracts/),
