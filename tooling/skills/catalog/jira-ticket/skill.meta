@@ -1,7 +1,7 @@
 name=jira-ticket
-version=1.1.0
-description=Create and manage Jira tickets (bugs/tasks) via acli, linking to the configured epic and active sprint. Use when: creating a Jira ticket, raising a bug, logging a task, or moving an issue to a sprint.
+version=1.2.0
+description=Create and manage Jira tickets (bugs/tasks) with correctly formatted descriptions, linking to the configured epic and active sprint. Use when: creating a Jira ticket, raising a bug, logging a task, or moving an issue to a sprint.
 argument_hint=Optional: the issue type and summary, e.g. "Bug login button does nothing"
 requires=
-next_step=acli jira auth|Authenticate the Atlassian CLI and export JIRA_EMAIL in your shell profile, with the API token in the OS keychain. Every action this skill takes goes through `acli`, and credentials deliberately live outside the committed config. Setup notes are in the header of jira-sprint.sh.|`acli jira auth status` fails, or JIRA_EMAIL is unset
+next_step=acli jira auth|Authenticate the Atlassian CLI and export JIRA_EMAIL in your shell profile, with the API token in the OS keychain. Transitions and assignment go through `acli`; creating and re-describing issues goes through the REST API with the keychain token. Setup notes are in the header of jira-sprint.sh.|`acli jira auth status` fails, or JIRA_EMAIL is unset
 next_step=Set jira_board_id and jira_epic_key|Without a board id the skill cannot find the active sprint, and without an epic key new tickets are created unparented. Both are blank by default because no cross-repo value is sensible — the skill skips those steps rather than guessing.|`skills.sh config show` reports jira_board_id or jira_epic_key as SOURCE=default

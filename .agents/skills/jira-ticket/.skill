@@ -1,7 +1,7 @@
 name=jira-ticket
-version=1.1.0
-installed_hash=59402c87582b406cfba0007133a2a700761e06761efcc17083d0b45b4fb1695d
-source_repo=https://github.com/bluetel/bluetel-ai.git
-source_ref=main
+version=1.2.0
+installed_hash=fcf0fdbd0fc9c73c98676d26ad4c14cb8357077e606a5bdb618c817a203a383b
+source_repo=
+source_ref=
 assets=
-installed_at=2026-08-05T13:09:51Z
+installed_at=2026-08-17T12:52:23Z
