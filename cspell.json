@@ -179,7 +179,8 @@
     "marklassian",
     "acli",
     "workitem",
-    "customfield"
+    "customfield",
+    "libsecret"
   ],
   "ignorePaths": [
     "node_modules",

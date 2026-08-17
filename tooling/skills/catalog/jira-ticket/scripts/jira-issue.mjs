@@ -25,6 +25,10 @@
 //   jira-issue.mjs create --type Bug --summary "…" \
 //     --field customfield_12042="Client" --field customfield_11718=2 < body.md
 //
+// Flags take their value as a separate argument: `--summary "x"`, never
+// `--summary=x`. Unknown flags are rejected rather than ignored, so a typo cannot
+// silently drop --dry-run and create a real ticket.
+//
 // Options:
 //   --type <Story|Task|Bug>  issue type                     (create, required)
 //   --summary <text>        short title, max ~80 chars      (create, required)
@@ -32,14 +36,14 @@
 //   --description-file <f>  read markdown from a file       (default: stdin)
 //   --project <KEY>         defaults to config jira_project_key / ticket_prefix
 //   --parent <KEY>          epic; defaults to config jira_epic_key
-//   --assignee <who>        @me, an email, or a display name
-//   --label <a,b>           comma-separated labels
-//   --field <id>=<value>    set any other field; repeatable. A value that parses
-//                           as JSON is sent as JSON, otherwise as a string
+//   --assignee <who>        @me, an email, or an exact display name
+//   --label <a,b>           comma-separated labels (replaces the existing set)
+//   --field <id>=<value>    set any other field; repeatable. JSON-looking values
+//                           are sent as JSON, everything else as a string
 //   --sprint                move into the board's active sprint after creating
 //   --no-sprint             leave it in the backlog
 //                           (default comes from config jira_create_into)
-//   --dry-run               print the request payload and exit
+//   --dry-run               print the request payload and exit, making no API call
 //   --json                  print the raw API response
 
 import { readFileSync } from 'node:fs'
@@ -54,57 +58,135 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 
 const ISSUE_TYPES = ['Story', 'Task', 'Bug']
 
-function parseArgs(argv) {
+/** Flags that take a following argument as their value. */
+const VALUED_FLAGS = new Set([
+  'type',
+  'summary',
+  'key',
+  'description-file',
+  'project',
+  'parent',
+  'assignee',
+  'label',
+  'field',
+])
+
+/** Flags that are on/off. Anything outside these two sets is a mistake, not a no-op. */
+const BOOLEAN_FLAGS = new Set(['sprint', 'no-sprint', 'dry-run', 'json'])
+
+/**
+ * Fields this script derives itself. Letting --field set them would defeat the point:
+ * `--field description=...` would replace the converted ADF with a raw string, which
+ * is the exact bug this script exists to fix.
+ */
+const RESERVED_FIELDS = new Set([
+  'description',
+  'summary',
+  'project',
+  'issuetype',
+  'parent',
+  'labels',
+  'assignee',
+])
+
+/**
+ * Reject `--flag=value`. It is the dominant convention elsewhere, so without this it
+ * registers as an unrecognised flag name — and `--dry-run=true` silently leaves
+ * dry-run unset, turning a rehearsal into a real ticket.
+ */
+function rejectEqualsForm(name) {
+  if (!name.includes('=')) return
+  const [head] = name.split('=')
+  throw new Error(
+    BOOLEAN_FLAGS.has(head)
+      ? `--${head} is a switch and takes no value — pass it on its own`
+      : `use \`--${head} <value>\`, not \`--${head}=<value>\``,
+  )
+}
+
+/** The value following a valued flag. Absent, or another flag, means it was omitted. */
+function valueFor(name, next) {
+  if (next === undefined || next.startsWith('--')) throw new Error(`--${name} needs a value`)
+  return next
+}
+
+function unknownFlag(name) {
+  const valid = [...VALUED_FLAGS, ...BOOLEAN_FLAGS]
+    .map((flag) => `--${flag}`)
+    .sort()
+    .join(', ')
+  return new Error(`unknown flag --${name}. Valid flags: ${valid}`)
+}
+
+export function parseArgs(argv) {
   const flags = { _: [], field: [] }
-  const valued = new Set([
-    'type',
-    'summary',
-    'key',
-    'description-file',
-    'description',
-    'project',
-    'parent',
-    'assignee',
-    'label',
-    'field',
-  ])
+
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (!arg.startsWith('--')) {
       flags._.push(arg)
       continue
     }
+
     const name = arg.slice(2)
-    if (valued.has(name)) {
-      const value = argv[++i]
-      if (value === undefined) throw new Error(`--${name} needs a value`)
-      // --field is repeatable; everything else takes the last value given.
+    rejectEqualsForm(name)
+
+    if (VALUED_FLAGS.has(name)) {
+      const value = valueFor(name, argv[++i])
       if (name === 'field') flags.field.push(value)
       else flags[name] = value
-    } else {
+    } else if (BOOLEAN_FLAGS.has(name)) {
       flags[name] = true
+    } else {
+      throw unknownFlag(name)
     }
+  }
+
+  // Nothing here takes a positional argument. A stray one is almost always a switch
+  // being given a value — `--sprint 42`, which the sibling jira-sprint.sh does accept
+  // — and silently dropping it would send the ticket somewhere unasked.
+  if (flags._.length > 0) {
+    throw new Error(
+      `unexpected argument '${flags._[0]}'. This command takes no positional arguments;` +
+        ' to target a specific sprint, create the issue then run' +
+        ' jira-sprint.sh --sprint <id> <KEY>.',
+    )
   }
   return flags
 }
 
 /**
- * Turn repeated `--field id=value` into a fields object. A value that parses as
- * JSON is sent as JSON (so numbers, `{"value":"x"}` and arrays work); anything
- * else is sent as a plain string.
+ * Should `raw` be sent as JSON rather than a string? Only for values that clearly
+ * are JSON: `2` becomes a number, but `1.10` stays the string it was written as
+ * rather than silently becoming 1.1.
  */
-function parseExtraFields(entries) {
+function shouldParseAsJson(raw) {
+  if (/^[{[]/.test(raw)) return true
+  if (raw === 'true' || raw === 'false' || raw === 'null') return true
+  try {
+    return String(JSON.parse(raw)) === raw
+  } catch {
+    return false
+  }
+}
+
+/** Turn repeated `--field id=value` into a fields object. */
+export function parseExtraFields(entries) {
   const fields = {}
   for (const entry of entries) {
     const split = entry.indexOf('=')
     if (split < 1) throw new Error(`--field expects <id>=<value>, got '${entry}'`)
     const id = entry.slice(0, split).trim()
     const raw = entry.slice(split + 1)
-    try {
-      fields[id] = JSON.parse(raw)
-    } catch {
-      fields[id] = raw
+    if (RESERVED_FIELDS.has(id)) {
+      throw new Error(
+        `--field cannot set '${id}' — this script derives it. ` +
+          (id === 'description'
+            ? 'Pass the description on stdin or with --description-file.'
+            : `Use --${id} instead where one exists.`),
+      )
     }
+    fields[id] = shouldParseAsJson(raw) ? JSON.parse(raw) : raw
   }
   return fields
 }
@@ -123,19 +205,22 @@ function usage() {
 
 /**
  * Read the markdown description, or return null when none was supplied.
- * Reading fd 0 would block on an interactive terminal, so only consume stdin
- * when it is actually a pipe or file.
+ *
+ * stdin is drained asynchronously rather than with a sync read of fd 0: the
+ * documented invocation pipes from a producer that may not have written anything
+ * yet, and a sync read of a not-yet-ready pipe fails with EAGAIN.
  */
-function readDescription(flags) {
+export async function readDescription(flags, stdin = process.stdin) {
   if (flags['description-file']) return readFileSync(flags['description-file'], 'utf8')
-  if (flags.description) return flags.description
-  if (process.stdin.isTTY) return null
-  const stdin = readFileSync(0, 'utf8')
-  return stdin.trim() === '' ? null : stdin
+  if (stdin.isTTY) return null
+  let body = ''
+  stdin.setEncoding('utf8')
+  for await (const chunk of stdin) body += chunk
+  return body.trim() === '' ? null : body
 }
 
 /** Resolve the project key, rejecting the "this repo has no Jira" placeholder. */
-function resolveProject(flags) {
+export function resolveProject(flags) {
   // ticket_prefix is the fallback, but some repos park a placeholder like
   // "{no jira board}" in it to mean "this project does not use Jira".
   const project =
@@ -151,13 +236,14 @@ function resolveProject(flags) {
 }
 
 /** Normalise `--type` to the canonical name Jira expects. */
-function resolveIssueType(given) {
+export function resolveIssueType(given) {
   if (!given) throw new Error(`--type is required (${ISSUE_TYPES.join(', ')})`)
   const type = ISSUE_TYPES.find((t) => t.toLowerCase() === given.toLowerCase())
   if (!type) {
     throw new Error(
       `unknown --type '${given}'. Expected one of: ${ISSUE_TYPES.join(', ')}.\n` +
-        'If this project genuinely uses another type, confirm with the user first.',
+        'If this project genuinely uses another type, confirm with the user, then set it with' +
+        ` --field issuetype='{"name":"${given}"}'.`,
     )
   }
   return type
@@ -179,23 +265,37 @@ function creationFields(flags) {
   return fields
 }
 
+/** Flags that are a meaningful edit on their own, so a description is not required. */
+function hasOtherEdits(flags) {
+  return (
+    Boolean(flags.summary || flags.label || flags.assignee || flags.parent) ||
+    flags.field.length > 0
+  )
+}
+
 /**
  * Convert the description to ADF, or return null when none was given. On update,
- * changing only the summary, labels or assignee is legitimate.
+ * changing only the summary, labels, assignee, parent or a custom field is legitimate.
  */
 async function descriptionField(flags, { forCreate }) {
-  const description = readDescription(flags)
+  const description = await readDescription(flags)
   if (description !== null) return await markdownToAdfDocument(description)
 
-  const otherEdits = flags.summary || flags.label || flags.assignee || flags.field.length > 0
-  if (forCreate || !otherEdits) {
+  if (forCreate || !hasOtherEdits(flags)) {
     throw new Error('no description given — pipe markdown on stdin, or pass --description-file')
   }
   return null
 }
 
-async function buildFields(flags, { forCreate }) {
-  const fields = forCreate ? creationFields(flags) : flags.summary ? { summary: flags.summary } : {}
+export async function buildFields(flags, { forCreate }) {
+  const fields = forCreate ? creationFields(flags) : {}
+
+  if (!forCreate) {
+    if (flags.summary) fields.summary = flags.summary
+    if (flags.parent) fields.parent = { key: flags.parent }
+    if (flags.type) throw new Error('--type cannot be changed on update; do it in the Jira UI')
+    if (flags.project) throw new Error('--project only applies to create')
+  }
 
   const description = await descriptionField(flags, { forCreate })
   if (description) fields.description = description
@@ -206,9 +306,14 @@ async function buildFields(flags, { forCreate }) {
       .map((l) => l.trim())
       .filter(Boolean)
   }
-  if (flags.assignee) fields.assignee = { accountId: await resolveAccountId(flags.assignee) }
+  // Resolving an assignee is a live API call, so skip it under --dry-run, which
+  // documents itself as making no request.
+  if (flags.assignee) {
+    fields.assignee = flags['dry-run']
+      ? { accountId: `<resolved from '${flags.assignee}' at run time>` }
+      : { accountId: await resolveAccountId(flags.assignee) }
+  }
 
-  // Project-specific fields last, so an explicit --field can override anything above.
   Object.assign(fields, parseExtraFields(flags.field))
 
   return fields
@@ -219,14 +324,23 @@ async function buildFields(flags, { forCreate }) {
  * `jira_create_into` config key. The documented default is the backlog: new
  * tickets sit there until the team refines them.
  */
-function wantsSprint(flags) {
+export function wantsSprint(flags) {
+  if (flags.sprint && flags['no-sprint']) {
+    throw new Error('--sprint and --no-sprint are mutually exclusive')
+  }
   if (flags.sprint) return true
   if (flags['no-sprint']) return false
-  return setting('JIRA_CREATE_INTO', 'jira_create_into', 'backlog').toLowerCase() === 'sprint'
+
+  const configured = setting('JIRA_CREATE_INTO', 'jira_create_into', 'backlog').toLowerCase()
+  if (configured !== 'backlog' && configured !== 'sprint') {
+    throw new Error(`jira_create_into must be 'backlog' or 'sprint', got '${configured}'`)
+  }
+  return configured === 'sprint'
 }
 
 async function create(flags) {
   const fields = await buildFields(flags, { forCreate: true })
+  const goesToSprint = wantsSprint(flags) // validated before anything is created
 
   if (flags['dry-run']) {
     console.log(JSON.stringify({ fields }, null, 2))
@@ -241,13 +355,17 @@ async function create(flags) {
     console.log('No epic configured (jira_epic_key is unset), so the issue is unparented.')
   }
 
-  if (wantsSprint(flags)) {
+  if (goesToSprint) {
     const sprintScript = join(HERE, 'jira-sprint.sh')
     try {
       execFileSync(sprintScript, [created.key], { stdio: 'inherit' })
-    } catch {
-      console.error(
-        `Created ${created.key}, but the sprint move failed — run: ${sprintScript} ${created.key}`,
+    } catch (cause) {
+      // The issue exists but is not where it was asked to go. Say which half failed
+      // and fail loudly — a caller that sees exit 0 will treat this as done.
+      throw new Error(
+        `created ${created.key}, but the move into the active sprint failed.\n` +
+          `Retry just that step with: '${sprintScript}' ${created.key}`,
+        { cause },
       )
     }
   } else {
@@ -283,8 +401,12 @@ async function main() {
   else throw new Error(`unknown command '${command}' (expected: create, update)`)
 }
 
-main().catch((error) => {
-  console.error(`Error: ${error.message}`)
-  if (error.cause) console.error(String(error.cause.message ?? error.cause))
-  process.exit(1)
-})
+// Only run when invoked as a script. Importing the module must not execute the CLI,
+// so the argument-handling above can be unit tested.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((error) => {
+    console.error(`Error: ${error.message}`)
+    if (error.cause) console.error(String(error.cause.message ?? error.cause))
+    process.exit(1)
+  })
+}

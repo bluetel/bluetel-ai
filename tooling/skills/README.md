@@ -23,6 +23,12 @@ The installer runs entirely as **Claude driving `git` / `curl` / POSIX shell** �
 - **`curl`**,
 - base POSIX utilities and **`sha256sum` or `shasum`**.
 
+Individual skills may need more than the installer does. `jira-ticket` ships Node scripts, so
+using it (not installing it) additionally needs **Node ≥ 18** — plus **`npm`** and network access
+on first run, to fetch the markdown-to-ADF converter into a user-level cache if the target repo
+has no `node_modules` of its own. Each such prerequisite is declared as a `next_step` in the
+skill's `skill.meta`, so `skills.sh next-steps` reports it.
+
 ## Installing skills into another project
 
 From the target project root, run the published one-liner:
@@ -174,5 +180,11 @@ pipeline. To make new/updated skills available to targets:
 ## Source-repo / CI only
 
 The TypeScript + `vitest` surface here exists solely to test the shell logic in CI (`pnpm nx
-test skills`, `pnpm nx typecheck skills`). Nothing Node-based is shipped to or executed on a
-target. Tests shell out to `lib/skills.sh` against throwaway temp targets.
+test skills`, `pnpm nx typecheck skills`). The **installer** is Node-free end to end — nothing
+Node-based runs on a target to install a skill. Tests shell out to `lib/skills.sh` against
+throwaway temp targets.
+
+Skill payloads are a separate matter: what a skill ships under `catalog/<name>/` can be anything
+its own prerequisites allow, and `jira-ticket/scripts/` is Node (see Target requirements). The
+tests reach into those payload files directly, which is why `lib/jira-scripts.ts` exists — it is
+the one typed boundary over the untyped `.mjs`, since payload scripts get no build step.

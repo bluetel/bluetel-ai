@@ -1,14 +1,22 @@
+// cspell:ignore dryrun parnet — deliberate typos: these tests assert that a
+// misspelt flag is rejected rather than silently ignored.
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 
 import {
   configValue,
+  jiraSite,
   looksLikeMarkdown,
   markdownToAdfDocument,
+  parseArgs,
+  parseExtraFields,
+  resolveIssueType,
+  resolveProject,
   unwrapCodeFence,
+  wantsSprint,
   type AdfNode,
 } from './jira-scripts'
 
@@ -98,6 +106,47 @@ describe('unwrapCodeFence', () => {
     expect(unwrapCodeFence(body)).toBe(body)
   })
 
+  it('leaves a description that opens AND closes with real code blocks alone', () => {
+    // The regression: an anchored /^```…```$/ with no `m` flag matched from the first
+    // fence to the LAST one, deleting both and unbalancing every fence between. A bug
+    // report that leads with a stack trace and ends with a command is the normal shape
+    // — SKILL.md tells the writer to include log excerpts — and it was being mangled
+    // into one code block full of literal `**`, which is the bug #35 exists to fix.
+    const body = [
+      '```',
+      'ERROR: boom',
+      '```',
+      '',
+      '**Problem:**',
+      '',
+      'It broke.',
+      '',
+      '```bash',
+      'npm run build',
+      '```',
+    ].join('\n')
+
+    expect(unwrapCodeFence(body)).toBe(body)
+  })
+
+  it('keeps a description that is deliberately a single untagged code block', () => {
+    // Indistinguishable from a lazy wrapper by shape, so it is told apart by content:
+    // no prose markup inside means it was a real code block, not a wrapper.
+    const body = '```\nERROR: boom\n  at thing (file.js:1)\n```'
+    expect(unwrapCodeFence(body)).toBe(body)
+  })
+
+  it('keeps the fences balanced through conversion for such a description', async () => {
+    const body = ['```', 'ERROR: boom', '```', '', '**Problem:**', '', 'It broke.'].join('\n')
+    const doc = await markdownToAdfDocument(body)
+
+    // One codeBlock for the trace, and the Problem label survives as a bold run
+    // rather than being swallowed into it as literal asterisks.
+    expect(nodesOfType(doc, 'codeBlock')).toHaveLength(1)
+    expect(plainText(doc)).toContain('Problem:')
+    expect(JSON.stringify(doc)).not.toContain('**')
+  })
+
   it('survives the fenced round trip into ADF', async () => {
     const doc = await markdownToAdfDocument('```markdown\n**Problem:**\n\nBroken.\n```')
 
@@ -127,7 +176,7 @@ describe('looksLikeMarkdown', () => {
 
 describe('documented ticket templates and examples', () => {
   const reference = readFileSync(
-    join(import.meta.dirname, '../catalog/jira-ticket/reference/ticket-types.md'),
+    join(import.meta.dirname, '../catalog/jira-ticket/references/ticket-types.md'),
     'utf8',
   )
 
@@ -231,5 +280,169 @@ describe('configValue', () => {
 
     expect(configValue('jira_board_id', root)).toBe('')
     expect(configValue('jira_site', mkdtempSync(join(tmpdir(), 'skills-empty-')))).toBe('')
+  })
+})
+
+describe('parseArgs', () => {
+  it('reads valued flags and switches', () => {
+    const flags = parseArgs(['--type', 'Bug', '--summary', 'a title', '--dry-run'])
+
+    expect(flags.type).toBe('Bug')
+    expect(flags.summary).toBe('a title')
+    expect(flags['dry-run']).toBe(true)
+  })
+
+  it('collects repeated --field', () => {
+    const flags = parseArgs(['--field', 'a=1', '--field', 'b=2'])
+    expect(flags.field).toEqual(['a=1', 'b=2'])
+  })
+
+  it('rejects --flag=value, which would register --dry-run=true as an unknown switch', () => {
+    // The failure this prevents: --dry-run=true left dry-run unset and created a real ticket.
+    expect(() => parseArgs(['--dry-run=true'])).toThrow('takes no value')
+    expect(() => parseArgs(['--summary=x'])).toThrow('`--summary <value>`')
+  })
+
+  it('rejects an unknown flag rather than storing it as an ignored switch', () => {
+    expect(() => parseArgs(['--dryrun'])).toThrow('unknown flag --dryrun')
+    expect(() => parseArgs(['--parnet', 'X-1'])).toThrow('unknown flag --parnet')
+  })
+
+  it('rejects a valued flag whose value is missing or is the next flag', () => {
+    expect(() => parseArgs(['--summary', '--dry-run'])).toThrow('--summary needs a value')
+    expect(() => parseArgs(['--summary'])).toThrow('--summary needs a value')
+  })
+
+  it('rejects a stray positional, so `--sprint 42` cannot silently drop the id', () => {
+    // jira-sprint.sh takes `--sprint <id>`; here --sprint is a switch. Silently
+    // dropping the id would send the ticket to the active sprint instead.
+    expect(() => parseArgs(['--sprint', '42'])).toThrow("unexpected argument '42'")
+  })
+})
+
+describe('parseExtraFields', () => {
+  it('sends JSON-looking values as JSON and everything else as a string', () => {
+    expect(parseExtraFields(['customfield_11718=2'])).toEqual({ customfield_11718: 2 })
+    expect(parseExtraFields(['customfield_12042=Client'])).toEqual({ customfield_12042: 'Client' })
+    expect(parseExtraFields(['f={"value":"Client"}'])).toEqual({ f: { value: 'Client' } })
+    expect(parseExtraFields(['f=true'])).toEqual({ f: true })
+  })
+
+  it('leaves a version-like value as the string it was written as', () => {
+    // JSON.parse('1.10') is 1.1, which is not what anyone typed.
+    expect(parseExtraFields(['f=1.10'])).toEqual({ f: '1.10' })
+  })
+
+  it('refuses to set a field the script derives itself', () => {
+    // --field description=… would replace the converted ADF with a raw string,
+    // reintroducing the literal-markdown bug this script exists to fix.
+    expect(() => parseExtraFields(['description=**raw**'])).toThrow("cannot set 'description'")
+    for (const id of ['summary', 'project', 'issuetype', 'parent', 'labels', 'assignee']) {
+      expect(() => parseExtraFields([`${id}=x`])).toThrow(`cannot set '${id}'`)
+    }
+  })
+
+  it('requires the id=value form', () => {
+    expect(() => parseExtraFields(['nonsense'])).toThrow('<id>=<value>')
+    expect(() => parseExtraFields(['=x'])).toThrow('<id>=<value>')
+  })
+})
+
+describe('resolveIssueType', () => {
+  it('normalises case to the name Jira expects', () => {
+    expect(resolveIssueType('bug')).toBe('Bug')
+    expect(resolveIssueType('STORY')).toBe('Story')
+    expect(resolveIssueType('Task')).toBe('Task')
+  })
+
+  it('rejects a type outside the documented three, pointing at the escape hatch', () => {
+    expect(() => resolveIssueType('Epic')).toThrow('Story, Task, Bug')
+    expect(() => resolveIssueType('Epic')).toThrow('--field issuetype=')
+    expect(() => resolveIssueType()).toThrow('--type is required')
+  })
+})
+
+describe('resolveProject', () => {
+  it('prefers an explicit --project', () => {
+    expect(resolveProject({ project: 'ABC' })).toBe('ABC')
+  })
+
+  it('rejects the placeholder some repos park in ticket_prefix', () => {
+    // e.g. ticket_prefix={no jira board/no jira tickets use names instead}
+    const root = mkdtempSync(join(tmpdir(), 'skills-noj-'))
+    mkdirSync(join(root, '.agents'), { recursive: true })
+    writeFileSync(join(root, '.agents', 'skills.config'), 'ticket_prefix={no jira board}\n')
+
+    const cwd = process.cwd()
+    try {
+      process.chdir(root)
+      expect(() => resolveProject({})).toThrow('no Jira project key configured')
+    } finally {
+      process.chdir(cwd)
+    }
+  })
+})
+
+describe('wantsSprint', () => {
+  const originalEnv = process.env.JIRA_CREATE_INTO
+
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env.JIRA_CREATE_INTO
+    else process.env.JIRA_CREATE_INTO = originalEnv
+  })
+
+  it('defaults to the backlog, which is what the documented process expects', () => {
+    delete process.env.JIRA_CREATE_INTO
+    expect(wantsSprint({ field: [], _: [] })).toBe(false)
+  })
+
+  it('honours the config value', () => {
+    process.env.JIRA_CREATE_INTO = 'sprint'
+    expect(wantsSprint({ field: [], _: [] })).toBe(true)
+    process.env.JIRA_CREATE_INTO = 'backlog'
+    expect(wantsSprint({ field: [], _: [] })).toBe(false)
+  })
+
+  it('lets explicit flags override the config either way', () => {
+    process.env.JIRA_CREATE_INTO = 'backlog'
+    expect(wantsSprint({ sprint: true, field: [], _: [] })).toBe(true)
+    process.env.JIRA_CREATE_INTO = 'sprint'
+    expect(wantsSprint({ 'no-sprint': true, field: [], _: [] })).toBe(false)
+  })
+
+  it('rejects contradictory flags and an unrecognised config value', () => {
+    delete process.env.JIRA_CREATE_INTO
+    expect(() => wantsSprint({ sprint: true, 'no-sprint': true, field: [], _: [] })).toThrow(
+      'mutually exclusive',
+    )
+    process.env.JIRA_CREATE_INTO = 'sprints'
+    expect(() => wantsSprint({ field: [], _: [] })).toThrow("'backlog' or 'sprint'")
+  })
+})
+
+describe('jiraSite', () => {
+  const originalEnv = process.env.JIRA_SITE
+
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env.JIRA_SITE
+    else process.env.JIRA_SITE = originalEnv
+  })
+
+  it('accepts a bare hostname', () => {
+    process.env.JIRA_SITE = 'example.atlassian.net'
+    expect(jiraSite()).toBe('example.atlassian.net')
+  })
+
+  it.each([
+    'evil.example/',
+    'https://example.atlassian.net',
+    'example.atlassian.net/x',
+    'host',
+    'a b.com',
+  ])('rejects %s, which would redirect the credentialed request', (value) => {
+    // jiraSite() is concatenated into a URL carrying the API token, so a value
+    // containing '/' or '@' can point those credentials at another host.
+    process.env.JIRA_SITE = value
+    expect(() => jiraSite()).toThrow('bare hostname')
   })
 })

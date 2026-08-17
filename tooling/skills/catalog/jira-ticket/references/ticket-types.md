@@ -12,11 +12,11 @@ that guide and observed practice on the board differ, the differences are called
 | --------- | --------------------------------------------------------------------------------------- |
 | **Story** | Describing a new feature or behaviour from a user's perspective                         |
 | **Task**  | Describing a concrete piece of technical work (build, configure, investigate, refactor) |
-| **Bug**   | Reporting something broken **in production** — see `reference/bug-reporting.md`         |
+| **Bug**   | Reporting something broken **in production** — see `references/bug-reporting.md`        |
 
 `Bug` is narrower than it looks: it is only for problems found after release. Problems found during
 peer review, IAT or UAT are defects in unfinished work — bounce that ticket back to In Progress
-instead of raising a Bug. Read `reference/bug-reporting.md` before raising one.
+instead of raising a Bug. Read `references/bug-reporting.md` before raising one.
 
 ## The standard acceptance criteria
 
@@ -187,7 +187,7 @@ Review. `UAT Steps` are written out here because the writer already knew how to 
 
 ## Bug
 
-Reports something broken in production. Read `reference/bug-reporting.md` first: the type is
+Reports something broken in production. Read `references/bug-reporting.md` first: the type is
 narrower than it appears, and Bugs carry extra fields.
 
 ### Template

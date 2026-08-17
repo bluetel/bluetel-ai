@@ -9,14 +9,14 @@ move an existing issue into a sprint or between statuses.
 
 Read the relevant one before writing a description — they carry the templates and the team's process:
 
-| File                         | Contents                                                                 |
-| ---------------------------- | ------------------------------------------------------------------------ |
-| `reference/ticket-types.md`  | Templates, field guidance and worked examples for Story, Task and Bug    |
-| `reference/bug-reporting.md` | When a Bug is a Bug (production only), reverts, and the extra Bug fields |
-| `reference/workflow.md`      | Board states, creation fields, story point scale, summary style          |
+| File                          | Contents                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| `references/ticket-types.md`  | Templates, field guidance and worked examples for Story, Task and Bug    |
+| `references/bug-reporting.md` | When a Bug is a Bug (production only), reverts, and the extra Bug fields |
+| `references/workflow.md`      | Board states, creation fields, story point scale, summary style          |
 
-Installed path: `.agents/skills/jira-ticket/reference/…`; in the source repo,
-`tooling/skills/catalog/jira-ticket/reference/…`.
+Installed path: `.agents/skills/jira-ticket/references/…`; in the source repo,
+`tooling/skills/catalog/jira-ticket/references/…`.
 
 ## Project conventions (read first)
 
@@ -81,7 +81,7 @@ Script paths: installed as `.agents/skills/jira-ticket/scripts/…`; in the sour
 
 `Bug` is narrower than it looks. Problems found during peer review, IAT or UAT are defects in
 unfinished work: bounce that ticket back to In Progress rather than raising a Bug. A fix-forward for
-a production issue is still a Bug, not a Task. **Read `reference/bug-reporting.md` before raising
+a production issue is still a Bug, not a Task. **Read `references/bug-reporting.md` before raising
 one** — it also covers reverts and the extra fields a Bug carries.
 
 If the project uses other types (`Spike`, …), confirm with the user before using them.
@@ -97,11 +97,11 @@ default epic is configured (offer to set one via `config set 'jira_epic_key=…'
 ## Procedure
 
 1. **Identify the issue type** from the table above. For a Bug, check
-   `reference/bug-reporting.md` first — the problem may not warrant one.
+   `references/bug-reporting.md` first — the problem may not warrant one.
 2. **Write the summary** — a short, specific statement, max ~80 chars. Describe the symptom or need,
    not the fix: "Play bar does not reset when starting a new article", not "Reset play bar state on
    mount".
-3. **Write the description** to a file, following the template in `reference/ticket-types.md` and the
+3. **Write the description** to a file, following the template in `references/ticket-types.md` and the
    writing rules below.
 4. **Create the issue** — pipe the markdown in on stdin, or point at the file:
 
@@ -126,7 +126,7 @@ Add `--dry-run` to print the exact payload and check the formatting before anyth
 
 6. **Remaining fields** — Priority (usually leave Neutral), Labels, Story Point Estimate and Linked
    Issues are best set in the Jira UI, or via `--field` for custom fields. See
-   `reference/workflow.md` for the story point scale and what each field is for.
+   `references/workflow.md` for the story point scale and what each field is for.
 
 ### Fixing an existing ticket
 
@@ -138,20 +138,29 @@ To re-render a ticket whose description was published as literal markdown:
 
 ### CLI flags reference
 
-| Flag                 | Required | Notes                                            |
-| -------------------- | -------- | ------------------------------------------------ |
-| `--type`             | create   | `Story`, `Task` or `Bug`                         |
-| `--summary`          | create   | Short title, max ~80 chars                       |
-| `--key`              | update   | Issue to re-describe                             |
-| `--description-file` | Yes\*    | Markdown file (\*or pipe markdown on stdin)      |
-| `--project`          | No       | Defaults to `jira_project_key` / `ticket_prefix` |
-| `--parent`           | No       | Defaults to `jira_epic_key`                      |
-| `--assignee`         | No       | `@me`, an email, or a display name               |
-| `--label`            | No       | Comma-separated labels                           |
-| `--field`            | No       | `<id>=<value>` for custom fields; repeatable     |
-| `--sprint`           | No       | Move into the active sprint after creating       |
-| `--no-sprint`        | No       | Leave it in the backlog                          |
-| `--dry-run`          | No       | Print the payload without touching Jira          |
+| Flag                 | Required | Notes                                                 |
+| -------------------- | -------- | ----------------------------------------------------- |
+| `--type`             | create   | `Story`, `Task` or `Bug`; cannot be changed on update |
+| `--summary`          | create   | Short title, max ~80 chars                            |
+| `--key`              | update   | Issue to re-describe                                  |
+| `--description-file` | Yes\*    | Markdown file (\*or pipe markdown on stdin)           |
+| `--project`          | No       | Defaults to `jira_project_key` / `ticket_prefix`      |
+| `--parent`           | No       | Epic; defaults to `jira_epic_key`                     |
+| `--assignee`         | No       | `@me`, an email, or an **exact** display name         |
+| `--label`            | No       | Comma-separated; **replaces** the existing label set  |
+| `--field`            | No       | `<id>=<value>` for custom fields; repeatable          |
+| `--sprint`           | No       | Move into the active sprint after creating            |
+| `--no-sprint`        | No       | Leave it in the backlog                               |
+| `--dry-run`          | No       | Print the payload and exit, making no API call        |
+
+Pass each value as a **separate argument** — `--summary "x"`, never `--summary=x`, which is
+rejected. Unknown flags are rejected too rather than ignored, so a typo cannot silently drop
+`--dry-run` and create a real ticket. There is no positional argument: `--sprint` is a switch here,
+unlike `jira-sprint.sh --sprint <id>`.
+
+`--field` cannot set `description`, `summary`, `project`, `issuetype`, `parent`, `labels` or
+`assignee` — the script derives those, and letting a raw string through would reintroduce the
+literal-markdown bug.
 
 Do NOT pass priority — set it in the Jira UI after creation.
 
@@ -197,7 +206,7 @@ Real tickets on these boards run ~110 words / ~1,000 characters of description. 
 ### One ticket, one concern
 
 If you find yourself writing "and also", split the ticket. Aim for work completable in under two
-days; see the story point scale in `reference/workflow.md`.
+days; see the story point scale in `references/workflow.md`.
 
 ### Formatting
 
@@ -246,7 +255,7 @@ acli jira workitem transition --key "<project>-XXX" --status "<status>" --yes
 
 The default board flow is `Backlog` → `Ready` → `In Progress` → `Peer Review` → `IAT` → `UAT` →
 `Awaiting Release` → `Done`, plus `Blocked`. Status names vary per project, so confirm rather than
-assuming. `reference/workflow.md` describes what each state means and what must be true to leave it.
+assuming. `references/workflow.md` describes what each state means and what must be true to leave it.
 
 ### Move to a sprint, or back to the backlog
 
