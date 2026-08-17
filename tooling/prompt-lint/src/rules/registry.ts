@@ -9,11 +9,15 @@
  */
 import { ALL_KINDS } from '../scope'
 
+import { configMismatch } from './conventions'
+import { declaredDependencyMissing } from './declared'
 import { defineRule, type LocalRule, type Rule, type RuleId } from './define'
+import { installRules } from './install'
 import { metadataRules } from './metadata'
 import { placeholderResidue } from './placeholders'
 import { danglingPath } from './references'
 import { sectionMissing } from './sections'
+import { useWhenTrigger } from './trigger'
 
 /**
  * The four rules that describe the run rather than an artifact's content. Their findings
@@ -93,9 +97,13 @@ export const BOOKKEEPING_RULES = {
 /** Every registered rule. The single source `--list-rules` and the cross-check read. */
 export const RULES: Rule[] = [
   ...metadataRules,
+  declaredDependencyMissing,
   danglingPath,
   sectionMissing,
+  useWhenTrigger,
   placeholderResidue,
+  configMismatch,
+  ...installRules,
   ...Object.values(BOOKKEEPING_RULES),
 ]
 

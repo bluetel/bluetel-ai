@@ -63,8 +63,15 @@ describe('loadBaseline', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.value.path).toBe(DEFAULT_BASELINE_PATH)
-    // T039 ships it empty. It is populated from a measured run (T058), not guessed.
-    expect(result.value.entries).toEqual([])
+    // T039 shipped it empty and T058 populated it from a measured run. Asserting a count
+    // here would make this test a change-detector for the adoption state, which drains by
+    // design — so it asserts the shape every entry must hold instead. A malformed entry is
+    // caught at load, and this is the one place the *real* file goes through that load.
+    for (const entry of result.value.entries) {
+      expect(entry.rule, JSON.stringify(entry)).toMatch(/^[^/]+\/[^/]+$/)
+      expect(entry.path.length, entry.rule).toBeGreaterThan(0)
+      expect(entry.reason.trim().length, `${entry.rule} ${entry.path}`).toBeGreaterThan(0)
+    }
   })
 
   it('reads an explicitly named file, so the location is never inferred', () => {

@@ -348,19 +348,19 @@ rule fires and no other. Then confirm a clean catalog produces no findings.
 [quickstart.md](./quickstart.md#scenario-6--a-skill-cannot-be-published-broken-us3-fr-044) has the break/expect
 table.
 
-- [ ] T051 [P] [US3] Implement `tooling/prompt-lint/src/rules/declared.ts` + `declared.test.ts` —
+- [x] T051 [P] [US3] Implement `tooling/prompt-lint/src/rules/declared.ts` + `declared.test.ts` —
       `meta/declared-dependency-missing`: `requires=` names catalog skills that exist, `assets=` names an existing
       bundle directory, and each `next_step=` line carries its two mandatory `|`-separated fields (`action`,
       `why`) with an optional third (`when`). A `next_step` missing its `why` renders as a bare instruction with
       no rationale, which is exactly what that field exists to prevent, so it fires.
-- [ ] T052 [P] [US3] Implement `tooling/prompt-lint/src/rules/conventions.ts` + `conventions.test.ts` —
+- [x] T052 [P] [US3] Implement `tooling/prompt-lint/src/rules/conventions.ts` + `conventions.test.ts` —
       `conventions/config-mismatch`: an artifact must not assert a convention contradicting
       `.agents/skills.config` — a recognisable `owner/repo` slug that is not the configured one, a
       `PREFIX-<digits>` ticket token that is not the configured prefix, or a base/staging branch name that is not
       the configured branch. Mechanical comparisons only; it does not read the meaning of a sentence. The
       fires-case fixture is the live defect: `.agents/remote-workflow-instructions.md` naming `URM` and
       `harrytwigg/universal-react-monorepo` while the config says `bluetel/bluetel-ai`.
-- [ ] T053 [P] [US3] Implement `tooling/prompt-lint/src/rules/trigger.ts` + `trigger.test.ts` —
+- [x] T053 [P] [US3] Implement `tooling/prompt-lint/src/rules/trigger.ts` + `trigger.test.ts` —
       `skill/use-when-trigger` (FR-014): a `catalog-meta` or `agent-pointer` `description` carries a `Use when:`
       clause naming the situations the skill applies to, because the description is the only thing an agent sees
       when deciding whether to invoke a skill. Fires on the ten `speckit-*` descriptions, which describe what they
@@ -372,7 +372,7 @@ table.
       [data-model.md](./data-model.md#the-25-rules-by-family) both require it. It belongs here, with the rest of
       the catalog-publishing invariants US3 §2 names; phase C of that table was corrected in the same change that
       added this task.
-- [ ] T054 [US3] Implement `tooling/prompt-lint/src/rules/install.ts` + `install.test.ts` — the three
+- [x] T054 [US3] Implement `tooling/prompt-lint/src/rules/install.ts` + `install.test.ts` — the three
       `scope: 'set'` rules: `install/catalog-drift` (`.agents/skills/<name>/` matches
       `tooling/skills/catalog/<name>/` byte for byte, **excluding** the files the installer's model deliberately
       leaves per-project — `.skill`, `.agents/skills.config`, asset bundles), `install/version-bump` (content
@@ -380,26 +380,26 @@ table.
       `name`/`description` agrees with `skill.meta`, and its body still names the shared
       `.agents/skills/<name>/SKILL.md` file). Each finding names **both** paths via `related`. `install/version-bump`
       is diff-scoped by nature: under `--all` it is reported as **not evaluated**, never as passing.
-- [ ] T055 [US3] Extend `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` to run set-scoped rules over
+- [x] T055 [US3] Extend `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` to run set-scoped rules over
       `universe` while per-artifact rules run over `targets`, and to widen `refs/dangling-path` to `universe`
       when the diff deletes any artifact. Stated as one rule in
       [data-model.md](./data-model.md#scope-and-configuration) and asserted here, because getting it wrong makes
       US1 §4 silently pass.
-- [ ] T056 [US3] Add a `prompt-lint` target to `tooling/skills/project.json` running the validator with
+- [x] T056 [US3] Add a `prompt-lint` target to `tooling/skills/project.json` running the validator with
       `--scope=catalog`, so `nx affected -t … prompt-lint` runs the catalog rules whenever a skill changes.
       Division of labour, stated in the spec's Assumptions and worth restating in the target's comment: **the
       shell tests own the installer's behaviour, `prompt-lint` owns the artifact's content.** Confirm
       `pnpm nx test skills` still passes unchanged (FR-044).
-- [ ] T057 [US3] Extend `tooling/prompt-lint/docs/rules.md` with the entries for T051–T054 and re-run the
+- [x] T057 [US3] Extend `tooling/prompt-lint/docs/rules.md` with the entries for T051–T054 and re-run the
       cross-check from T045. A rule cannot land without its entry — that is what the cross-check is for.
-- [ ] T058 [US3] Measure the surface and set the adoption state: run `pnpm prompt-lint --all --no-baseline`,
+- [x] T058 [US3] Measure the surface and set the adoption state: run `pnpm prompt-lint --all --no-baseline`,
       compare against the table in
       [plan.md](./plan.md#adoption-how-this-lands-without-breaking-every-open-pr), then encode it — `warn` for
       `skill/use-when-trigger` and `conventions/config-mismatch` in `src/config.ts` `severities`, and one
       `baseline.json` entry per known pre-existing violation with a reason. Record any divergence from the
       predicted counts in the pull request; a measurement that disagrees with the plan is information, not a
       number to bend.
-- [ ] T059 [US3] Run [quickstart.md](./quickstart.md#scenario-6--a-skill-cannot-be-published-broken-us3-fr-044)
+- [x] T059 [US3] Run [quickstart.md](./quickstart.md#scenario-6--a-skill-cannot-be-published-broken-us3-fr-044)
       Scenario 6 (one rule per break, both paths named for the set-scoped ones) and
       [Scenario 7](./quickstart.md#scenario-7--suppressions-and-the-baseline-behave-fr-009-fr-010-fr-035)
       (an unreasoned suppression is itself a finding and exempts nothing; a fixed violation with a surviving

@@ -30,7 +30,7 @@ reviewable edit to `severities` in `src/config.ts` — never an environment vari
 _what_ is checked has to appear in a diff (FR-034, SC-009). The bookkeeping rules are the exception:
 their severity is not configurable and they cannot be baselined.
 
-**Coverage**: 11 rules · 6 families · 7 configurable · 4 bookkeeping
+**Coverage**: 17 rules · 8 families · 13 configurable · 4 bookkeeping
 
 Kind abbreviations: `CS` catalog-skill, `CM` catalog-meta, `CR` catalog-reference, `IS`
 installed-skill, `AP` agent-pointer, `G` guidance, `ST` speckit-template, `C` constitution, `UN`
@@ -92,6 +92,37 @@ line-oriented reader rather than rejected. The field looks set and is not.
 _Fix_: repair the line, or move prose into the `SKILL.md` body where it belongs. A long value must
 stay on one line.
 
+### `meta/declared-dependency-missing`
+
+**Ships as** `error` · **Applies to** CM · **Dimension** correctness · **Scope** artifact
+
+`requires=` names skills that exist in the catalog; `assets=` names a bundle directory under
+`assets/`; each `next_step=` line carries its two mandatory `|`-separated fields — `action` and
+`why` — with an optional third, `when`.
+
+_Why_: `skills.sh`'s `verify` already gates all three and exits 2, so this rule is that gate moved
+earlier — before the push, rather than in a target's install. A `next_step` missing its `why`
+renders as a bare instruction with no rationale, which is precisely what the field exists to
+prevent.
+
+_Fix_: correct the name to match the catalog directory, add the bundle under `assets/`, or supply
+the missing `|`-separated field. `requires` and `assets` are space-separated, so a stray word is a
+declared dependency the installer cannot resolve — one finding per offending word, so the message
+names which of three declared names is the broken one.
+
+_Not reported_:
+
+1. an absent **or empty** `requires=`, `assets=` or `next_step=`. Empty and absent are the same
+   thing to the shell — zero iterations, no check — and every skill in the catalog today ships a
+   literal `requires=` with nothing after it, so a rule that fired on emptiness would fire
+   seventeen times on a clean catalog;
+2. anything but the **first** `requires=` or `assets=` line, because `meta_get` returns the first
+   match and a later line is a value nothing reads. That duplication is `meta/duplicate-key`'s
+   finding. `next_step` is the one repeatable key, so every line of it is checked;
+3. a `next_step` whose optional third field is empty or absent, or which carries extra `|`s. A
+   trailing bare `|` is well-formed, and `emit_next_steps` renders everything after the second
+   separator rather than swallowing it.
+
 ---
 
 ## `refs/` — do the references resolve
@@ -150,6 +181,37 @@ _Not reported_: any installed file that is not a `SKILL.md`. The `IS` kind sweep
 documents a skill reads, and a reference is prose to be consulted rather than a procedure with a
 completion condition.
 
+### `skill/use-when-trigger`
+
+**Ships as** `warn` · **Applies to** CM, AP · **Dimension** correctness · **Scope** artifact
+
+The `description` contains a `Use when:` clause naming the situations the skill applies to.
+
+_Why_: the description is the only thing an agent sees when deciding whether to invoke a skill —
+the body is not read until after the decision is made. A description that says only what a skill
+does therefore gets it selected by name rather than by need. The ten `speckit-*` skills are in
+exactly that state today.
+
+_Fix_: append `Use when: <situation>, <situation>` to the description. Describe the user's
+situation — what they are doing or asking for — rather than the command's mechanics.
+
+_Accepted, deliberately looser than the literal_ `Use when:`: the match is case-insensitive, the
+colon is optional, `whenever` counts as well as `when`, and an intervening `this` or `it` is
+allowed, so `Also use when the user says …` passes. A rule that reported that clause would teach
+authors to satisfy punctuation rather than to name a situation. Still rejected, and intentionally:
+`Useful when` (a different word), a bare `When:` with no `use` (a section label, not a trigger),
+and near-synonyms such as `Triggers on:` or `Applies to:`.
+
+_Reported separately_: a marker that is present but followed by fewer than three words, which is a
+different finding with a different message. `Use when: needed.` satisfies any substring test while
+naming nothing; three words is the shortest span that can carry a verb and its object — `creating a
+ticket`, `reviewing code changes` — and the shortest real clause in the catalog runs to six, so the
+threshold has clearance against the corpus rather than being tuned to it.
+
+_Not reported_: an absent or empty `description`, which is `meta/required-field`'s finding — and
+whose remediation already asks for the `Use when:` clause. Two rules reporting one missing field is
+how a report starts getting skimmed.
+
 ---
 
 ## `template/` — is it finished
@@ -172,6 +234,165 @@ backticks — which is also how this catalogue quotes every token it detects.
 _Inverted for_ `ST` (speckit-template): there the tokens are the template's _content_, so the rule
 instead requires that they are still **present**. A template filled in place and shipped would
 produce one repository's document for every future feature.
+
+---
+
+## `conventions/` — does it agree with the repository
+
+### `conventions/config-mismatch`
+
+**Ships as** `warn` · **Applies to** CS, IS, G · **Dimension** correctness · **Scope** artifact
+
+No artifact asserts a repository slug, ticket prefix, or base/staging branch that contradicts
+`.agents/skills.config`.
+
+_Why_: two sources of truth for a convention is the defect. This repository's own remote-workflow
+instructions name a ticket prefix that does not exist here and a repository that is not this one —
+under a heading that says "Never invent them" — while `.agents/skills.config`, the file the skills
+actually read, says otherwise. An agent that believes the instructions works to a ticket prefix that
+does not exist and pushes somewhere else.
+
+_Fix_: delete the hardcoded value and point at `.agents/skills.config`, or correct it to the
+configured one. Prefer deletion: two sources of truth is the defect, and correcting one of them
+leaves the other in place.
+
+_Only mechanical comparisons against a configured value_: it never reads the meaning of a sentence,
+and that bound is the design rather than modesty. All three compared values are shaped like ordinary
+text — `owner/repo` is shaped exactly like a relative path, a branch name is an English word, and
+`PREFIX-123` is the shape of half the acronyms in technical prose — so each needs an anchor before
+it counts as a claim: the token inside a code span (or carrying its own `github.com/…` context) with
+a word that assigns it the role immediately before it (`repo`, `remote`, `origin`, `--repo`,
+`gh -R`, `base branch`, `default branch`, `staging branch`, `targets`, `against`), or a
+ticket-convention word on the line. Anchors are tested against the text _before_ the token, so a
+token containing the word `repo` cannot vouch for itself.
+
+_Not reported_:
+
+1. a line that is pointing **at** the config rather than setting up a second source of truth — one
+   that names a `lower_snake_case` config key, names `skills.config`, or flags itself as an
+   illustration ("for example", "for instance", "e.g."). Six of the first nine findings over this
+   tree were that: a table of config keys and their example values, and a sentence describing how a
+   branch name is assembled from the configured prefix. The test is lexical, so it costs a real
+   defect written as "set `ticket_prefix` to …";
+2. anything inside a fenced block or an HTML comment. A command transcript or an author's note is
+   not a claim the prose is making, and `refs/dangling-path` draws the same line;
+3. a two-segment token whose owner is a git ref word (`origin`, `upstream`, `refs`, `heads`) or a
+   real directory in this tree, and a `PREFIX-` token whose prefix is a standard or a
+   requirement-id prefix (`UTF-8`, `SHA-256`, `RFC-2119`, `FR-007`, `SC-004`). The cost of that
+   list is a project whose real ticket prefix is one of them;
+4. everything, when `.agents/skills.config` is absent or the compared key is blank. That is
+   **silence**, not not-evaluated: a convention nobody configured is a convention no artifact can
+   contradict, so there is nothing to compare against rather than a comparison that failed to run.
+
+---
+
+## `install/` — the catalog-to-target contract
+
+All three are **Scope** `set` — properties of the collection, invisible to a per-file linter — and
+the only rules that reason about two trees at once. Each pairs a file in one tree with a file in
+another, so every finding names both paths: a drift finding that names one side tells the reader
+nothing about what to compare. Each is silent when the run hands it half a pair, because
+`--scope=catalog` and `--scope=installed` do exactly that.
+
+### `install/catalog-drift`
+
+**Ships as** `error` · **Applies to** CS, CR, IS · **Dimension** correctness · **Scope** set
+
+`.agents/skills/<name>/` matches `tooling/skills/catalog/<name>/` byte for byte, excluding the two
+files the installer deliberately leaves per-project: `skill.meta`, which it never copies, and
+`.skill`, which it generates.
+
+_Why_: the installer's update model is a content hash. When the installed copy diverges,
+`skills.sh status` reports the skill locally-modified and `update` refuses to touch it without
+`--on-conflict`. A drift introduced by editing the installed copy instead of the catalog therefore
+freezes that skill's updates — in this repository, and in every target that later hits the same
+conflict.
+
+_Fix_: for a file that differs, make the edit in `tooling/skills/catalog/<name>/` and re-run the
+installer, or accept the installed copy as the new catalog content — never both. For a file present
+on only one side the fix is different: re-run the installer so the installed copy carries every
+catalog file, or add the file to the catalog if the installed copy needs it. Installed content is
+replaced wholesale, never merged, so a file in the installed copy and in no catalog entry is deleted
+by the next `update`.
+
+_Not reported_:
+
+1. `skill.meta` and `.skill`. The exclusion list is the installer's, read off `skills.sh` rather
+   than taken from the design record: `stage_and_commit` copies
+   `find . -type f ! -name skill.meta`, and `skill_hash` digests the same minus `.skill`. The
+   config file and the asset bundles the design record also names live outside both compared
+   directories entirely, so excluding them by name would be dead code;
+2. a **content** difference in a file the artifact set does not carry. File lists are compared over
+   every tracked path, contents only over declared artifacts, so a script or a JSON schema present
+   on both sides is checked for presence and not for content. Widening that is a change to
+   `src/scope/patterns.ts`, not to this rule;
+3. a skill present in only one tree — which is also what `--scope=catalog` and `--scope=installed`
+   hand this rule, half a pair each. A catalog publishes to many targets and each installs the
+   subset it wants: `frontend-design` is published here and installed nowhere;
+4. any comparison in which one side could not be read. That is reported not-evaluated, naming the
+   comparison that did not happen, alongside `artifact/unreadable` naming the file. A rule may not
+   report "these files differ" on the strength of bytes it never saw.
+
+### `install/version-bump`
+
+**Ships as** `error` · **Applies to** CS, CM, CR · **Dimension** correctness · **Scope** set
+
+When a diff changes a catalog skill's hashed content, that skill's `skill.meta` `version` also
+changes.
+
+_Why_: the version is the only signal a target has. Content changed without a bump means no
+installed copy anywhere will ever learn there is an update — the change is published and invisible
+at the same time.
+
+_Fix_: bump `version` in the same commit. Patch for wording, minor for a new capability, major for a
+changed contract.
+
+_Diff-scoped by nature_: it is a comparison between two revisions, so under `--all` there is no base
+ref and the rule is reported **not evaluated** — never as passing. Say that distinction plainly,
+because it is the whole point: a whole-surface run that showed this rule green would be claiming
+every version in the catalog is bumped correctly on the strength of a comparison it never made.
+
+_Not reported_:
+
+1. a skill that did not exist at the base ref. A first published version is not a bump;
+2. a **modification** to a file the artifact set does not carry, such as a script or a JSON schema.
+   Additions and deletions of those are still visible, because deciding them needs no current
+   bytes; deciding a modification needs bytes to compare and there are none. A missed bump on a
+   changed `scripts/jira-sprint.sh` is the one case this rule cannot see, and it is stated rather
+   than hidden;
+3. an absent `version` on either side, or a catalog entry with no `skill.meta` in scope at all —
+   both `meta/required-field`'s finding.
+
+### `install/pointer-mismatch`
+
+**Ships as** `error` · **Applies to** AP, CM · **Dimension** correctness · **Scope** set
+
+A `.claude/skills/<name>/SKILL.md` pointer's frontmatter `name` and `description` match the catalog
+`skill.meta`, and its body references the shared `.agents/skills/<name>/SKILL.md` file. One finding
+per disagreeing field, each naming the `skill.meta` line it disagrees with: `name`, `description`
+and the body reference have three different fixes, and a combined message would have to carry all
+three.
+
+_Why_: the pointer is what the agent reads first. If its `description` has drifted from the
+catalog's, skill selection is made on stale information; if it stops naming the shared file, the
+agent runs a one-sentence stub as if it were the whole procedure.
+
+_Fix_: regenerate the pointer through the installer rather than editing it by hand. The pointer is
+generated from `skill.meta`, so the catalog is where the value belongs — and `generate_stub` is what
+writes the one line naming the shared file.
+
+_Not reported_:
+
+1. a `''` doubling in the pointer's `description`. The installer writes the value as a
+   single-quoted YAML scalar and doubles every `'`, so undoing that before comparing is the
+   difference between reporting drift and reporting the installer working correctly;
+2. an absent `name` or `description` on either side, which is `meta/required-field`'s finding, or a
+   metadata block that would not parse, which is `meta/stray-line`'s and `artifact/unreadable`'s;
+3. a pointer with no catalog `skill.meta` in scope. It may name a skill published by another
+   catalog, and under `--scope=installed` there is no `skill.meta` in scope at all. A missing
+   installed copy or a missing pointer is likewise silence: `skills.sh status` owns the installer's
+   own states (stub-missing, not-installed), and `prompt-lint` owns the content of the artifacts
+   that are there.
 
 ---
 

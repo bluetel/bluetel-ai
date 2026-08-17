@@ -501,6 +501,62 @@ Three smaller notes, none of which changed a decision:
   cost is that the hook needs `origin/main` resolvable — exactly as the `qlty:diff` line beside it
   already does.
 
+### Phase 5 divergences and the T058 measurement (recorded 2026-08-17)
+
+The measured surface, all 17 rules, `pnpm prompt-lint --all --no-baseline`, over 93 artifacts:
+
+| Rule                           | Measured  | [Adoption table](#adoption-how-this-lands-without-breaking-every-open-pr) predicted | Encoded as                                 |
+| ------------------------------ | --------- | ----------------------------------------------------------------------------------- | ------------------------------------------ |
+| `template/placeholder-residue` | 47 errors | not measured                                                                        | 17 baseline entries                        |
+| `skill/section-missing`        | 23 errors | not measured                                                                        | 23 baseline entries                        |
+| `skill/use-when-trigger`       | 20 warns  | 10                                                                                  | ships `warn`, under the 50 threshold       |
+| `conventions/config-mismatch`  | 3 warns   | 1                                                                                   | ships `warn`, under the 50 threshold       |
+| `refs/dangling-path`           | 2 errors  | 1                                                                                   | **not baselined** — fixed by T086          |
+| `meta/*` (5 rules)             | 0         | 0                                                                                   | —                                          |
+| `install/*` (3 rules)          | 0         | 0 (drift verified)                                                                  | `version-bump` not evaluated under `--all` |
+
+**Three predictions were low, and each for the same structural reason: the installed tree doubles a
+finding.** `skill/use-when-trigger` applies to `catalog-meta` **and** `agent-pointer`, and the pointer
+descriptions are byte-identical copies, so ten offending descriptions produce twenty findings.
+`refs/dangling-path`'s single defect has its installed copy, which is the design's own point about
+publication. `conventions/config-mismatch`'s "1 pre-existing violation" is one _file_ but three
+(line, value) pairs. None of these is a rule behaving wrongly; the counting unit in the adoption table
+was files, and the gate counts findings.
+
+[contracts/rules.md](./contracts/rules.md) says `skill/use-when-trigger` has "10 pre-existing
+violations" while its own `Applies to` line lists CM **and** AP. Those two statements cannot both hold.
+`appliesTo` was followed, because narrowing the rule to `catalog-meta` would leave the pointer —
+the file an agent reads first when deciding whether a skill applies — unchecked, which is the rule's
+entire purpose.
+
+**One defect found by measuring, in a Phase 3 rule.** `template/placeholder-residue` reported
+`$ARGUMENTS` in six `speckit-*` skill bodies. The contract says the rule covers "`$ARGUMENTS` **outside
+the one slot where it is meaningful**" and the qualifier had not been implemented — so the rule was
+asking six skills to delete the mechanism by which they receive their arguments. The slot is now
+recognised structurally: `$ARGUMENTS` as the last token on its line, preceded by nothing or a `label:`.
+Used mid-sentence it is still reported, because there it genuinely is ambiguous with prose. 53 → 47.
+
+**Why the two large counts are baselined and the two `warn` rules are not.** The plan's own division
+holds: severity handles "this rule is not ready to block anywhere", the baseline handles "this rule
+blocks, except for these named files". `use-when-trigger` and `config-mismatch` already ship `warn` by
+`defaultSeverity`, and 23 warnings sit under the threshold of 50 — so T058's instruction to add them to
+`severities` would have written a no-op, and baselining them would make their later promotion to `error`
+a two-step edit instead of one. They stay visible and non-blocking, which is what "ships as `warn`"
+means. The 40 baseline entries cover only the two rules that ship `error` with a pre-existing surface.
+
+`refs/dangling-path` is deliberately **not** baselined: the adoption table says "promoted to `error`
+immediately — fix the one defect in its own change", and that is T086. Until it lands, a whole-surface
+run is red with exactly those two findings, which is the intended state rather than an oversight.
+
+Two smaller notes:
+
+- **T058 asked for `severities` entries that would be inert.** Recorded above rather than written.
+- **The gate's default baseline is this package's own file**, resolved from the module. Once populated,
+  every gate test driving a temporary repository saw all 40 entries as stale. The suite now points its
+  fixtures at a path that does not exist, which `loadBaseline` treats as an empty baseline. Worth knowing
+  before FR-045's deferred target-project adoption: a baseline resolved from the tool rather than from the
+  repository under evaluation is the wrong default for any repository but this one.
+
 ## Phase 6: the two blockers and how they were resolved (recorded 2026-08-17)
 
 ### T060 — licence sign-off: **GRANTED**

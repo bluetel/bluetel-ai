@@ -26,6 +26,37 @@ describe('template/placeholder-residue', () => {
     expect(finding.remediation).toContain('backticks')
   })
 
+  describe('the one slot where `$ARGUMENTS` is meaningful', () => {
+    // The contract says "$ARGUMENTS outside the one slot where it is meaningful", and the
+    // qualifier was missing. In a `speckit-*` body the token is the substitution slot the
+    // harness fills at invocation, so reporting it asked six skills to delete the mechanism
+    // by which they receive their arguments. Measured during T058.
+    const skill = (content: string) =>
+      artifactFixture({
+        path: 'tooling/skills/catalog/speckit-plan/SKILL.md',
+        kind: 'catalog-skill',
+        content,
+      })
+
+    it.each([
+      ['alone on its line', '## Context\n\n$ARGUMENTS\n'],
+      ['after a label', 'Context for task generation: $ARGUMENTS\n'],
+      ['with trailing whitespace', '$ARGUMENTS  \n'],
+    ])('does not fire when it is the slot, %s', (_label, content) => {
+      expectDoesNotFire(placeholderResidue, skill(content))
+    })
+
+    it.each([
+      ['mid-sentence', 'Parse $ARGUMENTS for optional tokens before dispatching.\n'],
+      ['followed by prose', '$ARGUMENTS is the feature description you were given.\n'],
+    ])('still fires when it is used as prose, %s', (_label, content) => {
+      // Not the slot: here the token really is ambiguous with content, which is the
+      // condition the rule exists for. Every such use in this repository sits in backticks,
+      // and a code span was already exempt.
+      expectFires(placeholderResidue, skill(content))
+    })
+  })
+
   // This exemption is load-bearing rather than a nicety: it is what lets the constitution's
   // SYNC IMPACT REPORT comment quote the tokens, and what lets the rule catalogue quote
   // every token it matches.

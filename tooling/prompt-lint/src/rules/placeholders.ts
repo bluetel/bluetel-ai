@@ -37,6 +37,8 @@ interface PlaceholderPattern {
   pattern: RegExp
 }
 
+const ARGUMENT_SLOT_LABEL = 'the argument slot'
+
 const PATTERNS: readonly PlaceholderPattern[] = [
   {
     label: 'a bracketed template slot',
@@ -46,7 +48,7 @@ const PATTERNS: readonly PlaceholderPattern[] = [
   },
   { label: 'a clarification marker', pattern: /NEEDS[ _]CLARIFICATION/g },
   { label: 'an unresolved TODO', pattern: /\bTODO\b/g },
-  { label: 'the argument slot', pattern: /\$ARGUMENTS/g },
+  { label: ARGUMENT_SLOT_LABEL, pattern: /\$ARGUMENTS/g },
 ]
 
 /** Is this column inside an inline code span on this line? */
@@ -58,6 +60,26 @@ const isExempt = (view: MarkdownView, line: number, column: number): boolean =>
   inRanges(view.fenced, line) ||
   inRanges(view.htmlCommentSpans.get(line) ?? ([] as Range[]), column) ||
   inCodeSpan(view, line, column)
+
+/**
+ * The one position where `$ARGUMENTS` is meaningful rather than residue.
+ *
+ * [contracts/rules.md](../../../specs/005-prompt-quality-validator/contracts/rules.md) says
+ * "`$ARGUMENTS` **outside the one slot where it is meaningful**", and the qualifier was
+ * missing here. In a `speckit-*` skill body the token is the substitution slot the harness
+ * fills at invocation — `## Context` followed by `$ARGUMENTS`, or a labelled variant such as
+ * `Context for task generation: $ARGUMENTS`. Reporting it asked six skills to delete the
+ * mechanism by which they receive their arguments.
+ *
+ * The slot is recognised structurally: `$ARGUMENTS` is the last non-whitespace token on its
+ * line, and what precedes it is nothing or a `label:`. Used mid-sentence it is still
+ * reported, because there it really is ambiguous with prose — and every such use in this
+ * repository already sits in backticks, which was exempt anyway.
+ */
+const ARGUMENT_SLOT = /^\s*(?:[^:]{0,60}:\s*)?\$ARGUMENTS\s*$/
+
+const isArgumentSlot = (label: string, line: string): boolean =>
+  label === ARGUMENT_SLOT_LABEL && ARGUMENT_SLOT.test(line)
 
 interface Hit {
   line: number
@@ -75,7 +97,7 @@ const findHits = (view: MarkdownView): Hit[] => {
       pattern.lastIndex = 0
       let match = pattern.exec(text)
       while (match !== null) {
-        if (!isExempt(view, line, match.index)) {
+        if (!isExempt(view, line, match.index) && !isArgumentSlot(label, text)) {
           hits.push({ line, column: match.index, text: match[0], label })
         }
         match = pattern.exec(text)

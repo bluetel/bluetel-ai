@@ -13,6 +13,7 @@ import type * as ConfigModule from './config'
 import { EXIT, runPromptLintGate, type GateOptions } from './gate'
 import { defineRule } from './rules'
 import type * as RulesModule from './rules'
+import { ALL_KINDS } from './scope'
 
 /** See `scope/git.test.ts` — inheriting `GIT_*` from a hook breaks every fixture repo. */
 const GIT_ENV = Object.fromEntries(
@@ -30,7 +31,11 @@ const write = (root: string, path: string, content: string): void => {
 }
 
 const CLEAN_SKILL = '# Alpha\n\nDo the thing.\n\n## Done When\n\n- [ ] the thing is done\n'
-const CLEAN_META = 'name=alpha\nversion=1.0.0\ndescription=Does a thing. Use when: needed.\n'
+// `Use when: needed.` was the original filler here, and `skill/use-when-trigger` correctly
+// reports it: the marker is present but names no situation, which is the whole defect that
+// rule exists for. A fixture the rules pass has to be genuinely clean, not superficially so.
+const CLEAN_META =
+  'name=alpha\nversion=1.0.0\ndescription=Does a thing. Use when: the user asks for a thing.\n'
 
 /** A repo whose artifact surface starts clean, so a finding is always something we added. */
 const makeRepo = (): string => {
@@ -55,10 +60,22 @@ const makeRepo = (): string => {
   return root
 }
 
+/**
+ * A baseline path that does not exist, which `loadBaseline` treats as an empty baseline.
+ *
+ * The production default resolves to this package's own `baseline.json`, and that file now
+ * carries this repository's measured adoption state. A fixture repo shares none of those
+ * paths, so every entry would match nothing and arrive as a `suppression/stale` warning in
+ * every test here. Pointing the default away keeps `applyBaseline: true` exercising the
+ * load path while leaving each test's findings its own.
+ */
+const NO_BASELINE = join(tmpdir(), 'prompt-lint-gate-no-such-baseline.json')
+
 const options = (repoRoot: string, overrides: Partial<GateOptions> = {}): GateOptions => ({
   repoRoot,
   mode: 'all',
   applyBaseline: true,
+  baselinePath: NO_BASELINE,
   rulesOnly: true,
   ...overrides,
 })
@@ -87,7 +104,7 @@ describe('runPromptLintGate', () => {
     write(
       root,
       'tooling/skills/catalog/alpha/skill.meta',
-      'name=alpha\nversion=nope\ndescription=d. Use when: x.\n',
+      'name=alpha\nversion=nope\ndescription=d. Use when: the user asks for a thing.\n',
     )
 
     const outcome = runPromptLintGate(options(root))
@@ -120,7 +137,7 @@ describe('runPromptLintGate', () => {
     write(
       root,
       'tooling/skills/catalog/alpha/skill.meta',
-      'name=alpha\nversion=nope\ndescription=d. Use when: x.\n',
+      'name=alpha\nversion=nope\ndescription=d. Use when: the user asks for a thing.\n',
     )
 
     const gate = await import('./gate')
@@ -155,6 +172,47 @@ describe('runPromptLintGate', () => {
     const outcome = runPromptLintGate(options(root, { mode: 'diff', baseRef: 'main' }))
     expect(outcome.report?.scope.artifactCount).toBe(1)
     expect(outcome.report?.findings.every((f) => f.path === 'AGENTS.md')).toBe(true)
+  })
+
+  it('runs set-scoped rules over universe, not targets (US3, T055)', async () => {
+    // The other half of the asymmetry above, and the reason the distinction exists at all:
+    // a rule about the *collection* — catalog drift, a pointer that disagrees with its
+    // skill.meta — is asked a question the diff cannot narrow. Scoping it to `targets`
+    // would make it answer about one file and report a clean set.
+    const counter = defineRule(
+      {
+        id: 'test/counts-the-set',
+        defaultSeverity: 'note',
+        statement: 'Never registered; reports what set it was handed.',
+        rationale: 'Proves a set-scoped rule is evaluated over the universe.',
+        appliesTo: ALL_KINDS,
+        dimension: 'correctness',
+        scope: 'set',
+      },
+      (input) =>
+        input.universe.map((artifact) => ({
+          path: artifact.path,
+          message: `Saw ${artifact.path}.`,
+          remediation: 'Nothing to do; this rule exists only for the suite.',
+        })),
+    )
+
+    vi.resetModules()
+    vi.doMock('./rules', async (importOriginal) => ({
+      ...(await importOriginal<typeof RulesModule>()),
+      localRules: () => [counter],
+    }))
+
+    const root = makeRepo()
+    git(root, ['checkout', '-b', 'feature'])
+    write(root, 'AGENTS.md', '# Agents\n\nEdited.\n')
+
+    const gate = await import('./gate')
+    const outcome = gate.runPromptLintGate(options(root, { mode: 'diff', baseRef: 'main' }))
+
+    // One target, five in the universe — and the set-scoped rule saw all five.
+    expect(outcome.report?.scope.artifactCount).toBe(1)
+    expect(outcome.report?.findings).toHaveLength(5)
   })
 
   it('widens refs/dangling-path to universe when the diff deletes an artifact (US1 §4)', () => {
@@ -343,7 +401,8 @@ describe('runPromptLintGate', () => {
   })
 
   describe('the baseline', () => {
-    const BROKEN_META = 'name=alpha\nversion=nope\ndescription=d. Use when: x.\n'
+    const BROKEN_META =
+      'name=alpha\nversion=nope\ndescription=d. Use when: the user asks for a thing.\n'
     const META_PATH = 'tooling/skills/catalog/alpha/skill.meta'
 
     /** A baseline file outside the repository under test, as the real one is. */

@@ -26,6 +26,7 @@ import {
   bookkeepingFinding,
   BOOKKEEPING_RULES,
   localRules,
+  notEvaluatedSetRules,
   RULE_IDS,
   ruleById,
   unmetNeeds,
@@ -203,6 +204,13 @@ const runRules = (scope: Scope, context: RuleContext, widenToUniverse: Set<RuleI
       findings.push(...evaluate(rule, { ...context, artifact }))
     }
   }
+
+  // `unmetNeeds` takes an artifact, so it is inert for a set-scoped rule: the branch above
+  // passes `artifact: null` and never reaches the `skipped` map. Without this a set-scoped
+  // rule that could not run — no base ref for `install/version-bump`, an unreadable file on
+  // one side of a comparison — would report an empty finding list, which is the one thing
+  // this gate must never let look like a pass.
+  for (const skip of notEvaluatedSetRules(context)) skipped.set(skip.rule, skip.reason)
 
   return {
     findings,
