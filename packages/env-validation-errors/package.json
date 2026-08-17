@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@bluetel-ai/eslint-config-base": "workspace:*",
-    "typescript": "6.0.3",
+    "typescript": "~5.9.2",
     "vitest": "^3.2.4",
     "fast-check": "^3.23.2"
   }

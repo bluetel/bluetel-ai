@@ -9,17 +9,15 @@
     "typecheck": "nx --no-tui run-many -t typecheck",
     "format": "nx --no-tui format:write",
     "format:check": "nx --no-tui format:check",
-    "lint": "nx --no-tui run-many -t lint --configuration=fix && nx --no-tui run-many -t lint-workspace",
-    "lint:check": "nx --no-tui run-many -t lint lint-workspace",
+    "lint": "nx --no-tui run-many -t lint --configuration=fix",
+    "lint:check": "nx --no-tui run-many -t lint",
     "test": "nx --no-tui run-many -t test",
     "audit:cspell": "node scripts/audit-cspell.mjs",
     "knip": "SKIP_ENV_VALIDATION=true knip --no-progress",
     "knip:orphans": "SKIP_ENV_VALIDATION=true knip --no-progress --production --include files",
     "qlty": "qlty check --no-formatters",
     "qlty:diff": "tsx tooling/qlty-diff/src/cli.ts",
-    "lint-inventory": "tsx tooling/lint-coverage/src/cli.ts",
-    "prepare": "husky",
-    "lint:fast": "oxlint --type-aware ."
+    "prepare": "husky"
   },
   "keywords": [],
   "author": "",
@@ -43,16 +41,13 @@
     "knip": "^6.7.0",
     "lint-staged": "16.4.0",
     "nx": "22.6.1",
-    "oxlint": "1.77.0",
-    "oxlint-tsgolint": "7.0.2001",
     "prettier": "^3.8.1",
     "prettier-plugin-tailwindcss": "^0.5.14",
-    "tsx": "^4.21.0",
-    "typescript": "6.0.3"
+    "tsx": "^4.21.0"
   },
   "lint-staged": {
     "**/*.{js,jsx,ts,tsx}": [
-      "oxlint --type-aware --fix",
+      "node --max-old-space-size=8192 ./node_modules/.bin/eslint --flag v10_config_lookup_from_file --fix",
       "prettier --write"
     ],
     "**/*.{json,yaml,yml,md}": [

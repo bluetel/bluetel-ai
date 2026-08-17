@@ -7,17 +7,6 @@ export NVM_DIR="$HOME/.nvm"
 # qlty lives in ~/.qlty/bin, which GUI git clients don't have on PATH
 export PATH="$HOME/.qlty/bin:$PATH"
 
-# oxlint owns 142 of the 146 lint rules, including all 41 type-aware ones. Its type-aware
-# mode needs the `oxlint-tsgolint` binary; without it oxlint aborts rather than quietly
-# skipping those rules, but the hook still has to treat a missing binary as a failure and
-# not let the commit through.
-for bin in oxlint tsgolint; do
-  if [ ! -x "node_modules/.bin/$bin" ]; then
-    echo "⚠ $bin not installed — run pnpm install (oxlint owns the per-file lint gate)"
-    exit 1
-  fi
-done
-
 # Lint + format staged files (lint-staged re-stages anything it auto-fixes)
 npx lint-staged
 
@@ -89,12 +78,6 @@ EOF
 fi
 
 pnpm typecheck
-
-# The four rules oxlint cannot own — @nx/enforce-module-boundaries (needs the project graph),
-# @cspell/spellchecker (no oxlint equivalent, ~1555 ms), no-octal and no-dupe-args — are enforced
-# by `nx affected -t lint-workspace` in CI (.github/workflows/ci.yml), not here. Adding an
-# `nx affected` graph resolution to every local commit for a 4-rule layer measured slower than
-# the whole oxlint pass it sits next to; CI is the affected-scoped enforcement point for it.
 
 # Code-health gate for this branch's diff vs origin/main: lint, security,
 # duplication and complexity via qlty. Installed on demand so the gate
