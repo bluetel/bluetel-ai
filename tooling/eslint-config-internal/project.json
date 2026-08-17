@@ -1,4 +1,14 @@
 {
   "name": "eslint-config-internal",
-  "projectType": "library"
+  "projectType": "library",
+  "targets": {
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "oxlint --type-aware .",
+        "cwd": "tooling/eslint-config-internal"
+      },
+      "cache": true
+    }
+  }
 }
