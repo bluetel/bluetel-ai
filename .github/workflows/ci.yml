@@ -76,7 +76,7 @@ jobs:
       # `design-lint` joins the affected run rather than living in a separate job or a second CI
       # provider: splitting the blocking gates across two systems leaves one of them not running it
       # (FR-069). Projects without the target are simply skipped by `nx affected`.
-      - run: pnpm exec nx affected -t lint test typecheck design-lint --parallel=$(nproc)
+      - run: pnpm exec nx affected -t lint lint-workspace test typecheck design-lint --parallel="$(nproc)"
 
       # The assembly gate (SC-063). A module that is implemented, exported through a barrel and
       # unit-tested, but imported by nothing outside its own tests, is invisible to every check
