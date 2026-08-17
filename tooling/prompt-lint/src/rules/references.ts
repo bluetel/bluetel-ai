@@ -118,7 +118,39 @@ export const resolveReference = (
 const NOT_A_PRESENT_TENSE_CLAIM =
   /\b(?:exists?|existence|absent|missing|optional|present|if there is|if any|when none|not found|skip silently|for example|for instance|such as|persists?|persisted|writes? (?:the|to)|creates?|created|generates?|generated|seeds?|seeded|saves? (?:the|to))\b|e\.g\./i
 
-const assertsPossibleAbsence = (line: string): boolean => NOT_A_PRESENT_TENSE_CLAIM.test(line)
+const assertsPossibleAbsence = (prose: string): boolean => NOT_A_PRESENT_TENSE_CLAIM.test(prose)
+
+/**
+ * The line with the references on it blanked out.
+ *
+ * Rule 5 asks what the surrounding *sentence* claims, so a reference must not be part of
+ * the text it reads. Without this the rule silences itself on the paths it most needs to
+ * report: `docs/does-not-exist.md` matches `exist` inside its own filename, and "exist",
+ * "missing", "absent", "optional" and "created" are exactly the words a person reaches for
+ * when naming a placeholder or a file that is genuinely not there. Found by running
+ * quickstart Scenario 4, whose fixture is named `does-not-exist.md`.
+ *
+ * Only **candidate** references are masked, never every path token. The scanner emits
+ * `e.g` as a token of its own — dotted, so rule 1 discards it as a reference — and blanking
+ * it out would delete the illustrative marker rule 5 exists to honour.
+ */
+const proseAround = (line: string, references: readonly PathToken[]): string => {
+  let prose = line
+  for (const reference of references) prose = prose.split(reference.raw).join(' ')
+  return prose
+}
+
+/** Candidate references, grouped by the line they sit on, so rule 5 can mask a whole line. */
+const byLine = (tokens: readonly PathToken[]): Map<number, PathToken[]> => {
+  const lines = new Map<number, PathToken[]>()
+  for (const token of tokens) {
+    if (!isCandidate(token)) continue
+    const existing = lines.get(token.line)
+    if (existing === undefined) lines.set(token.line, [token])
+    else existing.push(token)
+  }
+  return lines
+}
 
 const APPLIES_TO: ArtifactKind[] = [
   'catalog-skill',
@@ -164,10 +196,16 @@ export const danglingPath = defineRule(
 
     const findings: FindingDraft[] = []
     const reported = new Set<string>()
+    const references = byLine(view.pathTokens)
 
     for (const token of view.pathTokens) {
       if (!isCandidate(token)) continue
-      if (assertsPossibleAbsence(view.lines[token.line])) continue
+      if (
+        assertsPossibleAbsence(
+          proseAround(view.lines[token.line], references.get(token.line) ?? []),
+        )
+      )
+        continue
 
       const { claimed, exists, candidate } = resolveReference(artifact, token.raw, input.index)
       // Rule 3: no root claimed it, so the reference is about somewhere else entirely and

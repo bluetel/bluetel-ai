@@ -473,6 +473,34 @@ what the design predicted.
 A third divergence blocks Phase 6 and is **not** resolved here, because resolving it needs decisions this
 run cannot make — see [the Phase 6 note](#phase-6-is-blocked-recorded-2026-08-17).
 
+### Phase 4 divergences (recorded 2026-08-17)
+
+Four came out of building US2. The first is a defect in the fix recorded above, which is the more
+interesting kind of finding: the correction to R2 had its own bug, and only running the design's own
+acceptance scenario surfaced it.
+
+| Divergence                                                                                                                                                                                                                                               | Why                                                                                                                                                                                                                                                                                                                                              | What shipped                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rule 5 silenced itself on the paths it most needed to report.** It tested the whole line, so `docs/does-not-exist.md` matched `exist` **inside its own filename**. Found by running quickstart Scenario 4, whose fixture is named `does-not-exist.md`. | Rule 5 asks what the surrounding _sentence_ claims, so the reference must not be part of the text it reads. The words at risk — exist, missing, absent, optional, created — are exactly the ones a placeholder filename uses. Masking _every_ path token then broke the `e.g.` exemption, because the scanner emits `e.g` as a token of its own. | Rule 5 reads the line with **candidate references only** blanked out. Regression tests for four such filenames, plus the case that the prose's own existence check still exempts a reference named `does-not-exist.md`. |
+| **A malformed `baseline.json` has no exit code in [contracts/cli.md](./contracts/cli.md#exit-codes).**                                                                                                                                                   | A baseline that fails to load downgrades nothing, which over a red surface is indistinguishable from a clean pass. It is configuration, not a prompt defect.                                                                                                                                                                                     | Exit `3`, decided **before scope resolution**, so FR-036's "no artifact evaluated" holds. A missing file stays legitimate — an empty baseline is the state the file is working towards.                                 |
+| **A baseline entry naming a bookkeeping rule is reported stale, not refused at load.**                                                                                                                                                                   | Such an entry exempts nothing, which _is_ the stale condition. Refusing the load would be exit `3` with no artifact evaluated — a report saying nothing about the prompts, over an entry that was already inert. Symmetric with how `applySuppressions` treats an unknown rule id.                                                               | A third stale message, alongside "reported nothing" and "not a registered rule".                                                                                                                                        |
+| **[R9](./research.md#r9)'s premise is stale.** It cites the qlty pre-commit block as installing on demand, and contrasts `prompt-lint` with it.                                                                                                          | That variant is not on this branch. It lives on `feature/oxlint-vscode-settings` and was reverted; what landed requires qlty preinstalled. Verified with `git merge-base --is-ancestor` against all four candidate commits.                                                                                                                      | Both gates now behave identically — report, never install. The hook comment claims only that `prompt-lint` installs nothing, which is true either way.                                                                  |
+
+Three smaller notes, none of which changed a decision:
+
+- **`nx affected -t prompt-lint` is inert today.** T046 asked for the target to be appended to the
+  affected list, and it was, but `nx show projects --with-target prompt-lint` returns `[]` until T056
+  adds the target in Phase 5. The CI comment describing it as the push-event coverage is therefore
+  forward-looking rather than currently true.
+- **[data-model](./data-model.md) calls the stale-baseline finding `stale-baseline`.** No such rule id
+  exists. `suppression/stale`'s registry statement already names baseline entries, and that is what the
+  code reuses — the data-model wording is the loose one.
+- **The hook uses `prompt-lint:diff`, not `--staged`,** per T047 and
+  [contracts/cli.md](./contracts/cli.md)'s integration table, though FR-043's prose says "staged".
+  Behaviourally equivalent here, because `listChangedFiles` folds in the index and untracked files. The
+  cost is that the hook needs `origin/main` resolvable — exactly as the `qlty:diff` line beside it
+  already does.
+
 ## Phase 6: the two blockers and how they were resolved (recorded 2026-08-17)
 
 ### T060 — licence sign-off: **GRANTED**

@@ -3,9 +3,37 @@
  * `parseArgs` is a pure function over argv, so the whole contract in `contracts/cli.md` is
  * assertable without spawning a process.
  */
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-import { parseArgs } from './cli'
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { parseArgs, runCli } from './cli'
+import type * as GateModule from './gate'
+
+import { configurableRules, EXIT, RULES, type GateIo, type GateOptions } from '.'
+
+/**
+ * Every call the command makes into the gate, in order.
+ *
+ * "Evaluates no artifacts" cannot be read off an exit code: a `--list-rules` that ran the
+ * whole gate and threw the outcome away would exit `0` with an identical stdout. So the
+ * real module is wrapped rather than replaced — the runs below still evaluate for real —
+ * and entering it at all is recorded.
+ */
+const { gateCalls } = vi.hoisted(() => ({ gateCalls: [] as GateOptions[] }))
+
+vi.mock('./gate', async (importOriginal) => {
+  const actual = await importOriginal<typeof GateModule>()
+  return {
+    ...actual,
+    runPromptLintGate: (options: GateOptions) => {
+      gateCalls.push(options)
+      return actual.runPromptLintGate(options)
+    },
+  }
+})
 
 const parse = (...argv: string[]) => parseArgs(argv)
 
@@ -129,5 +157,110 @@ describe('parseArgs', () => {
     it('parses --explain for a bookkeeping rule too', () => {
       expect(parse('--explain=artifact/unreadable').kind).toBe('explain')
     })
+  })
+})
+
+/** Collect what the command wrote, so stdout and stderr can be asserted separately. */
+const sink = (): { io: GateIo; stdout: string[]; stderr: string[] } => {
+  const stdout: string[] = []
+  const stderr: string[] = []
+  return {
+    io: {
+      out: (message) => {
+        stdout.push(message)
+      },
+      err: (message) => {
+        stderr.push(message)
+      },
+    },
+    stdout,
+    stderr,
+  }
+}
+
+/**
+ * `runCli` is where "exits 0" and "evaluates no artifacts" are two different claims, and
+ * the second is the one T042 is about. Asserting the exit code alone would pass for a
+ * `--list-rules` that evaluated the whole repository first and then printed a catalogue.
+ *
+ * Two sensors, because each covers what the other misses. `gateCalls` records entry into
+ * the gate, so a run whose outcome is discarded is still visible. And the `repoRoot` is a
+ * directory that exists and is **not** a git repository, so any run that does reach the
+ * gate fails against it with exit `4` and a message on stderr — which is what makes exit
+ * `0` and a silent stderr mean something. The first test is the control for the second.
+ */
+describe('runCli', () => {
+  const notARepository = mkdtempSync(join(tmpdir(), 'prompt-lint-cli-'))
+
+  beforeEach(() => {
+    gateCalls.length = 0
+  })
+
+  afterAll(() => {
+    rmSync(notARepository, { recursive: true, force: true })
+  })
+
+  it('enters the gate for a plain run, and fails loudly on that root — the control', () => {
+    const { io, stdout, stderr } = sink()
+    expect(runCli([], io, notARepository)).toBe(EXIT.scope)
+    expect(gateCalls).toHaveLength(1)
+    expect(gateCalls[0]).toMatchObject({ mode: 'diff', repoRoot: notARepository })
+    expect(stderr.join('\n')).toContain('is not a git repository')
+    expect(stdout).toEqual([])
+  })
+
+  it('evaluates no artifacts for --list-rules, and exits 0 (FR-006)', () => {
+    const { io, stdout, stderr } = sink()
+    expect(runCli(['--list-rules'], io, notARepository)).toBe(EXIT.ok)
+    expect(gateCalls).toEqual([])
+    expect(stderr).toEqual([])
+    expect(stdout[0]).toBe(`prompt-lint: ${String(RULES.length)} rules`)
+    expect(stdout.join('\n')).toContain(
+      `${String(configurableRules().length)} of ${String(RULES.length)} have a configurable severity`,
+    )
+  })
+
+  it('evaluates no artifacts for --explain, and exits 0', () => {
+    const { io, stdout, stderr } = sink()
+    expect(runCli(['--explain=refs/dangling-path'], io, notARepository)).toBe(EXIT.ok)
+    expect(gateCalls).toEqual([])
+    expect(stderr).toEqual([])
+    expect(stdout[0]).toBe('refs/dangling-path')
+    expect(stdout.join('\n')).toContain('what   ')
+  })
+
+  it('evaluates no artifacts for --list-rules even when a scope was also passed', () => {
+    // The self-describing commands short-circuit: `--all` would otherwise establish scope
+    // over the whole declared set before anything was printed.
+    const { io, stderr } = sink()
+    expect(runCli(['--list-rules', '--all'], io, notARepository)).toBe(EXIT.ok)
+    expect(gateCalls).toEqual([])
+    expect(stderr).toEqual([])
+  })
+
+  it('exits 2 for an unknown --explain target, having evaluated nothing', () => {
+    const { io, stdout, stderr } = sink()
+    expect(runCli(['--explain=refs/renamed-away'], io, notARepository)).toBe(EXIT.usage)
+    expect(gateCalls).toEqual([])
+    expect(stderr.join('\n')).toContain("unknown rule 'refs/renamed-away'")
+    expect(stdout).toEqual([])
+  })
+
+  it('exits 2 for an unknown flag, naming the flag rather than ignoring it', () => {
+    const { io, stdout, stderr } = sink()
+    expect(runCli(['--jsn'], io, notARepository)).toBe(EXIT.usage)
+    expect(gateCalls).toEqual([])
+    expect(stderr.join('\n')).toContain("prompt-lint: unknown flag '--jsn'")
+    expect(stdout).toEqual([])
+  })
+
+  it('accepts --no-baseline: it reaches the gate, carrying the flag, rather than being refused', () => {
+    // Exit 4 rather than 2 is half the assertion — the flag was understood. The other half
+    // is that it arrived: a flag parsed and then dropped on the floor is the failure an
+    // accepted-but-inert flag actually looks like.
+    const { io, stderr } = sink()
+    expect(runCli(['--no-baseline', '--all'], io, notARepository)).toBe(EXIT.scope)
+    expect(gateCalls[0]).toMatchObject({ mode: 'all', applyBaseline: false })
+    expect(stderr.join('\n')).toContain('is not a git repository')
   })
 })

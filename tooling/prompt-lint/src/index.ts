@@ -2,6 +2,22 @@
  * The public surface. `cli.ts` is deliberately **not** exported — it is an executable, not
  * an API, which is why `knip.json` gives it an explicit entry instead.
  */
+export {
+  applyBaseline,
+  baselinePathIn,
+  BASELINE_FILE_NAME,
+  DEFAULT_BASELINE_PATH,
+  emptyBaseline,
+  loadBaseline,
+  parseBaseline,
+} from './baseline'
+export type {
+  AppliedBaseline,
+  Baseline,
+  BaselineEntry,
+  BaselineFailure,
+  BaselineResult,
+} from './baseline'
 export { buildConfig, effectiveSeverity, validateConfig } from './config'
 export type { Config, ConfigError, ExcludeEntry, Override } from './config'
 export { EXIT, runPromptLintGate } from './gate'

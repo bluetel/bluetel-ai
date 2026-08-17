@@ -130,6 +130,38 @@ describe('refs/dangling-path', () => {
     const artifact = reference('See `references/a.md` and `references/a.md` again.\n')
     expect(expectFires(danglingPath, artifact, { paths: CATALOG_PATHS })).toHaveLength(1)
   })
+
+  describe('rule 5 reads the prose, not the reference', () => {
+    // Rule 5 originally tested the whole line, so a filename containing one of its own
+    // noise words silenced its own finding. Quickstart Scenario 4's fixture is named
+    // `does-not-exist.md`, which is how this was caught — and the words at risk are
+    // precisely the ones a placeholder filename is likely to use.
+    it('fires on a path whose own filename contains a noise word', () => {
+      const artifact = reference('See `references/does-not-exist.md` for the rest.\n')
+      const [finding] = expectFires(danglingPath, artifact, { paths: CATALOG_PATHS })
+      expect(finding.message).toContain('references/does-not-exist.md')
+    })
+
+    it.each([
+      'references/missing-page.md',
+      'references/optional-extras.md',
+      'references/created-at-runtime.md',
+      'references/absent.md',
+    ])('fires on `%s`, whose filename alone must not exempt it', (path) => {
+      const artifact = reference(`Read \`${path}\` before you begin.\n`)
+      expect(expectFires(danglingPath, artifact, { paths: CATALOG_PATHS })).toHaveLength(1)
+    })
+
+    it('still exempts the surrounding sentence’s own existence check', () => {
+      // The whole point of rule 5, and the case that must not regress: masking the
+      // reference must not stop the *prose* from exempting it.
+      expectDoesNotFire(
+        danglingPath,
+        reference('Check if `references/does-not-exist.md` exists before reading it.\n'),
+        { paths: CATALOG_PATHS },
+      )
+    })
+  })
 })
 
 describe('resolveReference', () => {

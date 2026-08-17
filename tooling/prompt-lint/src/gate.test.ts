@@ -6,7 +6,13 @@ import process from 'node:process'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+// Aliased namespace imports rather than inline `typeof import(…)`, which
+// `consistent-type-imports` forbids. They are only ever used as the type argument to
+// `importOriginal`, in the two tests that substitute a module.
+import type * as ConfigModule from './config'
 import { EXIT, runPromptLintGate, type GateOptions } from './gate'
+import { defineRule } from './rules'
+import type * as RulesModule from './rules'
 
 /** See `scope/git.test.ts` — inheriting `GIT_*` from a hook breaks every fixture repo. */
 const GIT_ENV = Object.fromEntries(
@@ -59,6 +65,11 @@ const options = (repoRoot: string, overrides: Partial<GateOptions> = {}): GateOp
 
 afterEach(() => {
   vi.unstubAllEnvs()
+  // The exit-5 case replaces the rule registry for one test; leaving it in place would
+  // make every later dynamic import see a registry with one exploding rule in it.
+  vi.doUnmock('./rules')
+  vi.doUnmock('./config')
+  vi.resetModules()
 })
 
 describe('runPromptLintGate', () => {
@@ -83,6 +94,44 @@ describe('runPromptLintGate', () => {
     expect(outcome.exitCode).toBe(EXIT.thresholds)
     expect(outcome.report?.verdict).toBe('fail')
     expect(outcome.report?.findings.map((f) => f.rule)).toContain('meta/version-semver')
+  })
+
+  it('demotes a rule through the config severities, which is the adoption lever', async () => {
+    // `config.ts` ships `SHIPPED_SEVERITIES` empty, so without substituting it nothing
+    // proves the override is *applied* rather than merely validated. That distinction is
+    // the whole of the staged-adoption story: an override that parses and does nothing
+    // would let a phase land looking adopted.
+    vi.resetModules()
+    vi.doMock('./config', async (importOriginal) => {
+      const actual = await importOriginal<typeof ConfigModule>()
+      return {
+        ...actual,
+        buildConfig: () => {
+          const built = actual.buildConfig()
+          return {
+            ...built,
+            config: { ...built.config, severities: { 'meta/version-semver': 'warn' as const } },
+          }
+        },
+      }
+    })
+
+    const root = makeRepo()
+    write(
+      root,
+      'tooling/skills/catalog/alpha/skill.meta',
+      'name=alpha\nversion=nope\ndescription=d. Use when: x.\n',
+    )
+
+    const gate = await import('./gate')
+    const outcome = gate.runPromptLintGate(options(root))
+
+    expect(outcome.report?.findings.find((f) => f.rule === 'meta/version-semver')?.severity).toBe(
+      'warn',
+    )
+    // Demoted, not silenced — still reported, and now under the warning threshold.
+    expect(outcome.report?.counts).toMatchObject({ error: 0, warn: 1 })
+    expect(outcome.exitCode).toBe(gate.EXIT.ok)
   })
 
   it('reports zero artifacts and exits 0 when the diff touched no artifact (FR-040)', () => {
@@ -147,6 +196,59 @@ describe('runPromptLintGate', () => {
     const outcome = runPromptLintGate(options(bare))
     expect(outcome.exitCode).toBe(EXIT.scope)
     rmSync(bare, { recursive: true, force: true })
+  })
+
+  it('exits 1 on a warning breach alone, so the two thresholds are independent', () => {
+    // The error threshold passing must not make the warning threshold irrelevant. A
+    // single comparison over a combined count would let any number of warnings through.
+    vi.stubEnv('PROMPT_LINT_MAX_WARNINGS', '0')
+    const root = makeRepo()
+    write(
+      root,
+      'AGENTS.md',
+      '# Agents\n<!-- prompt-lint-disable-next-line template/placeholder-residue — fixed already -->\nAll clean now.\n',
+    )
+
+    const outcome = runPromptLintGate(options(root))
+    expect(outcome.report?.counts).toMatchObject({ error: 0, warn: 1 })
+    expect(outcome.exitCode).toBe(EXIT.thresholds)
+    expect(outcome.report?.verdict).toBe('fail')
+  })
+
+  it('exits 5 naming the rule and the artifact when a rule throws (FR-041)', async () => {
+    // The failure this guards is not the throw, it is the throw being swallowed. A rule
+    // that dies must never leave a report that says the artifact passed, because the
+    // report would then be indistinguishable from one where the rule found nothing.
+    const exploding = defineRule(
+      {
+        id: 'test/explodes',
+        defaultSeverity: 'error',
+        statement: 'Never registered; exists to fail.',
+        rationale: 'Proves a rule failure is attributable rather than silent.',
+        appliesTo: ['guidance'],
+        dimension: 'correctness',
+        scope: 'artifact',
+      },
+      () => {
+        throw new Error('the rule could not decide')
+      },
+    )
+
+    vi.resetModules()
+    vi.doMock('./rules', async (importOriginal) => ({
+      ...(await importOriginal<typeof RulesModule>()),
+      localRules: () => [exploding],
+    }))
+
+    const gate = await import('./gate')
+    const outcome = gate.runPromptLintGate(options(makeRepo()))
+
+    expect(outcome.exitCode).toBe(gate.EXIT.internal)
+    // No report at all: a partial report is the thing that gets mistaken for a pass.
+    expect(outcome.report).toBeNull()
+    expect(outcome.failures[0]).toContain('test/explodes')
+    expect(outcome.failures[0]).toContain('AGENTS.md')
+    expect(outcome.failures[0]).toContain('the rule could not decide')
   })
 
   it('exits 3 with no artifact evaluated when the config is invalid (FR-036)', () => {
@@ -237,6 +339,87 @@ describe('runPromptLintGate', () => {
       const outcome = runPromptLintGate(options(root))
       const stale = outcome.report?.findings.find((f) => f.rule === 'suppression/stale')
       expect(stale?.message).toContain('not a registered rule')
+    })
+  })
+
+  describe('the baseline', () => {
+    const BROKEN_META = 'name=alpha\nversion=nope\ndescription=d. Use when: x.\n'
+    const META_PATH = 'tooling/skills/catalog/alpha/skill.meta'
+
+    /** A baseline file outside the repository under test, as the real one is. */
+    const writeBaseline = (root: string, entries: unknown[]): string => {
+      const path = join(root, 'fixture-baseline.json')
+      writeFileSync(path, JSON.stringify({ entries }))
+      return path
+    }
+
+    it('downgrades a matched finding to a note and lets the gate pass', () => {
+      const root = makeRepo()
+      write(root, META_PATH, BROKEN_META)
+      const baselinePath = writeBaseline(root, [
+        { rule: 'meta/version-semver', path: META_PATH, reason: 'pre-existing at adoption' },
+      ])
+
+      const outcome = runPromptLintGate(options(root, { baselinePath }))
+      const finding = outcome.report?.findings.find((f) => f.rule === 'meta/version-semver')
+      // Still reported, and still says so — a baseline lowers the stakes, it does not hide.
+      expect(finding?.severity).toBe('note')
+      expect(finding?.baselined).toBe(true)
+      expect(outcome.report?.baseline).toEqual({ applied: 1, stale: 0 })
+      expect(outcome.exitCode).toBe(EXIT.ok)
+    })
+
+    it('shows the true state under --no-baseline, which is what makes the file honest', () => {
+      const root = makeRepo()
+      write(root, META_PATH, BROKEN_META)
+      const baselinePath = writeBaseline(root, [
+        { rule: 'meta/version-semver', path: META_PATH, reason: 'pre-existing at adoption' },
+      ])
+
+      const outcome = runPromptLintGate(options(root, { baselinePath, applyBaseline: false }))
+      expect(outcome.report?.findings.find((f) => f.rule === 'meta/version-semver')?.severity).toBe(
+        'error',
+      )
+      expect(outcome.report?.baseline).toEqual({ applied: 0, stale: 0 })
+      expect(outcome.exitCode).toBe(EXIT.thresholds)
+    })
+
+    it('reports an entry that matches nothing, so the file drains (FR-010)', () => {
+      // Without this the baseline becomes permanent by inattention: every entry that was
+      // fixed years ago still reads as a known-bad file nobody has got to yet.
+      const root = makeRepo()
+      const baselinePath = writeBaseline(root, [
+        { rule: 'meta/version-semver', path: META_PATH, reason: 'already fixed' },
+      ])
+
+      const outcome = runPromptLintGate(options(root, { baselinePath }))
+      const stale = outcome.report?.findings.filter((f) => f.rule === 'suppression/stale') ?? []
+      expect(stale).toHaveLength(1)
+      expect(stale[0].message).toContain('reported nothing')
+      expect(outcome.report?.baseline).toEqual({ applied: 0, stale: 1 })
+    })
+
+    it('exits 3 with no artifact evaluated when the baseline cannot be parsed', () => {
+      // A baseline that fails to load downgrades nothing, which over a red surface is
+      // indistinguishable from a clean pass. It is configuration, so it is exit 3, and it
+      // is decided before any artifact is read.
+      const root = makeRepo()
+      const baselinePath = join(root, 'fixture-baseline.json')
+      writeFileSync(baselinePath, '{ "entries": [ }')
+
+      const outcome = runPromptLintGate(options(root, { baselinePath }))
+      expect(outcome.exitCode).toBe(EXIT.config)
+      expect(outcome.report).toBeNull()
+      expect(outcome.failures[0]).toContain('fixture-baseline.json')
+    })
+
+    it('treats a missing baseline as an empty one, not as a failure', () => {
+      // The end state this file is working towards is not having one.
+      const outcome = runPromptLintGate(
+        options(makeRepo(), { baselinePath: join(tmpdir(), 'prompt-lint-absent-baseline.json') }),
+      )
+      expect(outcome.exitCode).toBe(EXIT.ok)
+      expect(outcome.report?.baseline).toEqual({ applied: 0, stale: 0 })
     })
   })
 

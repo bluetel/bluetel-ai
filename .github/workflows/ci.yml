@@ -76,7 +76,11 @@ jobs:
       # `design-lint` joins the affected run rather than living in a separate job or a second CI
       # provider: splitting the blocking gates across two systems leaves one of them not running it
       # (FR-069). Projects without the target are simply skipped by `nx affected`.
-      - run: pnpm exec nx affected -t lint test typecheck design-lint --parallel=$(nproc)
+      #
+      # `prompt-lint` joins it for the same reason, and covers a case the diff gate below cannot:
+      # a project's own prompt checks (FR-044) run on pushes to `main` and `staging` too, where
+      # there is no pull-request base ref to diff against.
+      - run: pnpm exec nx affected -t lint test typecheck design-lint prompt-lint --parallel=$(nproc)
 
       # The assembly gate (SC-063). A module that is implemented, exported through a barrel and
       # unit-tested, but imported by nothing outside its own tests, is invisible to every check
@@ -94,6 +98,24 @@ jobs:
       # that went missing usually lives in a project the diff never touched.
       - name: Assembly gate (every shipped module has a production caller)
         run: pnpm knip:orphans
+
+      # The prompt-quality gate (FR-042): every AI-authored artifact this pull request touches —
+      # the skill catalog, the installed skill trees, the agent guidance, the Spec Kit templates
+      # and the constitution — checked against the rule catalogue.
+      #
+      # Pull requests only, like the qlty job above, and for a reason specific to this gate:
+      # `github.base_ref` is empty on `push` and `workflow_dispatch`, and `origin/` prefixed to an
+      # empty string is not a resolvable ref. That is deliberately exit `4` — "scope could not be
+      # established" — rather than a vacuous pass over zero artifacts (US2 §5), so running it on a
+      # push would go red for the wrong reason. Pushes are covered by `nx affected` above instead.
+      #
+      # Not part of `nx affected`: the scope is a git diff of the whole repository, and most of the
+      # declared artifacts live outside any project.
+      - name: Prompt-quality gate (AI-authored artifacts in the pull request diff)
+        if: github.event_name == 'pull_request'
+        run: pnpm prompt-lint:diff "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
 
       - name: Check if deploy is needed
         id: check-deploy

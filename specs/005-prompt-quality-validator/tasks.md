@@ -275,58 +275,58 @@ to lint, typecheck, tests or `qlty`. Remove the defect; the step passes.
 [quickstart.md](./quickstart.md#scenario-5--the-gate-blocks-a-pull-request-and-only-for-the-right-reason-us2-sc-008)
 provokes each exit code in turn.
 
-- [ ] T038 [US2] Implement `tooling/prompt-lint/src/baseline.ts` + `baseline.test.ts` — read
+- [x] T038 [US2] Implement `tooling/prompt-lint/src/baseline.ts` + `baseline.test.ts` — read
       `tooling/prompt-lint/baseline.json`, downgrade a matched finding to `note` and set `baselined: true`, and
       report an entry that matches nothing as `suppression/stale` at `warn` (FR-010's mechanism, reused) so the
       file drains and cannot quietly become permanent. Entries are keyed on `rule` + `path` only — not on line
       number, which would churn on every unrelated edit, and not on a content hash, which would make the file
       unreadable.
-- [ ] T039 [P] [US2] Create `tooling/prompt-lint/baseline.json` as an empty entry list with a header comment
+- [x] T039 [P] [US2] Create `tooling/prompt-lint/baseline.json` as an empty entry list with a header comment
       naming what it is for. It is populated from a measured run in T058, not guessed now.
-- [ ] T040 [US2] Extend `tooling/prompt-lint/src/config.ts` + `config.test.ts` with the per-rule `severities`
+- [x] T040 [US2] Extend `tooling/prompt-lint/src/config.ts` + `config.test.ts` with the per-rule `severities`
       override applied at evaluation time — the staged-adoption lever
       ([plan.md](./plan.md#adoption-how-this-lands-without-breaking-every-open-pr)). The test asserts a
       `severities` key naming a rule that does not exist is a config error (FR-036), which is also what catches a
       rule rename, and that **no environment variable can change a per-rule severity or the exclusion list**
       (FR-034, SC-009 — those change _what_ is checked, so they must appear in a diff).
-- [ ] T041 [US2] Extend `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` with the threshold comparison and the
+- [x] T041 [US2] Extend `tooling/prompt-lint/src/gate.ts` + `gate.test.ts` with the threshold comparison and the
       full exit-code contract from [contracts/cli.md](./contracts/cli.md#exit-codes): `0` within thresholds
       (including the explicit nothing-in-scope case), `1` threshold breached, `2` usage, `3` config invalid with
       **no artifact evaluated**, `4` scope not establishable, `5` a rule threw — named, never swallowed into a
       clean pass. The suite asserts each code independently, because the whole value of the contract is that a
       red step is attributable to "the prompts are wrong" versus "the tool could not run".
-- [ ] T042 [US2] Extend `tooling/prompt-lint/src/cli.ts` + `cli.test.ts` with `--list-rules`, `--explain=<ruleId>`
+- [x] T042 [US2] Extend `tooling/prompt-lint/src/cli.ts` + `cli.test.ts` with `--list-rules`, `--explain=<ruleId>`
       (both exit `0`, evaluating no artifacts) and `--no-baseline`. An unknown `--explain` target is exit `2`.
-- [ ] T043 [US2] Extend `tooling/prompt-lint/src/report/human.ts` + `human.test.ts` with the header line naming
+- [x] T043 [US2] Extend `tooling/prompt-lint/src/report/human.ts` + `human.test.ts` with the header line naming
       every `PROMPT_LINT_*` override in effect and the footer line reporting
       `suppressions: N used, M stale   baseline: N applied, M stale`. FR-034's point is that a passing CI log must
       never be able to conceal a relaxed threshold, so the test asserts the header from the environment, not from
       a parameter.
-- [ ] T044 [US2] Write `tooling/prompt-lint/docs/rules.md` — the FR-047 catalogue, mirrored from
+- [x] T044 [US2] Write `tooling/prompt-lint/docs/rules.md` — the FR-047 catalogue, mirrored from
       [contracts/rules.md](./contracts/rules.md) for every rule that exists at this phase, each entry carrying
       id, ships-as severity, statement, rationale and fix. This is the copy the cross-check reads; the spec
       directory's copy stays the design record.
-- [ ] T045 [US2] Extend `tooling/prompt-lint/src/rules/registry.test.ts` with the catalogue cross-check (FR-047,
+- [x] T045 [US2] Extend `tooling/prompt-lint/src/rules/registry.test.ts` with the catalogue cross-check (FR-047,
       SC-010): every registered rule has an entry in `docs/rules.md` and every entry names a registered rule.
       This is the test that makes an undocumented rule impossible and a documented-but-deleted rule impossible in
       the same assertion.
-- [ ] T046 [US2] Add the gate to `.github/workflows/ci.yml` — a step in the `main` job running
+- [x] T046 [US2] Add the gate to `.github/workflows/ci.yml` — a step in the `main` job running
       `pnpm prompt-lint:diff "origin/$BASE_REF"` with `BASE_REF: ${{ github.base_ref }}`, and `prompt-lint`
       appended to the `nx affected -t lint test typecheck design-lint` target list. The `contextops` setup step is
       Phase 6 (T077): at this phase the delegated half does not exist, so the gate is the correctness half and
       needs no Python. **`.github/workflows/` cannot be modified by the GitHub App this repository's agent runs
       as**, so this task requires a human commit or a token with `workflows` scope — flagged here rather than
       discovered at push time.
-- [ ] T047 [US2] Add `pnpm prompt-lint:diff` to `.husky/pre-commit`, after `pnpm typecheck` and before the qlty
+- [x] T047 [US2] Add `pnpm prompt-lint:diff` to `.husky/pre-commit`, after `pnpm typecheck` and before the qlty
       block. It does **not** install anything, unlike the qlty block below it
       ([research.md](./research.md#r9)). Note the working-tree state: `.husky/pre-commit` currently carries an
       uncommitted modification that makes the qlty block install on demand; reconcile with whatever has landed
       rather than reverting it blind.
-- [ ] T048 [P] [US2] Write `tooling/prompt-lint/README.md` — what it gates, how to run it, the exit codes, how to
+- [x] T048 [P] [US2] Write `tooling/prompt-lint/README.md` — what it gates, how to run it, the exit codes, how to
       add a rule (one `defineRule` module + its suite + its catalogue entry), and how to add a baseline entry.
-- [ ] T049 [P] [US2] Add the prerequisite section to the root `README.md`: what `prompt-lint` needs available and
+- [x] T049 [P] [US2] Add the prerequisite section to the root `README.md`: what `prompt-lint` needs available and
       the routes to providing it. The `contextops` specifics are appended in T079 when that half exists.
-- [ ] T050 [US2] Run [quickstart.md](./quickstart.md#scenario-5--the-gate-blocks-a-pull-request-and-only-for-the-right-reason-us2-sc-008)
+- [x] T050 [US2] Run [quickstart.md](./quickstart.md#scenario-5--the-gate-blocks-a-pull-request-and-only-for-the-right-reason-us2-sc-008)
       Scenario 5 for exit codes `0`–`4` (exit `6` is Phase 6), and
       [Scenario 9](./quickstart.md#scenario-9--pre-commit-path-fr-043) for the hook. Time the hook step: FR-043
       requires it be fast enough that skipping it is never worth it, and a hook slow enough to skip is a hook that

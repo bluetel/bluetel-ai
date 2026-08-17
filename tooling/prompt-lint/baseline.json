@@ -1,0 +1,17 @@
+{
+  "$comment": [
+    "The adoption baseline (FR-035). Each entry names a rule and a path whose violation predates the rule,",
+    "and downgrades that pair's findings to `note` with `baselined: true`, so turning a rule on does not fail",
+    "every unrelated pull request in flight. Entries are keyed on `rule` + `path` only: a line number would",
+    "churn on every unrelated edit, and a content hash would make this file unreadable to the reviewer who has",
+    "to approve each addition.",
+    "This file MUST drain. An entry that stops matching is reported as `suppression/stale` at `warn` (FR-010),",
+    "which is what stops the baseline quietly becoming the standard. Fix the violation and delete the entry;",
+    "never add one to make a red run green. `pnpm prompt-lint --all --no-baseline` shows the true state of the",
+    "surface.",
+    "JSON has no comment syntax, so this key carries the header. The parser in `src/baseline.ts` reads",
+    "`entries` and ignores every other key.",
+    "It is empty until a measured run populates it (T058), not guessed in advance."
+  ],
+  "entries": []
+}

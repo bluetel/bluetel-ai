@@ -16,6 +16,8 @@ import { join } from 'node:path'
 
 import type { Artifact, Suppression } from './artifact'
 import { parseSkillMeta } from './artifact'
+import { applyBaseline, emptyBaseline, loadBaseline } from './baseline'
+import type { Baseline, BaselineResult } from './baseline'
 import { buildConfig, effectiveSeverity, validateConfig } from './config'
 import type { Config, Override } from './config'
 import { countBySeverity, orderFindings } from './report/order'
@@ -91,6 +93,12 @@ export interface GateOptions {
   subset?: ScopeSubset
   /** Ignore `baseline.json` — shows the true state of the surface. */
   applyBaseline: boolean
+  /**
+   * Which baseline to read. Defaults to this package's own. It is not derived from
+   * `repoRoot`, because the suite drives the gate against temporary repositories and a
+   * baseline resolved from those would be a different file — or an unexpectedly real one.
+   */
+  baselinePath?: string
   /** Skip the delegated half entirely (FR-053). */
   rulesOnly: boolean
 }
@@ -337,6 +345,19 @@ export const runPromptLintGate = (options: GateOptions): GateOutcome => {
     }
   }
 
+  // Read before any artifact is, and for the same reason `validateConfig` runs first: a
+  // `baseline.json` that cannot be parsed downgrades nothing, and a run that downgrades
+  // nothing while the file says it should is indistinguishable from a clean pass. Exit `3`
+  // is the honest code — the configuration is wrong, not the prompts — and it is reported
+  // with no artifact evaluated (FR-036) rather than half a report.
+  const loaded: BaselineResult<Baseline> = options.applyBaseline
+    ? loadBaseline(options.baselinePath)
+    : { ok: true, value: emptyBaseline(options.baselinePath) }
+  if (!loaded.ok) {
+    return { exitCode: EXIT.config, report: null, failures: [loaded.failure.message] }
+  }
+  const baseline = loaded.value
+
   const resolved = resolveScope({
     repoRoot: options.repoRoot,
     mode: options.mode,
@@ -363,7 +384,14 @@ export const runPromptLintGate = (options: GateOptions): GateOutcome => {
   }
 
   const suppressed = applySuppressions(raw, scope.targets)
-  const findings = orderFindings(applySeverities(config, [...suppressed.kept, ...suppressed.stale]))
+  // The baseline runs **after** the severity override, never before: the override maps a
+  // rule to its configured severity unconditionally, so the other order would put back the
+  // `error` the baseline had just taken away.
+  const based = applyBaseline(
+    applySeverities(config, [...suppressed.kept, ...suppressed.stale]),
+    baseline,
+  )
+  const findings = orderFindings([...based.findings, ...based.stale])
   const counts = countBySeverity(findings)
 
   const breached = counts.error > config.maxErrors || counts.warn > config.maxWarnings
@@ -383,7 +411,7 @@ export const runPromptLintGate = (options: GateOptions): GateOutcome => {
     thresholds: config,
     overrides,
     suppressions: { used: suppressed.used, stale: suppressed.stale },
-    baseline: { applied: 0, stale: 0 },
+    baseline: { applied: based.applied, stale: based.stale.length },
   }
 
   return {

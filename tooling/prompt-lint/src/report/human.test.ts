@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { buildConfig } from '../config'
 import type { Report } from '../gate'
 import type { Finding, RuleId } from '../rules'
 
@@ -106,6 +107,70 @@ describe('renderHuman', () => {
     expect(output).toContain('must not be used to pass CI')
   })
 
+  /**
+   * The test above proves the renderer prints what it was handed. It does not prove the
+   * pipeline carries an override from the environment into the log — and that is the whole
+   * of FR-034: a passing CI log must never be able to conceal a relaxed threshold, and the
+   * threshold is relaxed by a variable, not by a parameter. So these go through
+   * `buildConfig` from a stubbed environment and assert on what comes out the far end.
+   */
+  describe('the override header, from the environment rather than from a parameter (FR-034)', () => {
+    const THRESHOLD_VARIABLES = [
+      'PROMPT_LINT_MAX_ERRORS',
+      'PROMPT_LINT_MAX_WARNINGS',
+      'PROMPT_LINT_MIN_SCORE',
+      'PROMPT_LINT_BASE_REF',
+    ]
+
+    /**
+     * Empty reads as unset in `buildConfig`, so a variable already exported in the shell
+     * running the suite cannot leak into the assertions below. `no-dynamic-delete` is on
+     * and `process.env` is not the thing under test — the stub is.
+     */
+    const withNoOverrides = (): void => {
+      for (const name of THRESHOLD_VARIABLES) vi.stubEnv(name, '')
+    }
+
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    it('names every PROMPT_LINT_* variable the environment set', () => {
+      withNoOverrides()
+      vi.stubEnv('PROMPT_LINT_MAX_ERRORS', '5')
+      vi.stubEnv('PROMPT_LINT_MAX_WARNINGS', '999')
+      vi.stubEnv('PROMPT_LINT_MIN_SCORE', '10')
+      vi.stubEnv('PROMPT_LINT_BASE_REF', 'origin/staging')
+
+      const { config, overrides } = buildConfig()
+      const output = render(report({ overrides, thresholds: config }))
+
+      expect(output).toContain('PROMPT_LINT_MAX_ERRORS=5')
+      expect(output).toContain('PROMPT_LINT_MAX_WARNINGS=999')
+      expect(output).toContain('PROMPT_LINT_MIN_SCORE=10')
+      expect(output).toContain('PROMPT_LINT_BASE_REF=origin/staging')
+      expect(output).toContain('must not be used to pass CI')
+      // And the relaxed number itself is beside the count, so a reader who skims past the
+      // header still sees `max 5` where the shipped default is `max 0`.
+      expect(output).toContain('errors:   1  (max 5)')
+    })
+
+    it('prints the header above the verdict, because it changes what the verdict means', () => {
+      withNoOverrides()
+      vi.stubEnv('PROMPT_LINT_MAX_ERRORS', '5')
+      const { config, overrides } = buildConfig()
+      const lines = renderHuman(report({ overrides, thresholds: config }), { maxFindings: 25 })
+      expect(lines[0]).toContain('⚠ overrides in effect: PROMPT_LINT_MAX_ERRORS=5')
+    })
+
+    it('prints no header at all when the environment sets none, so the header means something', () => {
+      withNoOverrides()
+      const { config, overrides } = buildConfig()
+      expect(overrides).toEqual([])
+      expect(render(report({ overrides, thresholds: config }))).not.toContain('overrides in effect')
+    })
+  })
+
   it('states what was not evaluated rather than staying silent about it', () => {
     const output = render(
       report({ notEvaluated: [{ rule: 'meta/required-field' as RuleId, reason: 'unreadable' }] }),
@@ -119,6 +184,18 @@ describe('renderHuman', () => {
       report({ suppressions: { used: 3, stale: [] }, baseline: { applied: 10, stale: 1 } }),
     )
     expect(output).toContain('suppressions: 3 used, 0 stale     baseline: 10 applied, 1 stale')
+  })
+
+  it('counts stale suppressions from the entries themselves, not from a separate tally', () => {
+    // A stale count kept apart from the findings it describes is a count that can drift
+    // from them — and a baseline that never drains is the thing FR-010 exists to surface.
+    const output = render(
+      report({
+        suppressions: { used: 1, stale: [finding({ rule: 'suppression/stale' as RuleId })] },
+        baseline: { applied: 0, stale: 2 },
+      }),
+    )
+    expect(output).toContain('suppressions: 1 used, 1 stale     baseline: 0 applied, 2 stale')
   })
 
   it('tags a bundle-scoped finding with its bundle and prints no line number', () => {
