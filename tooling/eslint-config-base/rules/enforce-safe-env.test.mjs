@@ -153,71 +153,10 @@ describe('enforce-safe-env: no fix, only suggest', () => {
 // fast-check generators
 // ---------------------------------------------------------------------------
 
-/**
- * Reserved words, which match the identifier pattern but are not bindable.
- *
- * Without this filter the generator eventually produces `import { createEnv as in } from …`,
- * which is a **syntax error**: the rule is never consulted, the parser's own message comes back
- * with no `suggestions`, and the property fails on a counterexample that says nothing about the
- * rule. Observed at roughly 1 run in 7 (`seed: -2058363188`,
- * `Counterexample: ["import { createEnv as in } from '@t3-oss/env-core'"]`), i.e. a flaky gate
- * rather than a found bug.
- */
-const RESERVED = new Set([
-  'await',
-  'break',
-  'case',
-  'catch',
-  'class',
-  'const',
-  'continue',
-  'debugger',
-  'default',
-  'delete',
-  'do',
-  'else',
-  'enum',
-  'export',
-  'extends',
-  'false',
-  'finally',
-  'for',
-  'function',
-  'if',
-  'implements',
-  'import',
-  'in',
-  'instanceof',
-  'interface',
-  'let',
-  'new',
-  'null',
-  'package',
-  'private',
-  'protected',
-  'public',
-  'return',
-  'static',
-  'super',
-  'switch',
-  'this',
-  'throw',
-  'true',
-  'try',
-  'typeof',
-  'var',
-  'void',
-  'while',
-  'with',
-  'yield',
-])
-
 /** Generate a valid JS identifier (for import aliases and other specifiers). */
 const identifierArb = fc
   .stringMatching(/^[a-zA-Z_$][a-zA-Z0-9_$]{0,15}$/)
-  .filter(
-    (s) => s !== 'createEnv' && s !== 'type' && s !== 'from' && s !== 'import' && !RESERVED.has(s),
-  )
+  .filter((s) => s !== 'createEnv' && s !== 'type' && s !== 'from' && s !== 'import')
 
 /** Generate random whitespace (1-4 spaces). */
 const wsArb = fc.integer({ min: 1, max: 4 }).map((n) => ' '.repeat(n))

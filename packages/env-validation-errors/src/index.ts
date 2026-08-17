@@ -1,7 +1,6 @@
 import {
-  // This is the one place createEnv is legitimately imported: createSafeEnv wraps it.
-  // The rule moved from ESLint to oxlint, so the directive has to move with it.
-  // oxlint-disable-next-line bluetel-ai/enforce-safe-env
+  // We are declaring this rule here
+  // eslint-disable-next-line @bluetel-ai/enforce-safe-env
   createEnv,
   type EnvOptions,
   type StandardSchemaV1,
