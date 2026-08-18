@@ -37,7 +37,7 @@ into a temp dir, and launches Claude on the `skills-install` skill. Override the
 flags:
 
 ```sh
-sh install.sh --branch my-skill-branch
+TMP=$(mktemp -d) && git clone -q --depth 1 --filter=blob:none --sparse https://github.com/bluetel/bluetel-ai.git "$TMP" && git -C "$TMP" sparse-checkout set --no-cone /tooling/skills/bootstrap/install.sh && sh "$TMP/tooling/skills/bootstrap/install.sh" --branch <branch-name>; rm -rf "$TMP"
 ```
 
 This is the fast path for developing a skill: push your changes to a branch, then point a test
