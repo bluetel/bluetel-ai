@@ -1,7 +1,7 @@
 name=pr-creation
-version=1.2.0
-installed_hash=dd37c41c849afc52e1a1266ede63bcf6efd9b6a9212fdb69d0dead3c3a413488
-source_repo=https://github.com/bluetel/bluetel-ai.git
-source_ref=main
+version=1.5.0
+installed_hash=d500c29ee496c2a71857a6e1d147234ff0f8525044c3e8d819decda01d3c9243
+source_repo=
+source_ref=
 assets=
-installed_at=2026-08-05T13:09:52Z
+installed_at=2026-08-17T12:40:06Z
