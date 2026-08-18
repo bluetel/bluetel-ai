@@ -12,4 +12,4 @@ TMP=$(mktemp -d) && git clone -q --depth 1 --filter=blob:none --sparse https://g
 
 **Prerequisite:** the [Claude CLI](https://docs.claude.com/en/docs/claude-code) must be installed — it drives the install via `git`/`curl` on your behalf.
 
-**Tip:** run `gh auth setup-git` once beforehand so `git` reuses your GitHub CLI credentials. Without it, the `git clone` inside `install.sh` can stop midway to prompt for authentication.
+**Tip:** run `gh auth setup-git` once beforehand so `git` reuses your GitHub CLI credentials. Without it, the `git clone` inside `install.sh` can stop midway to prompt for authentication. The GH CLI should also be installed with Homebrew.
