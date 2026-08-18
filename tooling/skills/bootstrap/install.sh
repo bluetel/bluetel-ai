@@ -9,6 +9,11 @@
 #
 # Target dependencies: claude, git >= 2.27, curl, a POSIX shell, and
 # sha256sum or shasum. NO Node, jq, or tar required.
+#
+# Options (for skill development — point the installer at an unmerged branch):
+#   --branch <ref>   Clone this ref instead of $SKILLS_REPO_REF / main.
+#   --repo <url>      Clone this repo instead of $SKILLS_REPO_URL.
+#   -h, --help        Show this help and exit.
 
 set -eu
 
@@ -17,6 +22,47 @@ REPO_REF="${SKILLS_REPO_REF:-main}"
 SUBTREE="tooling/skills"
 
 err() { printf '%s\n' "$*" >&2; }
+
+usage() {
+  printf '%s\n' "Usage: install.sh [--branch <ref>] [--repo <url>]"
+  printf '%s\n' ""
+  printf '%s\n' "  --branch <ref>  Clone this branch/tag/ref instead of '$REPO_REF'."
+  printf '%s\n' "  --repo <url>    Clone this repo instead of '$REPO_URL'."
+  printf '%s\n' ""
+  printf '%s\n' "Equivalent env vars: SKILLS_REPO_REF, SKILLS_REPO_URL."
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --branch)
+      [ $# -ge 2 ] || { err "error: --branch requires a value."; exit 1; }
+      REPO_REF="$2"
+      shift 2
+      ;;
+    --branch=*)
+      REPO_REF="${1#--branch=}"
+      shift
+      ;;
+    --repo)
+      [ $# -ge 2 ] || { err "error: --repo requires a value."; exit 1; }
+      REPO_URL="$2"
+      shift 2
+      ;;
+    --repo=*)
+      REPO_URL="${1#--repo=}"
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      err "error: unknown option '$1'."
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
 
 need() {
   # need <cmd> <install-guidance>
