@@ -55,7 +55,7 @@ Or override per invocation with `--sprint` / `--no-sprint`.
 | **Ready**            | Can be worked on. Assign yourself when you start                                                            |
 | **In Progress**      | Being worked on. Moves to Peer Review once the CoS or A/C are addressed                                     |
 | **Blocked**          | Cannot proceed. Document why in the ticket's comments; prioritise unblocking over new work                  |
-| **Peer Review**      | PR review plus testing the change. Failing tests or a failing SonarQube gate send it back to In Progress    |
+| **Peer Review**      | PR review plus testing the change. Failing tests or a failing CI check send it back to In Progress          |
 | **IAT**              | Internal acceptance testing on staging, by an engineer who has not worked on or reviewed it. No code review |
 | **UAT**              | Client or stakeholder verification against business requirements                                            |
 | **Awaiting Release** | Verified, waiting on a production deploy                                                                    |

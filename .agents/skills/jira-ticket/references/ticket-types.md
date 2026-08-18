@@ -20,17 +20,20 @@ instead of raising a Bug. Read `references/bug-reporting.md` before raising one.
 
 ## The standard acceptance criteria
 
-Every Story and Task carries these three as the **last** bullets of its CoS, below the
+Every Story and Task carries these two as the **last** bullets of its CoS, below the
 task-specific ones:
 
 ```markdown
 - Unit tests with at least 80% coverage
-- SonarQube Quality Gates are passing
 - Feature changes are sufficiently documented
 ```
 
 They are standard across all tickets, with occasional exceptions. If you believe one genuinely does
 not apply, leave it out and say why in `Notes` rather than dropping it silently.
+
+They are also only the cross-project baseline. A project with more — a coverage or static-analysis
+gate, an accessibility criterion — lists them in `.agents/jira-ticket-context.md`, and those go in
+the same block. Do not add a criterion naming a tool this project has not said it runs.
 
 ## Who fills in what
 
@@ -65,7 +68,6 @@ so that <explanation of how it will benefit me>.
 
 - [Task-specific criterion]
 - Unit tests with at least 80% coverage
-- SonarQube Quality Gates are passing
 - Feature changes are sufficiently documented
 ```
 
@@ -93,7 +95,6 @@ so that I can make an informed decision before subscribing.
 - When no introductory offer is active, the standard paywall is shown with no changes
 - The web paywall is unaffected
 - Unit tests with at least 80% coverage
-- SonarQube Quality Gates are passing
 - Feature changes are sufficiently documented
 ```
 
@@ -113,7 +114,6 @@ A specific, self-contained piece of work. May or may not be tied to a Story.
 
 - [Functional or non-functional requirement]
 - Unit tests with at least 80% coverage
-- SonarQube Quality Gates are passing
 - Feature changes are sufficiently documented
 
 **Notes**
@@ -155,7 +155,6 @@ Summary: `Expose subscription offer metadata via a GraphQL query`
 - Results are cached with a 10-minute TTL to avoid hitting S3 on every request
 - Resolver returns null gracefully when the S3 file is missing or malformed
 - Unit tests with at least 80% coverage
-- SonarQube Quality Gates are passing
 - Feature changes are sufficiently documented
 
 **Notes**

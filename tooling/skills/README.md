@@ -6,12 +6,12 @@ Node on the target.
 
 ## Layout
 
-| Folder       | Purpose                                                                                                                                                                                                                                            |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `catalog/`   | Canonical skill content. One dir per skill (`<name>/SKILL.md` + `skill.meta`). The catalog **is** the directory scan — no manifest file. This includes `skills-install/`, the interactive install procedure, so it is itself an installable skill. |
-| `bootstrap/` | `install.sh` — the one publishable file (`curl … \| sh`). Verifies tools, shallow-sparse-clones this subtree, launches Claude on `catalog/skills-install/SKILL.md`.                                                                                |
-| `lib/`       | `skills.sh` — the deterministic POSIX-shell core (`list`/`status`/`install`/`update`) + colocated vitest shell-out tests.                                                                                                                          |
-| `assets/`    | Shared **asset bundles** — project scaffolding a skill needs outside `.agents/`/`.claude/` (currently `speckit/`, holding the `.specify/` tree the `speckit-*` skills drive). See below.                                                           |
+| Folder       | Purpose                                                                                                                                                                                                                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `catalog/`   | Canonical skill content. One dir per skill (`<name>/SKILL.md` + `skill.meta`). The catalog **is** the directory scan — no manifest file. This includes `skills-install/`, the interactive install procedure, so it is itself an installable skill.                                                                        |
+| `bootstrap/` | `install.sh` — the one publishable file (`curl … \| sh`). Verifies tools, shallow-sparse-clones this subtree, launches Claude on `catalog/skills-install/SKILL.md`.                                                                                                                                                       |
+| `lib/`       | `skills.sh` — the deterministic POSIX-shell core (`list`/`status`/`install`/`update`) + colocated vitest shell-out tests.                                                                                                                                                                                                 |
+| `assets/`    | Shared **asset bundles** — project scaffolding and per-project context files a skill needs outside `.agents/skills/`/`.claude/skills/`: `speckit/` (the `.specify/` tree the `speckit-*` skills drive), `copywriting/` and `jira-ticket/` (a seeded `.agents/*-context.md` each skill reads before it writes). See below. |
 
 ## Target requirements
 
@@ -127,6 +127,11 @@ tailored per project (`/speckit-constitution` rewrites them in place), so:
   never touched.
 
 Several skills may share one bundle (all nine `speckit-*` skills do); it is seeded once per run.
+
+A bundle need not be scaffolding. `copywriting/` and `jira-ticket/` each seed a single
+`.agents/<skill>-context.md` — a placeholder the project fills in with its own standing
+instructions, which the skill reads before it writes anything. The same "data, never hashed,
+never overwritten" rules are what make that work: the project's answers survive every update.
 
 ## Post-install recommendations
 

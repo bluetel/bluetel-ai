@@ -48,6 +48,20 @@ sh lib/skills.sh config show
 sh lib/skills.sh config set 'jira_board_id=42' 'jira_epic_key=ACME-100'
 ```
 
+### Project custom instructions
+
+Read `.agents/jira-ticket-context.md` before writing any ticket. It holds this project's standing
+instructions — its own acceptance criteria, fields or labels it always sets, board wording, and
+anything else it does differently from the shared templates. Where that file and this skill
+disagree, **the project file wins.**
+
+The installer seeds it as a placeholder reading `_No custom instructions yet._`. If that is all it
+says — or the file is absent, in a repo installed before it existed — there is nothing to apply: use
+the templates as written, and do not mention the file in the ticket or to the user.
+
+It is prose, not config. Site, project key, board and epic are **not** custom instructions; they
+live in `.agents/skills.config`, above.
+
 ### Credentials (never in the config file)
 
 `.agents/skills.config` is committed, so it holds **no** credentials:
@@ -101,8 +115,8 @@ default epic is configured (offer to set one via `config set 'jira_epic_key=…'
 2. **Write the summary** — a short, specific statement, max ~80 chars. Describe the symptom or need,
    not the fix: "Play bar does not reset when starting a new article", not "Reset play bar state on
    mount".
-3. **Write the description** to a file, following the template in `references/ticket-types.md` and the
-   writing rules below.
+3. **Write the description** to a file, following the template in `references/ticket-types.md`, the
+   writing rules below, and anything in `.agents/jira-ticket-context.md`.
 4. **Create the issue** — pipe the markdown in on stdin, or point at the file:
 
 ```bash
@@ -224,16 +238,19 @@ days; see the story point scale in `references/workflow.md`.
 
 ### The standard acceptance criteria
 
-Every Story and Task ends its CoS with these three, below the task-specific ones:
+Every Story and Task ends its CoS with these two, below the task-specific ones:
 
 ```markdown
 - Unit tests with at least 80% coverage
-- SonarQube Quality Gates are passing
 - Feature changes are sufficiently documented
 ```
 
 If one genuinely does not apply, leave it out and say why in `Notes` rather than dropping it
 silently.
+
+These are the cross-project baseline. A project that requires more — a coverage gate, an
+accessibility criterion, a static-analysis check — lists them in
+`.agents/jira-ticket-context.md`; do not assume a tool this project has not named.
 
 ## Post-Creation Actions
 

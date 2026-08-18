@@ -182,7 +182,6 @@ describe('documented ticket templates and examples', () => {
 
   const STANDARD_CRITERIA = [
     'Unit tests with at least 80% coverage',
-    'SonarQube Quality Gates are passing',
     'Feature changes are sufficiently documented',
   ]
 
@@ -213,13 +212,10 @@ describe('documented ticket templates and examples', () => {
     },
   )
 
-  it.each(['Story', 'Task'])(
-    'the %s example carries the three standard acceptance criteria',
-    (type) => {
-      const example = fence(type, 1)
-      for (const criterion of STANDARD_CRITERIA) expect(example).toContain(criterion)
-    },
-  )
+  it.each(['Story', 'Task'])('the %s example carries the standard acceptance criteria', (type) => {
+    const example = fence(type, 1)
+    for (const criterion of STANDARD_CRITERIA) expect(example).toContain(criterion)
+  })
 
   it('the Bug example does not carry the standard criteria, which apply to Story and Task', () => {
     const example = fence('Bug', 1)
