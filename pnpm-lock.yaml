@@ -255,9 +255,6 @@ importers:
       '@bluetel-ai/prettier-config':
         specifier: workspace:*
         version: link:../prettier-config
-      marklassian:
-        specifier: ^1.2.1
-        version: 1.2.1
       vitest:
         specifier: '>=4.1.0'
         version: 4.1.7(@types/node@22.19.17)(vite@8.0.14(@types/node@22.19.17)(esbuild@0.27.2)(jiti@2.6.1)(less@4.5.1)(sass-embedded@1.98.0)(sass@1.98.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
@@ -5467,14 +5464,6 @@ packages:
   make-dir@3.1.0:
     resolution: {integrity: sha512-g3FeP20LNwhALb/6Cz6Dd4F2ngze0jz7tbzrD2wAV+o9FeNHe4rL+yK2md0J/fiSf1sa1ADhXqi5+oVwOM/eGw==}
     engines: {node: '>=8'}
-
-  marked@16.4.2:
-    resolution: {integrity: sha512-TI3V8YYWvkVf3KJe1dRkpnjs68JUPyEa5vjKrp1XEEJUAOaQc+Qj+L1qWbPd0SJuAdQkFU0h73sXXqwDYxsiDA==}
-    engines: {node: '>= 20'}
-    hasBin: true
-
-  marklassian@1.2.1:
-    resolution: {integrity: sha512-xqsslmU//fP0yWV7Qbw+Eq250cuYzi7uEOBElykAAM5cU2i30p1CDYjb1gRrkrt3Gg33XaqK0jk6838cRjxKJg==}
 
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
@@ -12931,12 +12920,6 @@ snapshots:
   make-dir@3.1.0:
     dependencies:
       semver: 6.3.1
-
-  marked@16.4.2: {}
-
-  marklassian@1.2.1:
-    dependencies:
-      marked: 16.4.2
 
   math-intrinsics@1.1.0: {}
 

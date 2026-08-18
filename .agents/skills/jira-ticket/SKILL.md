@@ -70,13 +70,18 @@ live in `.agents/skills.config`, above.
 - **API token** — stored in the OS keychain. See the header of `scripts/jira-sprint.sh` for the
   one-time setup. Never paste a token into a chat or ask an agent to store one.
 
+If `JIRA_EMAIL` is not set, check `acli --version` too — an unset email usually means this machine
+has had no Jira setup at all, and transitions and assignment go through `acli`.
+
 ## Tooling
 
 - **`scripts/jira-issue.mjs`** — creates and re-describes issues. **Use this, not
   `acli jira workitem create`.** It converts the markdown description to ADF (Atlassian Document
   Format) before sending, so headings, lists, links and code actually render. `acli` sends
   `--description` as plain text, which is why older tickets contain literal `**bold**` and `##`
-  characters. Needs `JIRA_EMAIL` + the keychain token.
+  characters. Needs `JIRA_EMAIL` + the keychain token, and Node 18+ — nothing else. The converter
+  (`scripts/adf.mjs`, `scripts/adf-blocks.mjs`, `scripts/adf-inline.mjs`) has no dependencies and
+  installs nothing, so it runs the same in a repo with no `node_modules` as in this one.
 - **`scripts/jira-sprint.sh`** — moves issues to a sprint via the Jira Agile REST API, since `acli`
   has no sprint-assignment command.
 - **`acli`** (Atlassian CLI) — still used for transitions and assignment. Must be pre-authenticated
@@ -191,9 +196,14 @@ implementer's job.
 - Do not write a root-cause analysis, name the file or function to change, or propose a patch — even
   when you are confident you know the cause. If you have a genuinely useful lead, put one sentence
   under `Notes` and mark it as a hunch ("possibly the draft-lock timeout, which looks like 5s").
-- Leave `Resolution` and `Pull Requests` as the italic placeholders shown in the templates. Those are
-  closing-time fields: the engineer fills them in before moving the ticket to Peer Review. Root cause
-  and fix belong there, written by whoever did the work — not in the description at creation.
+- Leave `Resolution`, `UAT Steps` and `Pull Requests` as the italic placeholders shown in the
+  templates. Those are closing-time fields: the engineer fills them in before moving the ticket to
+  Peer Review. Root cause and fix belong there, written by whoever did the work — not in the
+  description at creation.
+- `UAT Steps` in particular is a placeholder **at creation time, always** — even when you think you
+  know how to verify the work. Verification depends on what was built and where it was deployed, so
+  writing the steps up front either guesses at the fix or describes the reproduction again under a
+  heading that means something else.
 
 ### Never reference the conversation that produced the ticket
 
@@ -235,6 +245,8 @@ days; see the story point scale in `references/workflow.md`.
 - A test matrix table is worth using when behaviour depends on a combination of inputs.
 - The description is markdown and is converted for you. Do not hand-write ADF, and do not wrap the
   whole description in a fenced code block.
+- A single newline inside a paragraph is a wrap and converts to a space, as markdown does. Use a
+  blank line for a new paragraph, or end the line with two spaces to force a line break.
 
 ### The standard acceptance criteria
 

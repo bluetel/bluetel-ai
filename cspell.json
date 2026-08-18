@@ -171,10 +171,8 @@
     "tsgolint",
     "fixability",
     "unnamespaced",
-    // jira-ticket skill vocabulary. marklassian is the markdown-to-ADF library the skill converts
-    // descriptions with. `acli` is the Atlassian CLI, `workitem` its noun for an issue, and
-    // `customfield` the prefix Jira gives every custom field id.
-    "marklassian",
+    // jira-ticket skill vocabulary. `acli` is the Atlassian CLI, `workitem` its noun for an
+    // issue, and `customfield` the prefix Jira gives every custom field id.
     "acli",
     "workitem",
     "customfield",

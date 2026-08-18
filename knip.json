@@ -63,11 +63,6 @@
     // No script or import reaches it: the oxc VS Code extension shells out to `oxfmt --lsp`
     // from node_modules, so the editor is the only consumer.
     "oxfmt",
-    // Imported by tooling/skills/catalog/jira-ticket/scripts/adf.mjs, which sits outside the
-    // skills project glob on purpose — the catalog is payload copied verbatim into other repos,
-    // not source with an entry point. The workspace install is what lets the tests convert
-    // markdown without reaching the network.
-    "marklassian",
     "@bluetel-ai/eslint-config-base",
     "@bluetel-ai/eslint-config-react-native",
     "@bluetel-ai/prettier-config",

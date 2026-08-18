@@ -29,9 +29,7 @@ interface AdfDocument {
 }
 
 /** Convert a markdown description into an ADF document for `fields.description`. */
-export const markdownToAdfDocument = adf.markdownToAdfDocument as (
-  markdown: string,
-) => Promise<AdfDocument>
+export const markdownToAdfDocument = adf.markdownToAdfDocument as (markdown: string) => AdfDocument
 
 /** Strip a fence wrapping the whole document, which would otherwise render as code. */
 export const unwrapCodeFence = adf.unwrapCodeFence as (markdown: string) => string

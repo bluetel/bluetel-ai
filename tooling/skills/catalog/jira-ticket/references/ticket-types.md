@@ -40,15 +40,20 @@ the same block. Do not add a criterion naming a tool this project has not said i
 This is the distinction that keeps tickets useful. The **writer** describes the problem or the need.
 The **engineer** fills in the closing-time sections, before moving the ticket to Peer Review:
 
-| Section                                                       | Filled by          | When                                               |
-| ------------------------------------------------------------- | ------------------ | -------------------------------------------------- |
-| Story / CoS / Problem / Expected / Steps to replicate / Notes | Writer             | At creation                                        |
-| `Resolution`                                                  | Engineer           | Before Peer Review                                 |
-| `Pull Requests`                                               | Engineer           | Before Peer Review                                 |
-| `UAT Steps`                                                   | Writer or engineer | At creation if known, otherwise before Peer Review |
+| Section                                                       | Filled by | When               |
+| ------------------------------------------------------------- | --------- | ------------------ |
+| Story / CoS / Problem / Expected / Steps to replicate / Notes | Writer    | At creation        |
+| `Resolution`                                                  | Engineer  | Before Peer Review |
+| `Pull Requests`                                               | Engineer  | Before Peer Review |
+| `UAT Steps`                                                   | Engineer  | Before Peer Review |
 
-So when you create a ticket, leave `Resolution` and `Pull Requests` as the italic placeholders. They
-are closing-time fields, not an invitation to design the fix up front.
+So when you create a ticket, leave `Resolution`, `UAT Steps` and `Pull Requests` as the italic
+placeholders. They are closing-time fields, not an invitation to design the fix up front.
+
+`UAT Steps` belongs in that list even though the written guide allows the writer to fill it in when
+they already know how to verify the work. Verification depends on what was built and where it was
+deployed, neither of which is settled at creation — and on the board it shows: the boilerplate
+survives verbatim in most tickets that carry the section. Leave it as the placeholder, always.
 
 ---
 
@@ -142,7 +147,9 @@ _A summary of how the issue raised was addressed_
 - **Notes** — optional. Slack threads, design docs, external references: context that is not a
   requirement.
 - **UAT Steps** — a numbered sequence letting a product owner, QA engineer or stakeholder verify the
-  work on staging or production. Be specific: include URLs, user roles, and exact interactions.
+  work on staging or production. Left as the italic placeholder at creation; the engineer writes it
+  before Peer Review, once there is a deployed change to verify. Written then, it is specific:
+  URLs, user roles, and exact interactions.
 
 ### Example
 
@@ -168,19 +175,18 @@ _A summary of how the issue raised was addressed_
 
 **UAT Steps:**
 
-1. Log in as A3x on staging (https://staging.example.com/)
-2. Open the app on a physical iOS device using a fresh sandbox Apple ID
-3. Navigate to a paywalled article
-4. Confirm the introductory price and offer end date are displayed correctly
-5. Confirm the standard paywall appears when no offer is configured
+1. _Log in as A3x_
+2. _…_
 
 **Pull Requests**
 
 - _na-frontend: <link>_
 ```
 
-`Resolution` and `Pull Requests` are left as placeholders — the engineer fills them before Peer
-Review. `UAT Steps` are written out here because the writer already knew how to verify it.
+All three closing-time sections are left as placeholders — the engineer fills them in before Peer
+Review, when there is a deployed change to verify and a PR to link. Note what the description does
+carry: the caching behaviour and the null case, which are requirements, stated as observable
+outcomes rather than as instructions to the implementer.
 
 ---
 
@@ -219,8 +225,9 @@ _A summary of how the issue raised was addressed_
 ```
 
 The written guide's Bug template has no `UAT Steps` section, unlike Task. In practice many bugs on
-the board do carry one; adding it is fine when there is something specific to verify, but it is not
-required.
+the board do carry one. Adding it is fine, but add it as the same italic placeholder Task uses — at
+creation there is no fix to verify — and leave it out entirely rather than describing the
+reproduction steps a second time under a heading that means something else.
 
 ### Field guidance
 

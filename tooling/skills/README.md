@@ -24,10 +24,11 @@ The installer runs entirely as **Claude driving `git` / `curl` / POSIX shell** �
 - base POSIX utilities and **`sha256sum` or `shasum`**.
 
 Individual skills may need more than the installer does. `jira-ticket` ships Node scripts, so
-using it (not installing it) additionally needs **Node ≥ 18** — plus **`npm`** and network access
-on first run, to fetch the markdown-to-ADF converter into a user-level cache if the target repo
-has no `node_modules` of its own. Each such prerequisite is declared as a `next_step` in the
-skill's `skill.meta`, so `skills.sh next-steps` reports it.
+using it (not installing it) additionally needs **Node ≥ 18** — and nothing else: its
+markdown-to-ADF converter is three dependency-free files in the skill's own `scripts/`, so it
+needs neither `npm` nor network access, and behaves the same in a target repo with no
+`node_modules` at all. Each such prerequisite is declared as a `next_step` in the skill's
+`skill.meta`, so `skills.sh next-steps` reports it.
 
 ## Installing skills into another project
 

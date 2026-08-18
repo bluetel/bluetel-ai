@@ -1,3 +1,13 @@
+/* eslint-disable -- Skill payload, not this repo's source. skills.sh copies this file verbatim
+   into target repos and content-hashes the copy against the catalog, so any tool that rewrites
+   it there reports the skill as locally-modified on the next update. The directives below say
+   the same thing to the other toolchains a target repo might run. */
+// oxlint-disable
+/** biome-ignore-all lint: skill payload copied verbatim — see the eslint-disable above */
+/** biome-ignore-all format: skill payload copied verbatim — see the eslint-disable above */
+// oxfmt-ignore
+// prettier-ignore
+//
 // Jira REST helpers: per-repo config, credentials, and request plumbing.
 //
 // Deliberately mirrors scripts/jira-sprint.sh so both tools resolve the same way:
@@ -61,7 +71,10 @@ export function jiraEmail() {
   const email = process.env.JIRA_EMAIL
   if (!email) {
     throw new Error(
-      'JIRA_EMAIL is not set. Export it in your shell profile, e.g.:\n  export JIRA_EMAIL="you@company.com"',
+      'JIRA_EMAIL is not set. Export it in your shell profile, e.g.:\n' +
+        '  export JIRA_EMAIL="you@company.com"\n' +
+        'If it is unset, check `acli --version` too: an unset email usually means this machine\n' +
+        'has had no Jira setup at all, and the transition and assignment steps need acli.',
     )
   }
   return email

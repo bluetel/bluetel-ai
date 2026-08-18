@@ -1,106 +1,36 @@
+/* eslint-disable -- Skill payload, not this repo's source. skills.sh copies this file verbatim
+   into target repos and content-hashes the copy against the catalog, so any tool that rewrites
+   it there reports the skill as locally-modified on the next update — and a formatter that
+   "tidies" a hand-written parser is exactly the kind of rewrite that goes unnoticed. The
+   directives below say the same thing to the other toolchains a target repo might run. */
+// oxlint-disable
+/** biome-ignore-all lint: skill payload copied verbatim — see the eslint-disable above */
+/** biome-ignore-all format: skill payload copied verbatim — see the eslint-disable above */
+// oxfmt-ignore
+// prettier-ignore
+//
 // Markdown -> Atlassian Document Format (ADF).
 //
-// Why this exists: `acli jira workitem create --description` sends the string as
-// plain text, so a markdown description lands in Jira as literal `**bold**` and
-// `## heading` characters instead of formatting. The REST API accepts a real ADF
-// document for `fields.description`, so we convert first and POST that instead.
+// Why this exists: `acli jira workitem create --description` sends the string as plain text,
+// so a markdown description lands in Jira as literal `**bold**` and `## heading` characters
+// instead of formatting. The REST API accepts a real ADF document for `fields.description`,
+// so we convert first and POST that instead.
 //
-// Conversion is delegated to marklassian (MIT, https://github.com/jamsinclair/marklassian)
-// rather than hand-rolled: ADF has a lot of surface area and marklassian already
-// tracks it. It is resolved at runtime rather than vendored, because this script is
-// copied verbatim into target repos that may not be Node projects at all:
+// The conversion is implemented here, in three dependency-free files:
 //
-//   1. a normal `import` — hits the workspace install when one exists;
-//   2. otherwise a one-off `npm install` into a user-level cache dir.
+//   adf.mjs         this file — the entry point, plus the two guards below
+//   adf-blocks.mjs  paragraphs, headings, lists, code blocks, quotes, tables, rules
+//   adf-inline.mjs  strong, em, strike, code, links
 //
-// Only step 2 needs the network, and only the first time on a given machine.
+// It used to delegate to marklassian, resolved at runtime and `npm install`ed into a
+// user-level cache when the workspace could not resolve it. That is gone: skills.sh copies
+// this directory verbatim into repos that may not be Node projects at all, so the fallback
+// meant the first ticket on a machine needed npm and network access, and then ran code that
+// no lockfile in the consuming repo pinned. A ticket description uses a small and stable
+// subset of markdown — the templates in references/ticket-types.md are the whole of it — and
+// owning that subset outright is cheaper than owning a runtime installer for it.
 
-import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-
-// Pinned exactly, not a caret range: this install has no lockfile to record an
-// integrity hash against, so a floating range would let the resolved bytes change
-// between machines and over time with nothing to compare them to.
-const MARKLASSIAN_SPEC = 'marklassian@1.2.1'
-
-function cacheDir() {
-  const base = process.env.XDG_CACHE_HOME || join(homedir(), '.cache')
-  return join(base, 'bluetel-skills', 'adf')
-}
-
-function installToCache() {
-  const dir = cacheDir()
-  mkdirSync(dir, { recursive: true })
-  // A package.json here stops npm walking up and installing into the host repo.
-  writeFileSync(
-    join(dir, 'package.json'),
-    `${JSON.stringify({ name: 'bluetel-skills-adf', private: true, type: 'module' }, null, 2)}\n`,
-  )
-  try {
-    execFileSync(
-      'npm',
-      [
-        'install',
-        '--silent',
-        '--no-audit',
-        '--no-fund',
-        '--no-package-lock',
-        // marklassian and marked are plain JS with nothing to build, so no lifecycle
-        // script needs to run — and this install is unattended, triggered as a side
-        // effect of creating a ticket. Don't hand a postinstall the developer's shell.
-        '--ignore-scripts',
-        MARKLASSIAN_SPEC,
-      ],
-      {
-        cwd: dir,
-        stdio: ['ignore', 'ignore', 'inherit'],
-      },
-    )
-  } catch (cause) {
-    throw new Error(
-      `could not install ${MARKLASSIAN_SPEC} into ${dir}.\n` +
-        'It converts the markdown description into ADF, without which Jira renders the\n' +
-        'description as literal markdown. Check network access and that `npm` is on PATH,\n' +
-        `or install it into this repo with: npm install --save-dev ${MARKLASSIAN_SPEC}`,
-      { cause },
-    )
-  }
-  return join(dir, 'node_modules', 'marklassian', 'dist', 'index.js')
-}
-
-let cached
-/** Resolve marklassian's `markdownToAdf`, installing it on first use if needed. */
-export async function loadConverter() {
-  if (cached) return cached
-
-  // A wrong major, or a stub shadowing the real package in the host repo, resolves
-  // fine but has no markdownToAdf. Check before caching, so this falls through to
-  // the known-good cache install instead of failing later as "not a function".
-  try {
-    const { markdownToAdf } = await import('marklassian')
-    if (typeof markdownToAdf === 'function') {
-      cached = markdownToAdf
-      return cached
-    }
-  } catch {
-    // not resolvable from here — fall through to the user-level cache
-  }
-
-  const entry = join(cacheDir(), 'node_modules', 'marklassian', 'dist', 'index.js')
-  const path = existsSync(entry) ? entry : installToCache()
-  const { markdownToAdf } = await import(pathToFileURL(path).href)
-  if (typeof markdownToAdf !== 'function') {
-    throw new Error(
-      `${path} does not export markdownToAdf — the cached install looks incomplete.\n` +
-        `Delete ${cacheDir()} and re-run to reinstall it.`,
-    )
-  }
-  cached = markdownToAdf
-  return cached
-}
+import { blockNodes } from './adf-blocks.mjs'
 
 const FENCE = /^```/
 const WRAPPER_OPEN = /^```(?:markdown|md)?\s*$/
@@ -144,13 +74,15 @@ export function unwrapCodeFence(markdown) {
 }
 
 /** Convert a markdown description into an ADF document ready for `fields.description`. */
-export async function markdownToAdfDocument(markdown) {
+export function markdownToAdfDocument(markdown) {
   const source = unwrapCodeFence(markdown)
   if (source.trim() === '') throw new Error('description is empty')
-  const convert = await loadConverter()
-  const doc = convert(source)
-  if (!doc || doc.type !== 'doc' || !Array.isArray(doc.content)) {
-    throw new Error('conversion did not produce an ADF doc node')
-  }
-  return doc
+
+  const content = blockNodes(source.replace(/\r\n?/g, '\n').split('\n'))
+  // Not reachable from a non-empty source with the current grammar — every line either opens
+  // a block or becomes a paragraph. Checked anyway: a doc with no content is the one payload
+  // Jira accepts while silently publishing a blank description.
+  if (content.length === 0) throw new Error('description produced no content')
+
+  return { version: 1, type: 'doc', content }
 }

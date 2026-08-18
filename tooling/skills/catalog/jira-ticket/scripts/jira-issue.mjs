@@ -1,4 +1,13 @@
 #!/usr/bin/env node
+/* eslint-disable -- Skill payload, not this repo's source. skills.sh copies this file verbatim
+   into target repos and content-hashes the copy against the catalog, so any tool that rewrites
+   it there reports the skill as locally-modified on the next update. The directives below say
+   the same thing to the other toolchains a target repo might run. */
+// oxlint-disable
+/** biome-ignore-all lint: skill payload copied verbatim — see the eslint-disable above */
+/** biome-ignore-all format: skill payload copied verbatim — see the eslint-disable above */
+// oxfmt-ignore
+// prettier-ignore
 //
 // Create or re-describe a Jira issue with a properly formatted description.
 //
@@ -279,7 +288,7 @@ function hasOtherEdits(flags) {
  */
 async function descriptionField(flags, { forCreate }) {
   const description = await readDescription(flags)
-  if (description !== null) return await markdownToAdfDocument(description)
+  if (description !== null) return markdownToAdfDocument(description)
 
   if (forCreate || !hasOtherEdits(flags)) {
     throw new Error('no description given — pipe markdown on stdin, or pass --description-file')

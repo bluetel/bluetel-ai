@@ -1,5 +1,7 @@
 // cspell:ignore dryrun parnet — deliberate typos: these tests assert that a
 // misspelt flag is rejected rather than silently ignored.
+// cspell:ignore marklassian intraword — the package the vendored converter replaced, named
+// only in the comment recording why, and the term for `_` inside a word.
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,8 +32,8 @@ const plainText = (node: AdfNode): string =>
   (node.text ?? '') + (node.content ?? []).map(plainText).join('')
 
 describe('markdownToAdfDocument', () => {
-  it('renders a bold section label as a strong text run, not literal asterisks', async () => {
-    const doc = await markdownToAdfDocument('**Problem:**\n\nThe play bar does not reset.')
+  it('renders a bold section label as a strong text run, not literal asterisks', () => {
+    const doc = markdownToAdfDocument('**Problem:**\n\nThe play bar does not reset.')
 
     const [label] = doc.content
     expect(label.type).toBe('paragraph')
@@ -41,8 +43,8 @@ describe('markdownToAdfDocument', () => {
     expect(JSON.stringify(doc)).not.toContain('**')
   })
 
-  it('converts ordered lists into list nodes rather than numbered text', async () => {
-    const doc = await markdownToAdfDocument('1. Open an article\n2. Start a second one\n')
+  it('converts ordered lists into list nodes rather than numbered text', () => {
+    const doc = markdownToAdfDocument('1. Open an article\n2. Start a second one\n')
 
     const ordered = nodesOfType(doc, 'orderedList')
     expect(ordered).toHaveLength(1)
@@ -51,45 +53,150 @@ describe('markdownToAdfDocument', () => {
     expect(JSON.stringify(doc)).not.toContain('1.')
   })
 
-  it('converts bullets into a bulletList, as CoS sections need', async () => {
-    const doc = await markdownToAdfDocument('**CoS**\n\n- Add the field\n- Default it to false\n')
+  it('converts bullets into a bulletList, as CoS sections need', () => {
+    const doc = markdownToAdfDocument('**CoS**\n\n- Add the field\n- Default it to false\n')
 
     expect(nodesOfType(doc, 'bulletList')).toHaveLength(1)
     expect(nodesOfType(doc, 'listItem')).toHaveLength(2)
   })
 
-  it('marks inline code with a code mark rather than backticks', async () => {
-    const doc = await markdownToAdfDocument('It resets to `0:00` on load.')
+  it('marks inline code with a code mark rather than backticks', () => {
+    const doc = markdownToAdfDocument('It resets to `0:00` on load.')
 
     const coded = nodesOfType(doc, 'text').find((n) => n.marks?.some((m) => m.type === 'code'))
     expect(coded?.text).toBe('0:00')
     expect(JSON.stringify(doc)).not.toContain('`')
   })
 
-  it('turns a bare URL into a link mark', async () => {
-    const doc = await markdownToAdfDocument('Go to https://example.com and play audio')
+  it('turns a bare URL into a link mark', () => {
+    const doc = markdownToAdfDocument('Go to https://example.com and play audio')
 
     const linked = nodesOfType(doc, 'text').find((n) => n.marks?.some((m) => m.type === 'link'))
     expect(linked?.marks?.[0].attrs?.href).toBe('https://example.com')
   })
 
-  it('keeps italic placeholders italic, so implementer sections stay marked as unfilled', async () => {
-    const doc = await markdownToAdfDocument('_A summary of how the issue raised was addressed_')
+  it('keeps italic placeholders italic, so implementer sections stay marked as unfilled', () => {
+    const doc = markdownToAdfDocument('_A summary of how the issue raised was addressed_')
 
     const italic = nodesOfType(doc, 'text').find((n) => n.marks?.some((m) => m.type === 'em'))
     expect(italic?.text).toBe('A summary of how the issue raised was addressed')
   })
 
-  it('produces a doc node the REST API will accept', async () => {
-    const doc = await markdownToAdfDocument('**CoS**\n\n- Add the field\n')
+  it('produces a doc node the REST API will accept', () => {
+    const doc = markdownToAdfDocument('**CoS**\n\n- Add the field\n')
 
     expect(doc.type).toBe('doc')
     expect(doc.version).toBe(1)
     expect(Array.isArray(doc.content)).toBe(true)
   })
 
-  it('rejects an empty description instead of creating a blank ticket', async () => {
-    await expect(markdownToAdfDocument('   \n  ')).rejects.toThrow('empty')
+  it('rejects an empty description instead of creating a blank ticket', () => {
+    expect(() => markdownToAdfDocument('   \n  ')).toThrow('empty')
+  })
+})
+
+describe('markdownToAdfDocument, on the constructs the templates and real tickets use', () => {
+  it('nests a sub-list inside its parent item rather than flattening it', () => {
+    const doc = markdownToAdfDocument('- Outer\n  - Inner\n- Second')
+
+    const [list] = nodesOfType(doc, 'bulletList')
+    expect(list.content).toHaveLength(2)
+    // The nested list is a child of the first item, not a third sibling item.
+    expect(nodesOfType(list.content?.[0] as AdfNode, 'bulletList')).toHaveLength(1)
+    expect(nodesOfType(doc, 'listItem')).toHaveLength(3)
+  })
+
+  it('joins a hand-wrapped line into one paragraph, and honours a deliberate break', () => {
+    const wrapped = markdownToAdfDocument('The play bar does not reset\nwhen a new article starts.')
+    expect(plainText(wrapped)).toBe('The play bar does not reset when a new article starts.')
+    expect(nodesOfType(wrapped, 'paragraph')).toHaveLength(1)
+    expect(nodesOfType(wrapped, 'hardBreak')).toHaveLength(0)
+
+    // Two trailing spaces is markdown's explicit line break — the Story template's shape.
+    const broken = markdownToAdfDocument('As a subscriber,  \nI want the price shown.')
+    expect(nodesOfType(broken, 'hardBreak')).toHaveLength(1)
+    expect(nodesOfType(broken, 'paragraph')).toHaveLength(1)
+  })
+
+  it('converts a test matrix table into table nodes', () => {
+    const doc = markdownToAdfDocument('| Env | Result |\n| --- | ------ |\n| iOS | broken |')
+
+    expect(nodesOfType(doc, 'table')).toHaveLength(1)
+    expect(nodesOfType(doc, 'tableRow')).toHaveLength(2)
+    expect(nodesOfType(doc, 'tableHeader')).toHaveLength(2)
+    expect(nodesOfType(doc, 'tableCell')).toHaveLength(2)
+    expect(JSON.stringify(doc)).not.toContain('|')
+  })
+
+  it('leaves a lone pipe in prose as text, since a table needs its divider row', () => {
+    const doc = markdownToAdfDocument('The build prints a | between the columns.')
+
+    expect(nodesOfType(doc, 'table')).toHaveLength(0)
+    expect(plainText(doc)).toContain('|')
+  })
+
+  it('keeps an identifier with underscores intact instead of italicising the middle', () => {
+    // The regression an emphasis parser without the intraword guard produces: field ids and
+    // snake_case names are everywhere in these tickets.
+    const doc = markdownToAdfDocument('Set customfield_12042 and has_author_page on create.')
+
+    expect(plainText(doc)).toBe('Set customfield_12042 and has_author_page on create.')
+    expect(nodesOfType(doc, 'text').some((n) => n.marks?.some((m) => m.type === 'em'))).toBe(false)
+  })
+
+  it('does not italicise arithmetic or a dash used as punctuation', () => {
+    const doc = markdownToAdfDocument('Retries 3 * 4 * 5 times, and a - b - c stays a sum.')
+
+    expect(nodesOfType(doc, 'text').some((n) => n.marks?.some((m) => m.type === 'em'))).toBe(false)
+  })
+
+  it('links a labelled markdown link, and leaves a bracketed placeholder alone', () => {
+    const doc = markdownToAdfDocument('See [the spec](https://example.com/s) and [Step, from here]')
+
+    const linked = nodesOfType(doc, 'text').find((n) => n.marks?.some((m) => m.type === 'link'))
+    expect(linked?.text).toBe('the spec')
+    expect(linked?.marks?.[0].attrs?.href).toBe('https://example.com/s')
+    // Template placeholders are written `[like this]` and must survive as text.
+    expect(plainText(doc)).toContain('[Step, from here]')
+  })
+
+  it('stops a bare URL at the sentence punctuation that follows it', () => {
+    const doc = markdownToAdfDocument('Reproduced on https://staging.example.com/paywall.')
+
+    const linked = nodesOfType(doc, 'text').find((n) => n.marks?.some((m) => m.type === 'link'))
+    expect(linked?.marks?.[0].attrs?.href).toBe('https://staging.example.com/paywall')
+    expect(plainText(doc)).toBe('Reproduced on https://staging.example.com/paywall.')
+  })
+
+  it('keeps a blockquote as a quote and a --- as a rule', () => {
+    const doc = markdownToAdfDocument('> Quoted from the thread\n\n---\n\nAfter.')
+
+    expect(nodesOfType(doc, 'blockquote')).toHaveLength(1)
+    expect(nodesOfType(doc, 'rule')).toHaveLength(1)
+    expect(plainText(doc)).toContain('Quoted from the thread')
+  })
+
+  it('preserves a code block verbatim, including the markup inside it', () => {
+    const doc = markdownToAdfDocument(['```js', 'const a = `**not bold**`', '```'].join('\n'))
+
+    const [code] = nodesOfType(doc, 'codeBlock')
+    expect(code.attrs?.language).toBe('js')
+    expect(code.content?.[0].text).toBe('const a = `**not bold**`')
+  })
+
+  it('closes an unclosed fence at the end of the description rather than dropping it', () => {
+    // A truncated fence is a typo, not a reason to publish a ticket missing its evidence.
+    const doc = markdownToAdfDocument('**Problem:**\n\n```\nERROR: boom')
+
+    expect(nodesOfType(doc, 'codeBlock')).toHaveLength(1)
+    expect(plainText(doc)).toContain('ERROR: boom')
+  })
+
+  it('unescapes a backslash-escaped marker instead of emitting either form literally', () => {
+    const doc = markdownToAdfDocument('Literal \\*asterisks\\* and a \\_underscore\\_.')
+
+    expect(plainText(doc)).toBe('Literal *asterisks* and a _underscore_.')
+    expect(JSON.stringify(doc)).not.toContain('\\\\')
   })
 })
 
@@ -136,9 +243,9 @@ describe('unwrapCodeFence', () => {
     expect(unwrapCodeFence(body)).toBe(body)
   })
 
-  it('keeps the fences balanced through conversion for such a description', async () => {
+  it('keeps the fences balanced through conversion for such a description', () => {
     const body = ['```', 'ERROR: boom', '```', '', '**Problem:**', '', 'It broke.'].join('\n')
-    const doc = await markdownToAdfDocument(body)
+    const doc = markdownToAdfDocument(body)
 
     // One codeBlock for the trace, and the Problem label survives as a bold run
     // rather than being swallowed into it as literal asterisks.
@@ -147,15 +254,15 @@ describe('unwrapCodeFence', () => {
     expect(JSON.stringify(doc)).not.toContain('**')
   })
 
-  it('survives the fenced round trip into ADF', async () => {
-    const doc = await markdownToAdfDocument('```markdown\n**Problem:**\n\nBroken.\n```')
+  it('survives the fenced round trip into ADF', () => {
+    const doc = markdownToAdfDocument('```markdown\n**Problem:**\n\nBroken.\n```')
 
     expect(nodesOfType(doc, 'codeBlock')).toHaveLength(0)
     expect(nodesOfType(doc, 'text')[0].marks).toEqual([{ type: 'strong' }])
   })
 
-  it('still converts a real code block inside a description', async () => {
-    const doc = await markdownToAdfDocument('**Problem:**\n\n```bash\nnpm run build\n```')
+  it('still converts a real code block inside a description', () => {
+    const doc = markdownToAdfDocument('**Problem:**\n\n```bash\nnpm run build\n```')
 
     expect(nodesOfType(doc, 'codeBlock')).toHaveLength(1)
   })
@@ -201,9 +308,9 @@ describe('documented ticket templates and examples', () => {
 
   it.each(['Story', 'Task', 'Bug'])(
     'the %s template and example both convert without literal markdown surviving',
-    async (type) => {
+    (type) => {
       for (const index of [0, 1]) {
-        const doc = await markdownToAdfDocument(fence(type, index))
+        const doc = markdownToAdfDocument(fence(type, index))
 
         // Section labels are bold paragraphs on these boards, never headings.
         expect(nodesOfType(doc, 'heading'), `${type} fence ${index}`).toHaveLength(0)
@@ -233,6 +340,22 @@ describe('documented ticket templates and examples', () => {
     },
   )
 
+  it.each([0, 1])(
+    'the Task fence %i leaves UAT Steps as a placeholder, not a written-out sequence',
+    (index) => {
+      const body = fence('Task', index)
+      const steps = body.split('**UAT Steps:**')[1]?.split('**Pull Requests')[0] ?? ''
+
+      expect(steps.trim(), 'Task fence has no UAT Steps section').not.toBe('')
+      // Every numbered step is italic — i.e. still boilerplate. A step written as plain text
+      // would mean the example shows verification being invented at creation time, which is
+      // the engineer's job once there is a deployed change to verify.
+      for (const line of steps.split('\n').filter((l) => /^\s*\d+\./.test(l))) {
+        expect(line, `UAT step is not a placeholder: ${line}`).toMatch(/^\s*\d+\.\s+_.*_$/)
+      }
+    },
+  )
+
   it('the Bug example stays near the measured length for real tickets', () => {
     const words = fence('Bug', 1).split(/\s+/).filter(Boolean).length
 
@@ -242,15 +365,47 @@ describe('documented ticket templates and examples', () => {
     expect(words).toBeLessThan(161)
   })
 
-  it('the counter-example really does demonstrate the heading anti-pattern', async () => {
+  it('the counter-example really does demonstrate the heading anti-pattern', () => {
     const after = reference.split('\n## Counter-example')[1]
     expect(after, 'counter-example section not found').toBeDefined()
     const bad = /```markdown\n([\s\S]*?)\n```/.exec(after)
     expect(bad, 'no markdown fence in the counter-example').not.toBeNull()
-    const doc = await markdownToAdfDocument(bad?.[1] ?? '')
+    const doc = markdownToAdfDocument(bad?.[1] ?? '')
 
     // If someone "tidies" this into bold labels, it stops illustrating anything.
     expect(nodesOfType(doc, 'heading').length).toBeGreaterThan(0)
+  })
+})
+
+describe('the scripts stay dependency-free', () => {
+  const scripts = join(import.meta.dirname, '../catalog/jira-ticket/scripts')
+
+  it.each(['adf.mjs', 'adf-blocks.mjs', 'adf-inline.mjs', 'jira-api.mjs', 'jira-issue.mjs'])(
+    '%s imports nothing but node: builtins and its siblings',
+    (file) => {
+      const source = readFileSync(join(scripts, file), 'utf8')
+      const specifiers = [
+        ...source.matchAll(/^\s*(?:import\b[^'\n]*from\s+|import\s+)'([^']+)'/gm),
+      ].map((match) => match[1])
+
+      // skills.sh copies this directory verbatim into repos that may not be Node projects at
+      // all, so a bare specifier here is a dependency the target cannot be assumed to resolve.
+      // The version this replaced fell back to `npm install`-ing marklassian into a user-level
+      // cache on first use — network access and unpinned code, triggered by creating a ticket.
+      for (const specifier of specifiers) {
+        expect(
+          specifier.startsWith('node:') || specifier.startsWith('./'),
+          `${file} imports '${specifier}'`,
+        ).toBe(true)
+      }
+    },
+  )
+
+  it('spawns no package manager', () => {
+    for (const file of ['adf.mjs', 'adf-blocks.mjs', 'adf-inline.mjs']) {
+      const source = readFileSync(join(scripts, file), 'utf8')
+      expect(source, `${file} shells out`).not.toMatch(/execFileSync|execSync|spawn/)
+    }
   })
 })
 
