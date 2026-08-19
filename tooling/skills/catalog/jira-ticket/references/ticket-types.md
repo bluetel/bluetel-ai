@@ -131,12 +131,11 @@ _A summary of how the issue raised was addressed_
 
 **UAT Steps:**
 
-1. _Log in as A3x_
-2. _…_
+1. _<Insert UAT instructions here>_
 
 **Pull Requests**
 
-- _na-frontend: <link>_
+- _repo-1-here: <link>_
 ```
 
 ### Field guidance
@@ -175,12 +174,11 @@ _A summary of how the issue raised was addressed_
 
 **UAT Steps:**
 
-1. _Log in as A3x_
-2. _…_
+1. _<Insert UAT instructions here>_
 
 **Pull Requests**
 
-- _na-frontend: <link>_
+- _repo-1-here: <link>_
 ```
 
 All three closing-time sections are left as placeholders — the engineer fills them in before Peer
@@ -221,7 +219,7 @@ _A summary of how the issue raised was addressed_
 
 **Pull Requests**
 
-- _na-frontend: <link>_
+- _repo-1-here: <link>_
 ```
 
 The written guide's Bug template has no `UAT Steps` section, unlike Task. In practice many bugs on
@@ -273,7 +271,7 @@ _A summary of how the issue raised was addressed_
 
 **Pull Requests**
 
-- _na-frontend: <link>_
+- _repo-1-here: <link>_
 ```
 
 134 words including placeholders — about the median for a bug on these boards. The `Notes` hypothesis

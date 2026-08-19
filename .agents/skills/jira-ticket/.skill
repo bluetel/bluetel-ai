@@ -1,7 +1,7 @@
 name=jira-ticket
 version=1.2.0
-installed_hash=f0c0c5468962a0576010214f7774098f77161643935af761f131cb5528a8fa61
+installed_hash=c52ca1b508cf6b60bda2930e58d201b9a7a769a0c5ba1c3ced018ae8c45458cf
 source_repo=
 source_ref=
 assets=jira-ticket
-installed_at=2026-08-19T10:58:25Z
+installed_at=2026-08-19T11:16:38Z
