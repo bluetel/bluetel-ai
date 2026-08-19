@@ -7,13 +7,18 @@ move an existing issue into a sprint or between statuses.
 
 ## Reference files
 
-Read the relevant one before writing a description — they carry the templates and the team's process:
+**Open and read the relevant file below before writing a single word of a description — every
+ticket, not just the first one in a session.** They carry the templates and the team's process; the
+rest of this SKILL.md does not repeat their contents, so writing from memory or from general Jira
+knowledge instead of the actual file text is how the old `Bug Description` / `Root Cause` /
+`Affected Pages` boilerplate crept back in. `references/ticket-types.md` is required for every
+ticket — it is where the template lives, not this file.
 
-| File                          | Contents                                                                 |
-| ----------------------------- | ------------------------------------------------------------------------ |
-| `references/ticket-types.md`  | Templates, field guidance and worked examples for Story, Task and Bug    |
-| `references/bug-reporting.md` | When a Bug is a Bug (production only), reverts, and the extra Bug fields |
-| `references/workflow.md`      | Board states, creation fields, story point scale, summary style          |
+| File                          | Required for              | Contents                                                                 |
+| ----------------------------- | ------------------------- | ------------------------------------------------------------------------ |
+| `references/ticket-types.md`  | **every ticket**          | Templates, field guidance and worked examples for Story, Task and Bug    |
+| `references/bug-reporting.md` | every Bug                 | When a Bug is a Bug (production only), reverts, and the extra Bug fields |
+| `references/workflow.md`      | sprint moves, transitions | Board states, creation fields, story point scale, summary style          |
 
 Installed path: `.agents/skills/jira-ticket/references/…`; in the source repo,
 `tooling/skills/catalog/jira-ticket/references/…`.
@@ -115,14 +120,17 @@ default epic is configured (offer to set one via `config set 'jira_epic_key=…'
 
 ## Procedure
 
-1. **Identify the issue type** from the table above. For a Bug, check
+1. **Identify the issue type** from the table above. For a Bug, read
    `references/bug-reporting.md` first — the problem may not warrant one.
 2. **Write the summary** — a short, specific statement, max ~80 chars. Describe the symptom or need,
    not the fix: "Play bar does not reset when starting a new article", not "Reset play bar state on
    mount".
-3. **Write the description** to a file, following the template in `references/ticket-types.md`, the
-   writing rules below, and anything in `.agents/jira-ticket-context.md`.
-4. **Create the issue** — pipe the markdown in on stdin, or point at the file:
+3. **Read `references/ticket-types.md` now**, even if you already read it earlier in this
+   conversation — do not write the description from a paraphrase or a recollection of it. Read
+   `.agents/jira-ticket-context.md` too.
+4. **Write the description** to a file, using the template you just read for this issue type and
+   the writing rules below. The project file wins wherever it disagrees with the template.
+5. **Create the issue** — pipe the markdown in on stdin, or point at the file:
 
 ```bash
 .agents/skills/jira-ticket/scripts/jira-issue.mjs create \
@@ -137,13 +145,13 @@ how malformed descriptions get published in the first place.
 
 Add `--dry-run` to print the exact payload and check the formatting before anything is created.
 
-5. **Where it lands** — by default the ticket goes to the bottom of the backlog, which is the
+6. **Where it lands** — by default the ticket goes to the bottom of the backlog, which is the
    documented process: it sits there until the team refines it. Say so, and suggest notifying the
    team. Pass `--sprint` to put it straight into the board's active sprint, or set
    `jira_create_into=sprint` to make that this repo's default. If no `jira_board_id` is configured,
    say so rather than guessing a board.
 
-6. **Remaining fields** — Priority (usually leave Neutral), Labels, Story Point Estimate and Linked
+7. **Remaining fields** — Priority (usually leave Neutral), Labels, Story Point Estimate and Linked
    Issues are best set in the Jira UI, or via `--field` for custom fields. See
    `references/workflow.md` for the story point scale and what each field is for.
 
