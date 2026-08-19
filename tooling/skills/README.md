@@ -96,7 +96,7 @@ sensible cross-repo value — the consuming skill asks rather than guessing, and
 
 **Credentials are never stored here** — the file is committed. `JIRA_EMAIL` is per-user (shell
 profile) and the Jira API token lives in the OS keychain; see the header of
-`catalog/jira-ticket/scripts/jira-sprint.sh` for the one-time setup.
+`catalog/jira-ticket/scripts/jira-sprint.mjs` for the one-time setup.
 
 ## Asset bundles (project scaffolding)
 

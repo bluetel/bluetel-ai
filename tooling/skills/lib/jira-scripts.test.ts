@@ -380,26 +380,30 @@ describe('documented ticket templates and examples', () => {
 describe('the scripts stay dependency-free', () => {
   const scripts = join(import.meta.dirname, '../catalog/jira-ticket/scripts')
 
-  it.each(['adf.mjs', 'adf-blocks.mjs', 'adf-inline.mjs', 'jira-api.mjs', 'jira-issue.mjs'])(
-    '%s imports nothing but node: builtins and its siblings',
-    (file) => {
-      const source = readFileSync(join(scripts, file), 'utf8')
-      const specifiers = [
-        ...source.matchAll(/^\s*(?:import\b[^'\n]*from\s+|import\s+)'([^']+)'/gm),
-      ].map((match) => match[1])
+  it.each([
+    'adf.mjs',
+    'adf-blocks.mjs',
+    'adf-inline.mjs',
+    'jira-api.mjs',
+    'jira-issue.mjs',
+    'jira-sprint.mjs',
+  ])('%s imports nothing but node: builtins and its siblings', (file) => {
+    const source = readFileSync(join(scripts, file), 'utf8')
+    const specifiers = [
+      ...source.matchAll(/^\s*(?:import\b[^'\n]*from\s+|import\s+)'([^']+)'/gm),
+    ].map((match) => match[1])
 
-      // skills.sh copies this directory verbatim into repos that may not be Node projects at
-      // all, so a bare specifier here is a dependency the target cannot be assumed to resolve.
-      // The version this replaced fell back to `npm install`-ing marklassian into a user-level
-      // cache on first use — network access and unpinned code, triggered by creating a ticket.
-      for (const specifier of specifiers) {
-        expect(
-          specifier.startsWith('node:') || specifier.startsWith('./'),
-          `${file} imports '${specifier}'`,
-        ).toBe(true)
-      }
-    },
-  )
+    // skills.sh copies this directory verbatim into repos that may not be Node projects at
+    // all, so a bare specifier here is a dependency the target cannot be assumed to resolve.
+    // The version this replaced fell back to `npm install`-ing marklassian into a user-level
+    // cache on first use — network access and unpinned code, triggered by creating a ticket.
+    for (const specifier of specifiers) {
+      expect(
+        specifier.startsWith('node:') || specifier.startsWith('./'),
+        `${file} imports '${specifier}'`,
+      ).toBe(true)
+    }
+  })
 
   it('spawns no package manager', () => {
     for (const file of ['adf.mjs', 'adf-blocks.mjs', 'adf-inline.mjs']) {
@@ -465,7 +469,7 @@ describe('parseArgs', () => {
   })
 
   it('rejects a stray positional, so `--sprint 42` cannot silently drop the id', () => {
-    // jira-sprint.sh takes `--sprint <id>`; here --sprint is a switch. Silently
+    // jira-sprint.mjs takes `--sprint <id>`; here --sprint is a switch. Silently
     // dropping the id would send the ticket to the active sprint instead.
     expect(() => parseArgs(['--sprint', '42'])).toThrow("unexpected argument '42'")
   })

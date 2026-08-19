@@ -17,7 +17,7 @@
 // POSTs that to the REST API, so headings, lists, links and code render.
 //
 // Config (site, project, epic) comes from `.agents/skills.config`; credentials come
-// from $JIRA_EMAIL plus the OS keychain. See the header of jira-sprint.sh for setup.
+// from $JIRA_EMAIL plus the OS keychain. See the header of jira-sprint.mjs for setup.
 //
 // Usage:
 //   # description on stdin — preferred, no shell quoting to get wrong
@@ -152,13 +152,13 @@ export function parseArgs(argv) {
   }
 
   // Nothing here takes a positional argument. A stray one is almost always a switch
-  // being given a value — `--sprint 42`, which the sibling jira-sprint.sh does accept
+  // being given a value — `--sprint 42`, which the sibling jira-sprint.mjs does accept
   // — and silently dropping it would send the ticket somewhere unasked.
   if (flags._.length > 0) {
     throw new Error(
       `unexpected argument '${flags._[0]}'. This command takes no positional arguments;` +
         ' to target a specific sprint, create the issue then run' +
-        ' jira-sprint.sh --sprint <id> <KEY>.',
+        ' jira-sprint.mjs --sprint <id> <KEY>.',
     )
   }
   return flags
@@ -365,7 +365,7 @@ async function create(flags) {
   }
 
   if (goesToSprint) {
-    const sprintScript = join(HERE, 'jira-sprint.sh')
+    const sprintScript = join(HERE, 'jira-sprint.mjs')
     try {
       execFileSync(sprintScript, [created.key], { stdio: 'inherit' })
     } catch (cause) {

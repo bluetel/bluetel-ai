@@ -196,7 +196,7 @@ so a repo that is already configured must not be re-nagged:
 
    **Never** prompt for or store credentials. `JIRA_EMAIL` is per-user (shell profile) and the API
    token lives in the OS keychain — the config file is committed, so neither belongs there. If the
-   user asks, point them at the setup notes in `jira-ticket/scripts/jira-sprint.sh`.
+   user asks, point them at the setup notes in `jira-ticket/scripts/jira-sprint.mjs`.
 
 3. Write only the keys the user changed (unchanged keys keep their value automatically, and keys left
    at their default are deliberately not written out). **Quote each pair** so values containing

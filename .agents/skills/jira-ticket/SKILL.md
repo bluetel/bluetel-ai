@@ -67,7 +67,7 @@ live in `.agents/skills.config`, above.
 `.agents/skills.config` is committed, so it holds **no** credentials:
 
 - **`JIRA_EMAIL`** — your account email, exported in your shell profile (per-user, not per-repo).
-- **API token** — stored in the OS keychain. See the header of `scripts/jira-sprint.sh` for the
+- **API token** — stored in the OS keychain. See the header of `scripts/jira-sprint.mjs` for the
   one-time setup. Never paste a token into a chat or ask an agent to store one.
 
 If `JIRA_EMAIL` is not set, check `acli --version` too — an unset email usually means this machine
@@ -82,7 +82,7 @@ has had no Jira setup at all, and transitions and assignment go through `acli`.
   characters. Needs `JIRA_EMAIL` + the keychain token, and Node 18+ — nothing else. The converter
   (`scripts/adf.mjs`, `scripts/adf-blocks.mjs`, `scripts/adf-inline.mjs`) has no dependencies and
   installs nothing, so it runs the same in a repo with no `node_modules` as in this one.
-- **`scripts/jira-sprint.sh`** — moves issues to a sprint via the Jira Agile REST API, since `acli`
+- **`scripts/jira-sprint.mjs`** — moves issues to a sprint via the Jira Agile REST API, since `acli`
   has no sprint-assignment command.
 - **`acli`** (Atlassian CLI) — still used for transitions and assignment. Must be pre-authenticated
   via `acli jira auth`.
@@ -175,7 +175,7 @@ To re-render a ticket whose description was published as literal markdown:
 Pass each value as a **separate argument** — `--summary "x"`, never `--summary=x`, which is
 rejected. Unknown flags are rejected too rather than ignored, so a typo cannot silently drop
 `--dry-run` and create a real ticket. There is no positional argument: `--sprint` is a switch here,
-unlike `jira-sprint.sh --sprint <id>`.
+unlike `jira-sprint.mjs --sprint <id>`.
 
 `--field` cannot set `description`, `summary`, `project`, `issuetype`, `parent`, `labels` or
 `assignee` — the script derives those, and letting a raw string through would reintroduce the
@@ -290,13 +290,13 @@ assuming. `references/workflow.md` describes what each state means and what must
 
 ```bash
 # the board's active sprint
-.agents/skills/jira-ticket/scripts/jira-sprint.sh <project>-XXX
+.agents/skills/jira-ticket/scripts/jira-sprint.mjs <project>-XXX
 
 # a specific sprint id
-.agents/skills/jira-ticket/scripts/jira-sprint.sh --sprint <id> <project>-XXX
+.agents/skills/jira-ticket/scripts/jira-sprint.mjs --sprint <id> <project>-XXX
 
 # back to the backlog
-.agents/skills/jira-ticket/scripts/jira-sprint.sh --backlog <project>-XXX
+.agents/skills/jira-ticket/scripts/jira-sprint.mjs --backlog <project>-XXX
 ```
 
 To list sprints on the board (e.g. to find a sprint id by name):

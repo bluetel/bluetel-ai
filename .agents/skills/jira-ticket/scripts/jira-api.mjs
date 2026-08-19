@@ -10,10 +10,10 @@
 //
 // Jira REST helpers: per-repo config, credentials, and request plumbing.
 //
-// Deliberately mirrors scripts/jira-sprint.sh so both tools resolve the same way:
+// Deliberately mirrors scripts/jira-sprint.mjs so both tools resolve the same way:
 // env var > .agents/skills.config > built-in default, with credentials never read
 // from the (committed) config file — email from $JIRA_EMAIL, token from the OS
-// keychain. See the header of jira-sprint.sh for the one-time token setup.
+// keychain. See the header of jira-sprint.mjs for the one-time token setup.
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
