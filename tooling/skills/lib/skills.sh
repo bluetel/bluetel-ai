@@ -555,6 +555,10 @@ generate_stub() {
     if [ -n "$_gs_hint" ]; then
       printf "argument-hint: '%s'\n" "$(yaml_escape "$_gs_hint")"
     fi
+    # The stub is the file the harness reads, so the tool allowlist and the invocation
+    # gate are copied verbatim from the canonical SKILL.md's frontmatter, when it has one.
+    awk 'NR == 1 { if ($0 != "---") exit; next } /^---$/ { exit } /^(allowed-tools|disable-model-invocation):/' \
+      "$CATALOG/$_gs_name/SKILL.md"
     printf -- '---\n\n'
     printf '> **IMPORTANT:** You MUST read and follow the shared skill file at `.agents/skills/%s/SKILL.md` for the full procedure.\n' "$_gs_name"
   } >"$_gs_dest"

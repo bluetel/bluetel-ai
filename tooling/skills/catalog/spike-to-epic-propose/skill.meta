@@ -1,0 +1,7 @@
+name=spike-to-epic-propose
+version=1.0.0
+description=Proposes functional requirements from a fetched Confluence spike that has no Jira epic: one requirement per buildable outcome in the spike's next steps and pull requests, optional research of the client's GitHub repositories and same-space Confluence pages for what already exists, and a question round for every ambiguity, recorded in spike-to-epic/<KEY>/propose/fr.md for /spike-to-epic-plan. Use when: /spike-to-epic-fetch has run without an epic key and tickets need proposing from the spike.
+argument_hint=[KEY] [research]
+requires=spike-to-epic-fetch
+next_step=/spike-to-epic-fetch <Confluence spike URL>|Fetch the spike and its pull requests first. Propose reads only spike-to-epic/<KEY>/current/ and halts when manifest.md is missing, so a folder fetched by an older version of the fetch skill must be removed and re-fetched.|no spike-to-epic/*/current/manifest.md exists in the project
+next_step=gh auth status|Authenticate the GitHub CLI. PR diffs and, with `research`, repository code are read through gh; Phase 0 halts without a logged-in account.|`gh auth status` does not report a logged-in account
