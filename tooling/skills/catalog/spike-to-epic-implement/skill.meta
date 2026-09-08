@@ -1,0 +1,7 @@
+name=spike-to-epic-implement
+version=1.0.0
+description=Carries out a reviewed spike-to-epic plan in Jira, exactly as written, through the Atlassian MCP server: checks Jira for open tickets or epics that already cover the work and asks before continuing, then creates the epic, creates and updates the tickets, adds the issue links and sprint moves listed in plan.md, and reports a Jira link for every ticket created or changed. The plan folder is its only input and it refuses to run in a context that holds anything else. Use when: /spike-to-epic-plan has been reviewed and the tickets should now exist in Jira.
+argument_hint=[KEY]
+requires=spike-to-epic-plan
+next_step=/spike-to-epic-plan <KEY>|Write and review the plan first. Implement reads only spike-to-epic/<KEY>/plan/ and halts without a finished plan.md.|no spike-to-epic/*/plan/plan.md exists in the project
+next_step=/mcp|Every create, update, link and sprint move goes through the Atlassian MCP server as you. Connect or re-authenticate it, then re-run.|the Atlassian MCP server is not connected

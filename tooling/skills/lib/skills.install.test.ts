@@ -27,6 +27,29 @@ describe('skills.sh install', () => {
     expect(record).toMatch(/^installed_hash=[0-9a-f]{64}$/m)
   })
 
+  it('copies allowed-tools and disable-model-invocation from the canonical SKILL.md into the stub', () => {
+    const catalog = makeCatalog([
+      {
+        name: 'fetch',
+        version: '1.0.0',
+        description: 'Read-only fetch.',
+        files: {
+          'SKILL.md':
+            '---\nname: fetch\ndescription: Read-only fetch.\ndisable-model-invocation: true\nallowed-tools: Read, Bash(git status:*)\n---\n\n# fetch\n\nallowed-tools: this body line must not be copied\n',
+        },
+      },
+    ])
+    const target = makeTarget()
+
+    expect(runSkills(['install', 'fetch'], { catalog, target }).status).toBe(0)
+
+    const stub = readFileSync(join(target, '.claude/skills/fetch/SKILL.md'), 'utf8')
+    const [frontmatter] = stub.split('\n---\n\n')
+    expect(frontmatter).toContain('\ndisable-model-invocation: true\n')
+    expect(frontmatter).toContain('\nallowed-tools: Read, Bash(git status:*)')
+    expect(stub.match(/allowed-tools:/g)).toHaveLength(1)
+  })
+
   it('writes nothing outside .agents and .claude (SC-002)', () => {
     const catalog = makeCatalog(CATALOG)
     const target = makeTarget()

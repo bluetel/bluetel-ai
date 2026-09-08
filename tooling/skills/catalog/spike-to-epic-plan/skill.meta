@@ -1,0 +1,7 @@
+name=spike-to-epic-plan
+version=1.1.0
+description=Turns a spike-to-epic requirements document (fr.md from interrogate or propose) into a reviewable Jira plan: an epic and one candidate ticket per piece of work, written to the team's Jira ticket writing guide in the same layout fetch uses, plus a plan of action that /spike-to-epic-implement follows verbatim to create and update them. Writes nothing to Jira. Use when: fr.md exists and the tickets need drafting for human review before anything is created.
+argument_hint=[KEY]
+requires=spike-to-epic-fetch jira-ticket
+next_step=/spike-to-epic-interrogate <KEY> or /spike-to-epic-propose <KEY>|Produce fr.md first. Plan reads exactly one of spike-to-epic/<KEY>/interrogate/fr.md or spike-to-epic/<KEY>/propose/fr.md and halts when neither exists or both do.|no spike-to-epic/*/interrogate/fr.md or spike-to-epic/*/propose/fr.md exists in the project
+next_step=Connect the Atlassian MCP server with `claude mcp add`|Phase 1 reads the Jira project's issue template or a sample of its recent tickets, and the client's Confluence writing guide, through the Atlassian MCP server. Only search and get operations run; nothing is written back.|no mcp__atlassian tools appear in the session tool list

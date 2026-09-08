@@ -73,20 +73,20 @@ sh lib/skills.sh config get branch_pattern
 sh lib/skills.sh config set 'ticket_prefix=ACME' 'repo_owner=acme' --target /path/to/project
 ```
 
-| Key                | Default                        | Used by                      |
-| ------------------ | ------------------------------ | ---------------------------- |
-| `ticket_prefix`    | `BTAI`                         | `pr-creation`, `merging`     |
-| `branch_pattern`   | `feature/{ticket}`             | `pr-creation`, `merging`     |
-| `commit_format`    | `{ticket}: {description}`      | `pr-creation`, `merging`     |
-| `staging_branch`   | `staging`                      | `merging`                    |
-| `base_branch`      | `main`                         | `pr-creation`, `merging`     |
-| `repo_owner`       | `bluetel`                      | `pr-creation`, `merging`     |
-| `repo_name`        | `bluetel-ai`                   | `pr-creation`, `merging`     |
-| `jira_site`        | `bluetel.atlassian.net`        | `jira-ticket`                |
-| `jira_project_key` | _derived from_ `ticket_prefix` | `jira-ticket`                |
-| `jira_board_id`    | _(empty)_                      | `jira-ticket` (sprint moves) |
-| `jira_epic_key`    | _(empty)_                      | `jira-ticket` (`--parent`)   |
-| `jira_create_into` | `backlog`                      | `jira-ticket` (new tickets)  |
+| Key                | Default                        | Used by                                           |
+| ------------------ | ------------------------------ | ------------------------------------------------- |
+| `ticket_prefix`    | `BTAI`                         | `pr-creation`, `merging`                          |
+| `branch_pattern`   | `feature/{ticket}`             | `pr-creation`, `merging`                          |
+| `commit_format`    | `{ticket}: {description}`      | `pr-creation`, `merging`                          |
+| `staging_branch`   | `staging`                      | `merging`                                         |
+| `base_branch`      | `main`                         | `pr-creation`, `merging`                          |
+| `repo_owner`       | `bluetel`                      | `pr-creation`, `merging`                          |
+| `repo_name`        | `bluetel-ai`                   | `pr-creation`, `merging`                          |
+| `jira_site`        | `bluetel.atlassian.net`        | `jira-ticket`                                     |
+| `jira_project_key` | _derived from_ `ticket_prefix` | `jira-ticket`, `spike-to-epic-plan`               |
+| `jira_board_id`    | _(empty)_                      | `jira-ticket` (sprint moves)                      |
+| `jira_epic_key`    | _(empty)_                      | `jira-ticket` (`--parent`)                        |
+| `jira_create_into` | `backlog`                      | `jira-ticket` (new tickets), `spike-to-epic-plan` |
 
 Only explicitly-set keys are written to the file; anything absent resolves to the default, so
 derived values (`jira_project_key`) keep tracking their source. Keys with an empty default have no
