@@ -1,0 +1,7 @@
+name=spike-to-epic-fetch
+version=1.1.0
+description=Fetches a Confluence spike and its linked pull requests, plus the Jira epic and all of its child tickets when an epic key is given, into spike-to-epic/<KEY>/current/ as local markdown with a manifest.md index of every cross-reference. Use when: starting a spike-to-epic run, or re-fetching a spike before /spike-to-epic-interrogate or /spike-to-epic-propose.
+argument_hint=[EPIC-KEY] <Confluence spike URL or title>
+requires=
+next_step=gh auth status|Authenticate the GitHub CLI. Every pull request linked from the spike is read through `gh pr view` and `gh pr checks`; Phase 0 halts without a logged-in account.|`gh auth status` does not report a logged-in account
+next_step=Connect the Atlassian MCP server with `claude mcp add`|The spike, epic and child tickets are read through the Atlassian MCP server, and Phase 0 halts when it is not connected. Nothing is ever written back through it.|no mcp__atlassian tools appear in the session tool list

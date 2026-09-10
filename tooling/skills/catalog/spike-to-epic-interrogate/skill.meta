@@ -1,0 +1,6 @@
+name=spike-to-epic-interrogate
+version=1.0.0
+description=Cross-checks a fetched Confluence spike, its pull requests and the Jira epic's child tickets for coverage gaps, duplicated or misplaced criteria, contradictions, ordering and status drift, then interrogates the user on each finding and records the decisions in spike-to-epic/<EPIC-KEY>/interrogate/fr.md. Use when: /spike-to-epic-fetch has run and the tickets need checking against the spike before /spike-to-epic-plan.
+argument_hint=[EPIC-KEY] (optional when only one folder exists under spike-to-epic/)
+requires=spike-to-epic-fetch
+next_step=/spike-to-epic-fetch <EPIC-KEY> <Confluence spike URL>|Fetch the spike, pull requests, epic and child tickets first. Interrogate reads only spike-to-epic/<EPIC-KEY>/current/ and halts when manifest.md is missing, so a folder fetched by an older version of the fetch skill must be removed and re-fetched.|no spike-to-epic/*/current/manifest.md exists in the project
