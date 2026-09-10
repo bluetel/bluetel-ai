@@ -3,7 +3,7 @@ name: spike-to-epic-implement
 description: 'Carries out a reviewed spike-to-epic plan in Jira, exactly as written, through the Atlassian MCP server: checks Jira for open tickets or epics that already cover the work and asks before continuing, then creates the epic, creates and updates the tickets, adds the issue links and sprint moves listed in plan.md, and reports a Jira link for every ticket created or changed. The plan folder is its only input and it refuses to run in a context that holds anything else. Use when: /spike-to-epic-plan has been reviewed and the tickets should now exist in Jira.'
 argument-hint: '[KEY] (optional when only one folder under spike-to-epic/ has a plan/)'
 disable-model-invocation: true
-allowed-tools: mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__executeRead, mcp__atlassian__executeWrite, AskUserQuestion, TodoWrite, Glob, Read(spike-to-epic/*/plan/**), Read(spike-to-epic/*/implement/**), Write(spike-to-epic/*/implement/**), Edit(spike-to-epic/*/implement/**), Bash(find spike-to-epic:*), Bash(sed -n:*)
+allowed-tools: mcp__atlassian__getAccessibleAtlassianResources, mcp__atlassian__searchJiraIssuesUsingJql, mcp__atlassian__createJiraIssue, mcp__atlassian__editJiraIssue, mcp__atlassian__transitionJiraIssue, mcp__atlassian__executeRead, mcp__atlassian__executeWrite, AskUserQuestion, TodoWrite, Glob, Read(.agents/skills/spike-to-epic-implement/**), Read(spike-to-epic/*/plan/**), Read(spike-to-epic/*/implement/**), Write(spike-to-epic/*/implement/**), Edit(spike-to-epic/*/implement/**), Bash(find spike-to-epic:*), Bash(sed -n:*)
 ---
 
 # Spike to Epic: Implement
@@ -17,7 +17,7 @@ Last stage of the pipeline: fetch -> interrogate or propose -> plan -> implement
 ## The plan is the only input
 
 - **Fresh context only.** This skill runs first in a conversation or not at all. See Phase 0.
-- **Read nothing outside the plan.** Only `spike-to-epic/<KEY>/plan/` and this stage's own `implement/` folder. Never `current/`, `interrogate/`, `propose/`, the spike, a repository, a Jira ticket's current text, or anything remembered from an earlier session. What Jira holds today is irrelevant: the plan already decided what each ticket should say.
+- **Read nothing outside the plan.** Only `spike-to-epic/<KEY>/plan/`, this stage's own `implement/` folder and this skill's own files under `.agents/skills/spike-to-epic-implement/`. Never `current/`, `interrogate/`, `propose/`, the spike, a repository, a Jira ticket's current text, or anything remembered from an earlier session. What Jira holds today is irrelevant: the plan already decided what each ticket should say.
 - **Never write ticket text.** A summary is the plan's summary. A description is the extract of the plan file produced by the shell command in Phase 2, read back from `implement/descriptions/` and passed to Jira unchanged: no paraphrase, no trimming, no reordering, no fix, not even to a typo. If a description looks wrong, out of date or incomplete, that is a plan problem: stop, name the file, and ask the user to fix the plan and re-run.
 - **Jira is written only through the Atlassian MCP server.** No script, no curl, no other client. Every call targets the plan's Project on the plan's Site.
 - **Nothing off-plan.** No ticket, field, comment, link or sprint move that is not a row in the Plan of action table.
