@@ -170,7 +170,13 @@
     "oxfmtrc",
     "tsgolint",
     "fixability",
-    "unnamespaced"
+    "unnamespaced",
+    // jira-ticket skill vocabulary. `acli` is the Atlassian CLI, `workitem` its noun for an
+    // issue, and `customfield` the prefix Jira gives every custom field id.
+    "acli",
+    "workitem",
+    "customfield",
+    "libsecret"
   ],
   "ignorePaths": [
     "node_modules",

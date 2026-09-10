@@ -6,12 +6,12 @@ Node on the target.
 
 ## Layout
 
-| Folder       | Purpose                                                                                                                                                                                                                                            |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `catalog/`   | Canonical skill content. One dir per skill (`<name>/SKILL.md` + `skill.meta`). The catalog **is** the directory scan — no manifest file. This includes `skills-install/`, the interactive install procedure, so it is itself an installable skill. |
-| `bootstrap/` | `install.sh` — the one publishable file (`curl … \| sh`). Verifies tools, shallow-sparse-clones this subtree, launches Claude on `catalog/skills-install/SKILL.md`.                                                                                |
-| `lib/`       | `skills.sh` — the deterministic POSIX-shell core (`list`/`status`/`install`/`update`) + colocated vitest shell-out tests.                                                                                                                          |
-| `assets/`    | Shared **asset bundles** — project scaffolding a skill needs outside `.agents/`/`.claude/` (currently `speckit/`, holding the `.specify/` tree the `speckit-*` skills drive). See below.                                                           |
+| Folder       | Purpose                                                                                                                                                                                                                                                                                                                   |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `catalog/`   | Canonical skill content. One dir per skill (`<name>/SKILL.md` + `skill.meta`). The catalog **is** the directory scan — no manifest file. This includes `skills-install/`, the interactive install procedure, so it is itself an installable skill.                                                                        |
+| `bootstrap/` | `install.sh` — the one publishable file (`curl … \| sh`). Verifies tools, shallow-sparse-clones this subtree, launches Claude on `catalog/skills-install/SKILL.md`.                                                                                                                                                       |
+| `lib/`       | `skills.sh` — the deterministic POSIX-shell core (`list`/`status`/`install`/`update`) + colocated vitest shell-out tests.                                                                                                                                                                                                 |
+| `assets/`    | Shared **asset bundles** — project scaffolding and per-project context files a skill needs outside `.agents/skills/`/`.claude/skills/`: `speckit/` (the `.specify/` tree the `speckit-*` skills drive), `copywriting/` and `jira-ticket/` (a seeded `.agents/*-context.md` each skill reads before it writes). See below. |
 
 ## Target requirements
 
@@ -22,6 +22,13 @@ The installer runs entirely as **Claude driving `git` / `curl` / POSIX shell** �
 - **`git` ≥ 2.27** (shallow partial clone + sparse-checkout),
 - **`curl`**,
 - base POSIX utilities and **`sha256sum` or `shasum`**.
+
+Individual skills may need more than the installer does. `jira-ticket` ships Node scripts, so
+using it (not installing it) additionally needs **Node ≥ 18** — and nothing else: its
+markdown-to-ADF converter is three dependency-free files in the skill's own `scripts/`, so it
+needs neither `npm` nor network access, and behaves the same in a target repo with no
+`node_modules` at all. Each such prerequisite is declared as a `next_step` in the skill's
+`skill.meta`, so `skills.sh next-steps` reports it.
 
 ## Installing skills into another project
 
@@ -90,6 +97,7 @@ sh lib/skills.sh config set 'ticket_prefix=ACME' 'repo_owner=acme' --target /pat
 | `jira_project_key` | _derived from_ `ticket_prefix` | `jira-ticket`                |
 | `jira_board_id`    | _(empty)_                      | `jira-ticket` (sprint moves) |
 | `jira_epic_key`    | _(empty)_                      | `jira-ticket` (`--parent`)   |
+| `jira_create_into` | `backlog`                      | `jira-ticket` (new tickets)  |
 
 Only explicitly-set keys are written to the file; anything absent resolves to the default, so
 derived values (`jira_project_key`) keep tracking their source. Keys with an empty default have no
@@ -99,7 +107,7 @@ sensible cross-repo value — the consuming skill asks rather than guessing, and
 
 **Credentials are never stored here** — the file is committed. `JIRA_EMAIL` is per-user (shell
 profile) and the Jira API token lives in the OS keychain; see the header of
-`catalog/jira-ticket/scripts/jira-sprint.sh` for the one-time setup.
+`catalog/jira-ticket/scripts/jira-sprint.mjs` for the one-time setup.
 
 ## Asset bundles (project scaffolding)
 
@@ -131,6 +139,11 @@ tailored per project (`/speckit-constitution` rewrites them in place), so:
   never touched.
 
 Several skills may share one bundle (all nine `speckit-*` skills do); it is seeded once per run.
+
+A bundle need not be scaffolding. `copywriting/` and `jira-ticket/` each seed a single
+`.agents/<skill>-context.md` — a placeholder the project fills in with its own standing
+instructions, which the skill reads before it writes anything. The same "data, never hashed,
+never overwritten" rules are what make that work: the project's answers survive every update.
 
 ## Post-install recommendations
 
@@ -184,5 +197,11 @@ pipeline. To make new/updated skills available to targets:
 ## Source-repo / CI only
 
 The TypeScript + `vitest` surface here exists solely to test the shell logic in CI (`pnpm nx
-test skills`, `pnpm nx typecheck skills`). Nothing Node-based is shipped to or executed on a
-target. Tests shell out to `lib/skills.sh` against throwaway temp targets.
+test skills`, `pnpm nx typecheck skills`). The **installer** is Node-free end to end — nothing
+Node-based runs on a target to install a skill. Tests shell out to `lib/skills.sh` against
+throwaway temp targets.
+
+Skill payloads are a separate matter: what a skill ships under `catalog/<name>/` can be anything
+its own prerequisites allow, and `jira-ticket/scripts/` is Node (see Target requirements). The
+tests reach into those payload files directly, which is why `lib/jira-scripts.ts` exists — it is
+the one typed boundary over the untyped `.mjs`, since payload scripts get no build step.

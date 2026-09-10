@@ -39,7 +39,9 @@
   "ignorePatterns": [
     "**/image-sources.ts",
     "**/importMap.js",
-    "**/tooling/lint-coverage/fixtures/**"
+    "**/tooling/lint-coverage/fixtures/**",
+    "**/tooling/skills/catalog/**",
+    "**/tooling/skills/assets/**"
   ],
   "rules": {
     "@typescript-eslint/ban-ts-comment": [

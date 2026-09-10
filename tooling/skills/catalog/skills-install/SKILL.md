@@ -149,6 +149,8 @@ that only installed `pr-creation`, and don't walk the git keys for a Jira-only i
 | `merging`       | the above plus `staging_branch`                                                              |
 | `jira-ticket`   | `jira_site`, `jira_project_key`, `jira_board_id`, `jira_epic_key` (+ `ticket_prefix`)        |
 
+`jira_create_into` has a sensible default (`backlog`) — mention it rather than prompting for it.
+
 **Only prompt when it is actually necessary** — the config is data and is preserved across updates,
 so a repo that is already configured must not be re-nagged:
 
@@ -187,10 +189,14 @@ so a repo that is already configured must not be re-nagged:
      step is then skipped rather than guessed.
    - `jira_epic_key` — parent epic every new ticket is linked to (e.g. `ACME-100`). No default; empty
      means tickets are created without `--parent`.
+   - `jira_create_into` — where a newly created ticket lands: `backlog` (the default, and what the
+     documented process expects — tickets sit there until the team refines them) or `sprint` to move
+     straight into the board's active sprint. Don't prompt for this; only change it if the user says
+     new tickets should go straight onto the board.
 
    **Never** prompt for or store credentials. `JIRA_EMAIL` is per-user (shell profile) and the API
    token lives in the OS keychain — the config file is committed, so neither belongs there. If the
-   user asks, point them at the setup notes in `jira-ticket/scripts/jira-sprint.sh`.
+   user asks, point them at the setup notes in `jira-ticket/scripts/jira-sprint.mjs`.
 
 3. Write only the keys the user changed (unchanged keys keep their value automatically, and keys left
    at their default are deliberately not written out). **Quote each pair** so values containing

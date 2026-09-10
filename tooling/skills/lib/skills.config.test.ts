@@ -110,6 +110,9 @@ describe('skills.sh config', () => {
       // No sensible cross-repo value — the skill must ask rather than guess.
       expect(cfg.jira_board_id.value).toBe('')
       expect(cfg.jira_epic_key.value).toBe('')
+      // Unlike board/epic this one does have a safe default: the documented process
+      // puts a new ticket in the backlog until the team refines it.
+      expect(cfg.jira_create_into).toEqual({ value: 'backlog', source: 'default' })
     })
 
     it('derives jira_project_key from ticket_prefix, and keeps tracking it after a write', () => {
@@ -171,7 +174,8 @@ describe('skills.sh config', () => {
       const catalog = makeCatalog(CATALOG)
       const target = makeTarget()
 
-      // jira_epic_key is the last key and stays empty here; an earlier
+      // The last key in CONFIG_KEYS stays empty here (jira_create_into is unset, so
+      // it falls back to its default rather than being written); an earlier
       // `[ -n … ] && printf` made the whole write block exit non-zero.
       const res = runSkills(['config', 'set', 'ticket_prefix=SOLO'], { catalog, target })
 

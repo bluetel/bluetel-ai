@@ -356,7 +356,7 @@ skill_state() {
 # and the write is atomic. Values may contain spaces (e.g. commit_format), so
 # `set` operands are handled outside the space-split NAMES accumulator.
 
-CONFIG_KEYS="ticket_prefix branch_pattern commit_format staging_branch base_branch repo_owner repo_name jira_site jira_project_key jira_board_id jira_epic_key"
+CONFIG_KEYS="ticket_prefix branch_pattern commit_format staging_branch base_branch repo_owner repo_name jira_site jira_project_key jira_board_id jira_epic_key jira_create_into"
 
 config_path() { printf '%s' "$TARGET/.agents/skills.config"; }
 
@@ -379,6 +379,10 @@ config_default() {
     jira_project_key) config_effective ticket_prefix ;;
     jira_board_id) printf '' ;;
     jira_epic_key) printf '' ;;
+    # Where a newly created ticket lands: `backlog` (the documented default —
+    # created tickets sit in the backlog until the team refines them) or
+    # `sprint` (move straight into the board's active sprint).
+    jira_create_into) printf 'backlog' ;;
     *) return 1 ;;
   esac
 }
