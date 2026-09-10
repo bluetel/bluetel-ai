@@ -38,9 +38,20 @@ From the target project root, run the published one-liner:
 TMP=$(mktemp -d) && git clone -q --depth 1 --filter=blob:none --sparse https://github.com/bluetel/bluetel-ai.git "$TMP" && git -C "$TMP" sparse-checkout set --no-cone /tooling/skills/bootstrap/install.sh && sh "$TMP/tooling/skills/bootstrap/install.sh"; rm -rf "$TMP"
 ```
 
+**Tip:** run `gh auth setup-git` once beforehand so `git` reuses your GitHub CLI credentials. Without it, the `git clone` inside `install.sh` can stop midway to prompt for authentication. The GH CLI should also be installed with Homebrew.
+
 The bootstrap verifies prerequisites, shallow-sparse-clones only this `tooling/skills/` subtree
 into a temp dir, and launches Claude on the `skills-install` skill. Override the source with
-`SKILLS_REPO_URL` / `SKILLS_REPO_REF` env vars.
+`SKILLS_REPO_URL` / `SKILLS_REPO_REF` env vars, or the equivalent `--repo <url>` / `--branch <ref>`
+flags:
+
+```sh
+TMP=$(mktemp -d) && git clone -q --depth 1 --filter=blob:none --sparse https://github.com/bluetel/bluetel-ai.git "$TMP" && git -C "$TMP" sparse-checkout set --no-cone /tooling/skills/bootstrap/install.sh && sh "$TMP/tooling/skills/bootstrap/install.sh" --branch <branch-name>; rm -rf "$TMP"
+```
+
+This is the fast path for developing a skill: push your changes to a branch, then point a test
+project's installer at it directly — no need to merge to `main` first, and no env vars to
+remember to unset afterwards.
 
 **Self-service updates (no `curl`):** `skills-install` is itself a catalog skill, so a target can
 install it once (via the one-liner above) and thereafter run `/skills-install` directly. When
